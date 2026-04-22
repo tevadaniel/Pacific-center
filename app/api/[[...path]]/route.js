@@ -358,6 +358,7 @@ export async function GET(request, { params }) {
       const anomalies = await db.collection('registration_anomalies').find({ registration_id: id }).toArray();
       const comments = await db.collection('field_comments').find({ registration_id: id }).toArray();
       const sessions = await db.collection('attendance_sessions').find({ registration_id: id }).toArray();
+      const media = await db.collection('field_media').find({ registration_id: id }, { projection: { file_data: 0 } }).sort({ captured_at: -1 }).toArray();
       [reg, org, venue, deposit].forEach(x => { if (x) delete x._id; });
       return json({
         registration: reg,
@@ -373,6 +374,7 @@ export async function GET(request, { params }) {
         anomalies: anomalies.map(a => { delete a._id; return a; }),
         comments: comments.map(c => { delete c._id; return c; }),
         attendance_sessions: sessions.map(s => { delete s._id; return s; }),
+        media: media.map(m => { delete m._id; return m; }),
       });
     }
 
@@ -476,6 +478,55 @@ export async function GET(request, { params }) {
     if (route === 'organizations') {
       const orgs = await db.collection('organizations').find({}).sort({ name: 1 }).toArray();
       return json(orgs.map(o => { delete o._id; return o; }));
+    }
+
+    if (route === 'tasks') {
+      const q = {};
+      const status = url.searchParams.get('status');
+      const registration_id = url.searchParams.get('registration_id');
+      if (status) q.status = status;
+      if (registration_id) q.registration_id = registration_id;
+      const tasks = await db.collection('tasks_or_followups').find(q).sort({ due_date: 1, created_at: -1 }).toArray();
+      const regs = await db.collection('registrations').find({ id: { $in: tasks.map(t => t.registration_id) } }).toArray();
+      const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+      const regById = Object.fromEntries(regs.map(r => [r.id, r]));
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      return json(tasks.map(t => { delete t._id; const r = regById[t.registration_id]; const o = r ? orgById[r.organization_id] : null; return { ...t, organization_name: o?.name, stand_code: r?.stand_code }; }));
+    }
+
+    if (route === 'documents') {
+      const registration_id = url.searchParams.get('registration_id');
+      const q = {};
+      if (registration_id) q.registration_id = registration_id;
+      // Do not return base64 data blob in list (performance)
+      const docs = await db.collection('registration_documents').find(q, { projection: { file_data: 0 } }).sort({ uploaded_at: -1 }).toArray();
+      return json(docs.map(d => { delete d._id; return d; }));
+    }
+
+    if (route.startsWith('documents/') && route.endsWith('/download')) {
+      const id = p[1];
+      const doc = await db.collection('registration_documents').findOne({ id });
+      if (!doc) return err('Document introuvable', 404);
+      if (!doc.file_data) return err('Fichier manquant', 404);
+      // Return base64 with mime via Response
+      const buf = Buffer.from(doc.file_data, 'base64');
+      return new Response(buf, { status: 200, headers: { 'Content-Type': doc.mime_type || 'application/octet-stream', 'Content-Disposition': `inline; filename="${doc.file_name}"` } });
+    }
+
+    if (route === 'field-media') {
+      const registration_id = url.searchParams.get('registration_id');
+      const q = {};
+      if (registration_id) q.registration_id = registration_id;
+      const media = await db.collection('field_media').find(q, { projection: { file_data: 0 } }).sort({ captured_at: -1 }).toArray();
+      return json(media.map(m => { delete m._id; return m; }));
+    }
+
+    if (route.startsWith('field-media/') && route.endsWith('/view')) {
+      const id = p[1];
+      const m = await db.collection('field_media').findOne({ id });
+      if (!m?.file_data) return err('Media introuvable', 404);
+      const buf = Buffer.from(m.file_data, 'base64');
+      return new Response(buf, { status: 200, headers: { 'Content-Type': m.mime_type || 'image/jpeg' } });
     }
 
     return err(`Route inconnue: ${route}`, 404);
@@ -807,6 +858,97 @@ export async function POST(request, { params }) {
       return json(t, 201);
     }
 
+    if (route === 'documents') {
+      const doc = {
+        id: uuid(),
+        registration_id: body.registration_id,
+        document_type: body.document_type || 'autre',
+        file_path: null,
+        file_name: body.file_name || 'document',
+        file_data: body.file_data || null,
+        mime_type: body.mime_type || 'application/octet-stream',
+        size_bytes: body.size_bytes || 0,
+        uploaded_by: ctx.userId || 'u-admin',
+        status: body.status || 'depose',
+        uploaded_at: new Date(),
+        validated_at: null,
+        notes: body.notes || null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('registration_documents').insertOne(doc);
+      // Auto-flag registration if type is assurance
+      if (doc.document_type === 'assurance') {
+        await db.collection('registrations').updateOne({ id: doc.registration_id }, { $set: { is_insurance_uploaded: true, updated_at: new Date() } });
+      }
+      if (doc.document_type === 'convention') {
+        await db.collection('registrations').updateOne({ id: doc.registration_id }, { $set: { is_convention_signed: true, updated_at: new Date() } });
+      }
+      const { file_data, ...res } = doc; delete res._id;
+      return json(res, 201);
+    }
+
+    if (route === 'field-media') {
+      const m = {
+        id: uuid(),
+        registration_id: body.registration_id,
+        attendance_session_id: body.attendance_session_id || null,
+        anomaly_id: body.anomaly_id || null,
+        media_type: body.media_type || 'autre',
+        file_path: null,
+        file_name: body.file_name || `photo-${Date.now()}.jpg`,
+        file_data: body.file_data || null,
+        mime_type: body.mime_type || 'image/jpeg',
+        size_bytes: body.size_bytes || 0,
+        uploaded_by: ctx.userId || 'u-admin',
+        captured_at: new Date(),
+        created_at: new Date(),
+      };
+      await db.collection('field_media').insertOne(m);
+      const { file_data, ...res } = m; delete res._id;
+      return json(res, 201);
+    }
+
+    if (route.match(/^registrations\/[^/]+\/assign-stand$/)) {
+      const regId = p[1];
+      const { venue_stand_id, status, venue_id, stand_code } = body;
+      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
+      if (venue_stand_id) {
+        await db.collection('stand_assignments').insertOne({
+          id: uuid(), registration_id: regId, venue_stand_id,
+          assigned_by: ctx.userId || 'u-admin', assigned_at: new Date(),
+          status: status || 'provisoire',
+          created_at: new Date(), updated_at: new Date(),
+        });
+      }
+      const upd = { updated_at: new Date() };
+      if (venue_id) upd.venue_id = venue_id;
+      if (stand_code) upd.stand_code = stand_code;
+      await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
+      await logActivity(db, ctx.userId, 'registration', regId, 'stand_assign', null, { venue_stand_id, stand_code });
+      return json({ ok: true });
+    }
+
+    if (route === 'animation-slots') {
+      const s = {
+        id: uuid(),
+        registration_id: body.registration_id,
+        venue_id: body.venue_id,
+        day_label: body.day_label,
+        event_date: body.event_date || (body.day_label === 'vendredi' ? '2026-08-14' : '2026-08-15'),
+        start_time: body.start_time || '10:00',
+        end_time: body.end_time || '12:00',
+        title: body.title || 'Animation',
+        slot_type: body.slot_type || 'animation',
+        status: body.status || 'planifié',
+        notes: body.notes || null,
+        created_at: new Date(), updated_at: new Date(),
+      };
+      await db.collection('animation_slots').insertOne(s);
+      delete s._id;
+      return json(s, 201);
+    }
+
     return err(`Route POST inconnue: ${route}`, 404);
   } catch (e) {
     console.error(e);
@@ -888,6 +1030,38 @@ export async function PUT(request, { params }) {
       return json(r);
     }
 
+    if (route.startsWith('tasks/')) {
+      const id = p[1];
+      const allowed = ['status','title','due_date','assigned_to','notes','task_type'];
+      const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
+      if (upd.status === 'termine') upd.completed_at = new Date();
+      upd.updated_at = new Date();
+      await db.collection('tasks_or_followups').updateOne({ id }, { $set: upd });
+      const t = await db.collection('tasks_or_followups').findOne({ id }); delete t._id;
+      return json(t);
+    }
+
+    if (route.startsWith('documents/')) {
+      const id = p[1];
+      const allowed = ['status','notes','document_type'];
+      const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
+      if (upd.status === 'valide') upd.validated_at = new Date();
+      upd.updated_at = new Date();
+      await db.collection('registration_documents').updateOne({ id }, { $set: upd });
+      const d = await db.collection('registration_documents').findOne({ id }, { projection: { file_data: 0 } }); delete d._id;
+      return json(d);
+    }
+
+    if (route.startsWith('animation-slots/')) {
+      const id = p[1];
+      const allowed = ['day_label','event_date','start_time','end_time','title','slot_type','status','notes'];
+      const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
+      upd.updated_at = new Date();
+      await db.collection('animation_slots').updateOne({ id }, { $set: upd });
+      const s = await db.collection('animation_slots').findOne({ id }); delete s._id;
+      return json(s);
+    }
+
     return err(`Route PUT inconnue: ${route}`, 404);
   } catch (e) {
     console.error(e);
@@ -902,6 +1076,22 @@ export async function DELETE(request, { params }) {
     const route = p.join('/');
     if (route.startsWith('registrations/')) {
       await db.collection('registrations').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('documents/')) {
+      await db.collection('registration_documents').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('field-media/')) {
+      await db.collection('field_media').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('tasks/')) {
+      await db.collection('tasks_or_followups').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('animation-slots/')) {
+      await db.collection('animation_slots').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
     return err('Route DELETE inconnue', 404);

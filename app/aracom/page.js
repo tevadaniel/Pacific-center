@@ -15,8 +15,9 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download } from 'lucide-react';
-import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF } from '@/lib/constants';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus } from 'lucide-react';
+import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
+import { FileUploadButton } from '@/components/file-upload';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -24,6 +25,7 @@ const TABS = [
   { key: 'sites', label: 'Sites & stands', href: '/aracom?tab=sites' },
   { key: 'cautions', label: 'Cautions', href: '/aracom?tab=cautions' },
   { key: 'mailing', label: 'Mailing', href: '/aracom?tab=mailing' },
+  { key: 'relances', label: 'Relances', href: '/aracom?tab=relances' },
   { key: 'anomalies', label: 'Anomalies', href: '/aracom?tab=anomalies' },
   { key: 'bilans', label: 'Bilans', href: '/aracom?tab=bilans' },
 ];
@@ -59,6 +61,7 @@ export default function AracomPage() {
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'cautions' && <CautionsView />}
       {activeTab === 'mailing' && <MailingView />}
+      {activeTab === 'relances' && <RelancesView />}
       {activeTab === 'anomalies' && <AnomaliesView />}
       {activeTab === 'bilans' && <BilansView />}
     </Shell>
@@ -316,9 +319,10 @@ function FicheExposant({ id, onClose }) {
             </div>
 
             <Tabs defaultValue="resume">
-              <TabsList className="w-full grid grid-cols-5">
+              <TabsList className="w-full grid grid-cols-6">
                 <TabsTrigger value="resume">Résumé</TabsTrigger>
                 <TabsTrigger value="animation">Animation</TabsTrigger>
+                <TabsTrigger value="docs">Documents</TabsTrigger>
                 <TabsTrigger value="caution">Caution</TabsTrigger>
                 <TabsTrigger value="terrain">Terrain</TabsTrigger>
                 <TabsTrigger value="histo">Historique</TabsTrigger>
@@ -356,9 +360,17 @@ function FicheExposant({ id, onClose }) {
                       <div className="font-medium text-sm">{s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'} • {s.start_time}–{s.end_time}</div>
                       <div className="text-xs text-slate-500">{s.title}</div>
                     </div>
-                    <Badge variant="secondary">{s.status}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{s.status}</Badge>
+                      <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ce créneau ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); load(); }}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                    </div>
                   </div>
                 ))}
+                <NewSlotForm registrationId={id} venueId={data.registration?.venue_id} onDone={load} />
+              </TabsContent>
+
+              <TabsContent value="docs" className="space-y-3">
+                <DocsBlock registrationId={id} documents={data.documents} onRefresh={load} />
               </TabsContent>
 
               <TabsContent value="caution" className="space-y-3">
@@ -689,4 +701,148 @@ function openReport(r) {
   const rows = Object.entries(data).map(([k, v]) => `<tr><th>${k}</th><td>${typeof v === 'object' ? `<pre>${JSON.stringify(v, null, 2)}</pre>` : v}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Bilan ${r.report_type}</title><style>body{font-family:system-ui,sans-serif;padding:32px;max-width:900px;margin:auto;color:#0f172a}h1{font-size:22px;margin:0 0 4px}h2{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin:0 0 24px}table{border-collapse:collapse;width:100%;margin-top:12px}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top}th{background:#f8fafc;width:260px;font-weight:600;color:#334155}pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow:auto;font-size:12px}.meta{color:#64748b;font-size:12px;margin-bottom:24px}button{position:fixed;top:16px;right:16px;padding:8px 16px;border-radius:6px;background:#2563eb;color:#fff;border:0;cursor:pointer}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimer / PDF</button><h1>Bilan — ${r.report_type}</h1><h2>Forum de la Rentrée 2026</h2><div class="meta">Généré le ${new Date(r.generated_at).toLocaleString('fr-FR')} • Statut : ${r.report_status}</div><table>${rows}</table></body></html>`);
   w.document.close();
+}
+
+function RelancesView() {
+  const [rows, setRows] = useState([]);
+  const [regs, setRegs] = useState([]);
+  const [showNew, setShowNew] = useState(false);
+  const [form, setForm] = useState({ registration_id: '', task_type: 'appel', title: '', due_date: '', notes: '' });
+  const load = () => api('/api/tasks').then(setRows);
+  useEffect(() => { load(); api('/api/registrations').then(setRegs); }, []);
+  const create = async () => {
+    if (!form.registration_id || !form.title) return toast.error('Exposant et titre requis');
+    await api('/api/tasks', { method: 'POST', body: JSON.stringify(form) });
+    toast.success('Tâche créée'); setShowNew(false); setForm({ registration_id: '', task_type: 'appel', title: '', due_date: '', notes: '' }); load();
+  };
+  const toggleDone = async (t) => {
+    await api(`/api/tasks/${t.id}`, { method: 'PUT', body: JSON.stringify({ status: t.status === 'termine' ? 'a_faire' : 'termine' }) });
+    load();
+  };
+  const del = async (id) => {
+    if (!confirm('Supprimer cette tâche ?')) return;
+    await api(`/api/tasks/${id}`, { method: 'DELETE' });
+    toast.success('Supprimée'); load();
+  };
+  const open = rows.filter(t => t.status !== 'termine' && t.status !== 'annule');
+  const done = rows.filter(t => t.status === 'termine');
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="grid grid-cols-3 gap-3 flex-1">
+          <KpiCard label="À faire" value={open.length} accent="orange" />
+          <KpiCard label="Terminées" value={done.length} accent="emerald" />
+          <KpiCard label="Total" value={rows.length} accent="blue" />
+        </div>
+        <Button className="ml-4 gap-2 bg-blue-600 hover:bg-blue-700" onClick={() => setShowNew(!showNew)}>+ Nouvelle tâche</Button>
+      </div>
+      {showNew && (
+        <Card><CardContent className="p-4 grid md:grid-cols-5 gap-2">
+          <Select value={form.registration_id} onValueChange={v => setForm({ ...form, registration_id: v })}>
+            <SelectTrigger className="md:col-span-2"><SelectValue placeholder="Exposant" /></SelectTrigger>
+            <SelectContent className="max-h-[300px]">{regs.map(r => <SelectItem key={r.id} value={r.id}>{r.organization?.name} — {r.stand_code}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={form.task_type} onValueChange={v => setForm({ ...form, task_type: v })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{['appel','mail','document','caution','validation','autre'].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input placeholder="Titre" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+          <Input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
+          <div className="md:col-span-4"><Textarea rows={2} placeholder="Notes…" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+          <Button onClick={create} className="bg-emerald-600 hover:bg-emerald-700">Créer</Button>
+        </CardContent></Card>
+      )}
+      <Card><CardContent className="p-0">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4 w-8"></th><th>Titre</th><th>Exposant</th><th>Type</th><th>Échéance</th><th></th></tr></thead>
+          <tbody className="divide-y">
+            {rows.length === 0 ? <tr><td colSpan="6" className="py-10 text-center text-slate-400">Aucune tâche. Créez-en une pour commencer.</td></tr> : rows.map(t => (
+              <tr key={t.id} className={t.status === 'termine' ? 'opacity-60' : ''}>
+                <td className="px-4"><input type="checkbox" checked={t.status === 'termine'} onChange={() => toggleDone(t)} /></td>
+                <td className={`py-2 font-medium ${t.status === 'termine' ? 'line-through text-slate-500' : ''}`}>{t.title}<div className="text-xs text-slate-500 font-normal">{t.notes}</div></td>
+                <td className="text-slate-700">{t.organization_name} • <span className="font-mono text-xs">{t.stand_code}</span></td>
+                <td><Badge variant="secondary">{t.task_type}</Badge></td>
+                <td className="text-xs text-slate-500">{t.due_date || '—'}</td>
+                <td className="pr-4 text-right"><Button size="sm" variant="ghost" onClick={() => del(t.id)}>Supprimer</Button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent></Card>
+    </div>
+  );
+}
+
+function openReport_DEPRECATED() {}
+
+function DocsBlock({ registrationId, documents = [], onRefresh }) {
+  const upload = async (type, payload) => {
+    try {
+      await api('/api/documents', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, document_type: type, ...payload }) });
+      toast.success('Document ajouté'); onRefresh();
+    } catch (e) { toast.error(e.message); }
+  };
+  const del = async (id) => {
+    if (!confirm('Supprimer ce document ?')) return;
+    await api(`/api/documents/${id}`, { method: 'DELETE' }); toast.success('Supprimé'); onRefresh();
+  };
+  const validate = async (id, status) => {
+    await api(`/api/documents/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+    toast.success(`Statut : ${status}`); onRefresh();
+  };
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {DOCUMENT_TYPES.map(t => (
+          <FileUploadButton key={t} onUpload={(p) => upload(t, p)} label={`+ ${DOCUMENT_TYPE_LABEL[t]}`} />
+        ))}
+      </div>
+      {documents.length === 0 ? <p className="text-slate-500 text-sm">Aucun document.</p> : (
+        <div className="space-y-2">
+          {documents.map(d => (
+            <div key={d.id} className="border rounded-md p-3 flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className="w-4 h-4 text-slate-500 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium text-sm truncate">{d.file_name}</div>
+                  <div className="text-xs text-slate-500">{DOCUMENT_TYPE_LABEL[d.document_type]} • {(d.size_bytes / 1024).toFixed(0)} Ko</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Badge variant={d.status === 'valide' ? 'default' : 'secondary'} className={d.status === 'valide' ? 'bg-emerald-600' : d.status === 'refuse' ? 'bg-red-600' : ''}>{d.status}</Badge>
+                <a href={`/api/documents/${d.id}/download`} target="_blank" rel="noreferrer"><Button size="sm" variant="ghost"><Download className="w-3 h-3" /></Button></a>
+                {d.status !== 'valide' && <Button size="sm" variant="ghost" className="text-emerald-600" onClick={() => validate(d.id, 'valide')}><CheckCircle2 className="w-3 h-3" /></Button>}
+                {d.status !== 'refuse' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => validate(d.id, 'refuse')}><XCircle className="w-3 h-3" /></Button>}
+                <Button size="sm" variant="ghost" onClick={() => del(d.id)}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewSlotForm({ registrationId, venueId, onDone }) {
+  const [show, setShow] = useState(false);
+  const [form, setForm] = useState({ day_label: 'vendredi', start_time: '11:00', end_time: '12:00', title: 'Animation' });
+  const save = async () => {
+    await api('/api/animation-slots', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, venue_id: venueId, ...form }) });
+    toast.success('Créneau ajouté'); setShow(false); onDone();
+  };
+  if (!show) return <Button variant="outline" size="sm" className="gap-2" onClick={() => setShow(true)}><Plus className="w-4 h-4" /> Ajouter un créneau</Button>;
+  return (
+    <div className="border rounded-md p-3 bg-slate-50 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <Select value={form.day_label} onValueChange={v => setForm({ ...form, day_label: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="vendredi">Vendredi 14/08</SelectItem><SelectItem value="samedi">Samedi 15/08</SelectItem></SelectContent></Select>
+        <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Titre" />
+        <Input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} />
+        <Input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={save} className="bg-blue-600 hover:bg-blue-700">Ajouter</Button>
+        <Button size="sm" variant="ghost" onClick={() => setShow(false)}>Annuler</Button>
+      </div>
+    </div>
+  );
 }

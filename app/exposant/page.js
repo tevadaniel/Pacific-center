@@ -3,33 +3,53 @@
 import { useEffect, useState } from 'react';
 import { Shell, KpiCard } from '@/components/app-shell';
 import { api, getSession } from '@/lib/auth-client';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { FileUploadButton } from '@/components/file-upload';
 import { toast } from 'sonner';
-import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock } from 'lucide-react';
-import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF } from '@/lib/constants';
+import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download } from 'lucide-react';
+import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
+
+const DOC_TYPES = [
+  { key: 'assurance', label: 'Attestation d’assurance', icon: FileCheck2 },
+  { key: 'recu_caution', label: 'Reçu de caution', icon: Wallet },
+  { key: 'convention', label: 'Convention signée', icon: FileText },
+  { key: 'autre', label: 'Autre document', icon: FileText },
+];
 
 export default function ExposantPortal() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const me = await api('/api/auth/me');
-        if (!me.organization) { toast.error('Aucune organisation liée à ce compte'); return; }
-        // Find registration for this org
-        const regs = await api('/api/registrations');
-        const mine = regs.find(r => r.organization_id === me.organization.id);
-        if (!mine) { setData({ me, registration: null }); setLoading(false); return; }
-        const full = await api(`/api/registrations/${mine.id}`);
-        setData({ me, ...full });
-      } catch (e) { toast.error(e.message); }
-      setLoading(false);
-    })();
-  }, []);
+  const load = async () => {
+    try {
+      const me = await api('/api/auth/me');
+      if (!me.organization) { toast.error('Aucune organisation liée'); return; }
+      const regs = await api('/api/registrations');
+      const mine = regs.find(r => r.organization_id === me.organization.id);
+      if (!mine) { setData({ me, registration: null }); setLoading(false); return; }
+      const full = await api(`/api/registrations/${mine.id}`);
+      setData({ me, ...full });
+    } catch (e) { toast.error(e.message); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const uploadDoc = async (type, payload) => {
+    try {
+      await api('/api/documents', { method: 'POST', body: JSON.stringify({ registration_id: data.registration.id, document_type: type, ...payload }) });
+      toast.success('Document déposé');
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const deleteDoc = async (id) => {
+    if (!confirm('Supprimer ce document ?')) return;
+    await api(`/api/documents/${id}`, { method: 'DELETE' });
+    toast.success('Document supprimé'); load();
+  };
 
   if (loading) return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><div className="py-20 text-center text-slate-500">Chargement…</div></Shell>;
   if (!data?.registration) {
@@ -41,13 +61,16 @@ export default function ExposantPortal() {
   }
 
   const r = data.registration, o = data.organization, v = data.venue, d = data.deposit;
+  const docs = data.documents || [];
   const checks = [
     { ok: r.is_convention_signed, label: 'Convention signée' },
     { ok: d?.status === 'recue', label: 'Caution reçue' },
     { ok: r.is_insurance_uploaded, label: 'Assurance déposée' },
-    { ok: r.is_guide_sent, label: 'Guide exposant reçu' },
+    { ok: docs.some(dd => dd.document_type === 'recu_caution'), label: 'Reçu de caution' },
   ];
   const completion = Math.round((checks.filter(c => c.ok).length / checks.length) * 100);
+
+  const docsByType = DOC_TYPES.map(dt => ({ ...dt, items: docs.filter(d => d.document_type === dt.key) }));
 
   return (
     <Shell title={`Dossier — ${o?.name || 'Mon exposant'}`} subtitle="Votre espace personnel pour le Forum de la Rentrée 2026." allowedRoles={['exposant']}>
@@ -75,7 +98,7 @@ export default function ExposantPortal() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> Mes créneaux d’animation</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              {data.slots.length === 0 ? <p className="text-slate-500 text-sm">Aucun créneau planifié pour l’instant.</p> : data.slots.map(s => (
+              {data.slots.length === 0 ? <p className="text-slate-500 text-sm">Aucun créneau planifié.</p> : data.slots.map(s => (
                 <div key={s.id} className="border rounded-md p-3 flex items-center justify-between">
                   <div>
                     <div className="font-medium">{s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'}</div>
@@ -88,7 +111,7 @@ export default function ExposantPortal() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /> Chémincheminement de mon dossier</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /> Chéminement de mon dossier</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {checks.map((c, i) => (
                 <div key={i} className="flex items-center justify-between border rounded-md p-3">
@@ -111,7 +134,7 @@ export default function ExposantPortal() {
                 {d?.received_at && <div className="text-xs text-slate-500 mt-1">Reçue le {new Date(d.received_at).toLocaleDateString('fr-FR')}</div>}
               </div>
               <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
-                <strong>Œ Rappel :</strong> la caution est obligatoire pour valider votre inscription. Chèque, virement ou espèces acceptés.
+                <strong>Rappel :</strong> la caution est obligatoire pour valider votre inscription. Chèque, virement ou espèces acceptés.
               </div>
             </CardContent>
           </Card>
@@ -126,6 +149,40 @@ export default function ExposantPortal() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> Mes documents</CardTitle>
+            <p className="text-xs text-slate-500 mt-1">Déposez vos pièces (PDF ou photo, max 6 Mo chacun). L’équipe ARACOM les validera.</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {docsByType.map(dt => (
+              <div key={dt.key} className="border rounded-md p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2"><dt.icon className="w-4 h-4 text-slate-500" /><div className="font-medium">{dt.label}</div></div>
+                  <FileUploadButton onUpload={(p) => uploadDoc(dt.key, p)} label="Déposer" />
+                </div>
+                {dt.items.length === 0 ? <div className="text-xs text-slate-400">Aucun fichier</div> : (
+                  <div className="space-y-1">
+                    {dt.items.map(d => (
+                      <div key={d.id} className="flex items-center justify-between text-sm py-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{d.file_name}</span>
+                          <Badge variant={d.status === 'valide' ? 'default' : 'secondary'} className={`text-[10px] ${d.status === 'valide' ? 'bg-emerald-600' : ''}`}>{d.status}</Badge>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <a href={`/api/documents/${d.id}/download`} target="_blank" rel="noreferrer"><Button size="sm" variant="ghost"><Download className="w-3 h-3" /></Button></a>
+                          <Button size="sm" variant="ghost" onClick={() => deleteDoc(d.id)}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
 
         {data.anomalies?.length > 0 && (
           <Card className="border-red-100 bg-red-50/20">

@@ -14,8 +14,9 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChevronLeft, CheckCircle2, XCircle, Clock, AlertTriangle, Users, MapPin, Zap, TrendingUp, Camera, MessageSquare, Sparkles, Search } from 'lucide-react';
+import { ChevronLeft, CheckCircle2, XCircle, Clock, AlertTriangle, Users, MapPin, Zap, TrendingUp, Camera, MessageSquare, Sparkles, Search, ImageIcon, Trash2 } from 'lucide-react';
 import { PRESENCE_STATUS_LABEL, PRESENCE_STATUS_COLOR, ANOMALY_TYPES, ANOMALY_TYPE_LABEL, SEVERITY_LEVELS, SEVERITY_COLOR } from '@/lib/constants';
+import { FileUploadButton, MediaThumb } from '@/components/file-upload';
 
 const EVENT_DATES = [
   { value: '2026-08-14', label: 'Ven 14/08' },
@@ -234,10 +235,11 @@ function FicheTerrain({ session, eventDate, onClose }) {
           </div>
 
           <Tabs defaultValue="checkin">
-            <TabsList className="w-full grid grid-cols-4">
+            <TabsList className="w-full grid grid-cols-5">
               <TabsTrigger value="checkin">Check</TabsTrigger>
               <TabsTrigger value="comment">Commentaire</TabsTrigger>
               <TabsTrigger value="anomaly">Anomalie</TabsTrigger>
+              <TabsTrigger value="photos">Photos</TabsTrigger>
               <TabsTrigger value="history">Historique</TabsTrigger>
             </TabsList>
 
@@ -296,6 +298,10 @@ function FicheTerrain({ session, eventDate, onClose }) {
               <Button onClick={submitAnomaly} className="bg-red-600 hover:bg-red-700 gap-2"><AlertTriangle className="w-4 h-4" /> Signaler l’anomalie</Button>
             </TabsContent>
 
+            <TabsContent value="photos" className="space-y-3">
+              <PhotoUploader registrationId={session.registration_id} attendanceSessionId={session.id} media={fiche?.media || []} onRefresh={() => load()} />
+            </TabsContent>
+
             <TabsContent value="history" className="space-y-3">
               {fiche?.anomalies?.length > 0 && <div>
                 <div className="font-medium text-sm mb-2">Anomalies</div>
@@ -318,5 +324,46 @@ function FicheTerrain({ session, eventDate, onClose }) {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+
+const MEDIA_TYPES = [
+  { key: 'photo_arrivee', label: 'Photo stand à l’arrivée', color: 'bg-emerald-50 border-emerald-200' },
+  { key: 'photo_depart', label: 'Photo stand au départ', color: 'bg-blue-50 border-blue-200' },
+  { key: 'preuve_incident', label: 'Preuve d’incident', color: 'bg-red-50 border-red-200' },
+  { key: 'document_terrain', label: 'Document terrain', color: 'bg-slate-50 border-slate-200' },
+];
+
+function PhotoUploader({ registrationId, attendanceSessionId, media = [], onRefresh }) {
+  const upload = async (type, payload) => {
+    try {
+      await api('/api/field-media', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, attendance_session_id: attendanceSessionId, media_type: type, ...payload }) });
+      toast.success('Photo ajoutée'); onRefresh();
+    } catch (e) { toast.error(e.message); }
+  };
+  const del = async (id) => {
+    if (!confirm('Supprimer ce média ?')) return;
+    await api(`/api/field-media/${id}`, { method: 'DELETE' }); toast.success('Supprimé'); onRefresh();
+  };
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {MEDIA_TYPES.map(t => (
+          <FileUploadButton key={t.key} capture accept="image/*" icon={Camera} onUpload={(p) => upload(t.key, p)} label={t.label} className="h-auto py-3 text-xs whitespace-normal" />
+        ))}
+      </div>
+      {media.length === 0 ? <p className="text-slate-500 text-sm py-3">Aucune photo ni média pour cet exposant.</p> : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {media.map(m => (
+            <div key={m.id} className={`relative group rounded-md border overflow-hidden ${MEDIA_TYPES.find(x => x.key === m.media_type)?.color || 'bg-slate-50'}`}>
+              <img src={`/api/field-media/${m.id}/view`} alt={m.file_name} className="w-full h-28 object-cover" />
+              <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] px-1.5 py-1 truncate">{m.media_type}</div>
+              <button onClick={() => del(m.id)} className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"><Trash2 className="w-3 h-3 text-red-600" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
