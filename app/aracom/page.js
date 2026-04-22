@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus } from 'lucide-react';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
+import { exportExposantsCSV, exportCautionsCSV } from '@/lib/csv-export';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -54,7 +55,7 @@ export default function AracomPage() {
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={TABS.map(t => ({ ...t, href: `/aracom${t.key === 'dashboard' ? '' : '?tab=' + t.key}` }))}
-      right={<Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>}
+      right={<div className="flex items-center gap-2"><AlertsBadge /><Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link></div>}
     >
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
       {activeTab === 'exposants' && <ExposantsView />}
@@ -207,6 +208,10 @@ function ExposantsView() {
               <SelectContent><SelectItem value="all">Toutes priorités</SelectItem>{PRIORITY_LEVELS.map(p => <SelectItem key={p} value={p}>{p === 'prospect' ? 'Prospect' : `Priorité ${p}`}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t">
+            <div className="text-sm text-slate-600">{rows.length} exposant(s) affiché(s)</div>
+            <Button size="sm" variant="outline" onClick={() => exportExposantsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -301,6 +306,14 @@ function FicheExposant({ id, onClose }) {
     } catch (e) { toast.error(e.message); }
   };
 
+  const confirmReg = async () => {
+    try {
+      await api(`/api/registrations/${id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('Inscription confirmée — email envoyé');
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <Sheet open={true} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
@@ -311,6 +324,16 @@ function FicheExposant({ id, onClose }) {
               <SheetDescription>{data.organization?.discipline} • <PrioBadge p={data.organization?.priority_level} /> • <span className="font-mono">{data.registration?.stand_code}</span> • {data.venue?.name}</SheetDescription>
             </SheetHeader>
 
+            {data.registration?.status !== 'confirme' && (
+              <div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                <div>
+                  <div className="font-medium text-emerald-900 text-sm">Valider l'inscription de cet exposant</div>
+                  <div className="text-xs text-emerald-700">Bascule vers « Confirmé » et envoie un email de confirmation.</div>
+                </div>
+                <Button onClick={confirmReg} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> Confirmer</Button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <KpiCard label="Statut" value={REGISTRATION_STATUS_LABEL[data.registration?.status] || '—'} accent="blue" />
               <KpiCard label="Caution" value={DEPOSIT_STATUS_LABEL[data.deposit?.status] || '—'} accent={data.deposit?.status === 'recue' ? 'emerald' : 'orange'} />
@@ -319,12 +342,13 @@ function FicheExposant({ id, onClose }) {
             </div>
 
             <Tabs defaultValue="resume">
-              <TabsList className="w-full grid grid-cols-6">
+              <TabsList className="w-full grid grid-cols-7">
                 <TabsTrigger value="resume">Résumé</TabsTrigger>
                 <TabsTrigger value="animation">Animation</TabsTrigger>
                 <TabsTrigger value="docs">Documents</TabsTrigger>
                 <TabsTrigger value="caution">Caution</TabsTrigger>
                 <TabsTrigger value="terrain">Terrain</TabsTrigger>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="histo">Historique</TabsTrigger>
               </TabsList>
 
@@ -453,6 +477,10 @@ function FicheExposant({ id, onClose }) {
                 <Button onClick={generateBilan} variant="outline" className="w-full gap-2"><Sparkles className="w-4 h-4" /> Générer un brouillon de bilan exposant</Button>
               </TabsContent>
 
+              <TabsContent value="timeline" className="space-y-2">
+                <TimelineBlock registrationId={id} />
+              </TabsContent>
+
               <TabsContent value="histo" className="space-y-3">
                 <div>
                   <div className="font-medium text-sm mb-2">Historique de présence</div>
@@ -492,8 +520,26 @@ function SitesView() {
   const [venues, setVenues] = useState([]);
   const [selected, setSelected] = useState(null);
   const [stands, setStands] = useState([]);
-  useEffect(() => { api('/api/venues').then(v => { setVenues(v); if (v[0]) setSelected(v[0].id); }); }, []);
+  const [regs, setRegs] = useState([]);
+  const [editStand, setEditStand] = useState(null);
+  useEffect(() => { api('/api/venues').then(v => { setVenues(v); if (v[0]) setSelected(v[0].id); }); api('/api/registrations').then(setRegs); }, []);
   useEffect(() => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); }, [selected]);
+  const reload = () => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); api('/api/registrations').then(setRegs); };
+
+  const assignRegToStand = async (regId) => {
+    if (!regId || !editStand) return;
+    try {
+      await api(`/api/registrations/${regId}/assign-stand`, { method: 'POST', body: JSON.stringify({ venue_stand_id: editStand.id, stand_code: editStand.stand_code, venue_id: editStand.venue_id, status: 'provisoire' }) });
+      toast.success('Stand attribué');
+      setEditStand(null); reload();
+    } catch (e) { toast.error(e.message); }
+  };
+  const freeStand = async () => {
+    if (!editStand?.assignment) return;
+    await api(`/api/registrations/${editStand.assignment.registration_id}/assign-stand`, { method: 'POST', body: JSON.stringify({ venue_stand_id: null, venue_id: null, stand_code: null }) });
+    toast.success('Stand libéré'); setEditStand(null); reload();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
@@ -503,17 +549,61 @@ function SitesView() {
       </div>
       <Card>
         <CardContent className="p-4">
+          <div className="flex items-center gap-4 text-xs mb-3 flex-wrap">
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200 border border-emerald-300"></span> confirmé</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-200 border border-amber-300"></span> à confirmer</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-200 border border-orange-300"></span> à relancer</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-100 border border-slate-200"></span> prospect</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-white border"></span> libre</span>
+            <span className="ml-auto text-slate-500">Cliquer un stand pour (ré)affecter</span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
             {stands.map(s => (
-              <div key={s.id} className={`rounded-md border p-3 ${s.organization ? (s.registration_status === 'confirme' ? 'bg-emerald-50 border-emerald-200' : s.registration_status === 'a_confirmer' ? 'bg-amber-50 border-amber-200' : s.registration_status === 'a_relancer' ? 'bg-orange-50 border-orange-200' : 'bg-slate-50') : 'bg-white'}`}>
+              <button key={s.id} onClick={() => setEditStand(s)} className={`text-left rounded-md border p-3 hover:shadow-md transition ${s.organization ? (s.registration_status === 'confirme' ? 'bg-emerald-50 border-emerald-200' : s.registration_status === 'a_confirmer' ? 'bg-amber-50 border-amber-200' : s.registration_status === 'a_relancer' ? 'bg-orange-50 border-orange-200' : 'bg-slate-50') : 'bg-white hover:bg-blue-50'}`}>
                 <div className="font-mono text-xs font-bold">{s.stand_code}</div>
                 <div className="text-xs text-slate-700 mt-1 truncate">{s.organization?.name || <span className="text-slate-400">Libre</span>}</div>
                 {s.organization && <div className="text-[10px] text-slate-500 truncate">{s.organization.discipline}</div>}
-              </div>
+              </button>
             ))}
           </div>
         </CardContent>
       </Card>
+
+      <Sheet open={!!editStand} onOpenChange={(o) => !o && setEditStand(null)}>
+        <SheetContent className="w-full sm:max-w-md">
+          {editStand && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Stand {editStand.stand_code}</SheetTitle>
+                <SheetDescription>{venues.find(v => v.id === editStand.venue_id)?.name}</SheetDescription>
+              </SheetHeader>
+              <div className="mt-4 space-y-4">
+                {editStand.organization ? (
+                  <div className="rounded-md bg-slate-50 border p-3">
+                    <div className="text-xs text-slate-500 uppercase">Actuellement attribué à</div>
+                    <div className="font-medium mt-1">{editStand.organization.name}</div>
+                    <div className="text-xs text-slate-500">{editStand.organization.discipline}</div>
+                    <Button variant="outline" size="sm" className="mt-2 text-red-600 border-red-200" onClick={freeStand}><XCircle className="w-4 h-4 mr-1" /> Libérer ce stand</Button>
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-blue-50 border border-blue-100 p-3 text-blue-900 text-sm">Ce stand est libre.</div>
+                )}
+                <div>
+                  <Label>Attribuer à un exposant</Label>
+                  <Select onValueChange={assignRegToStand}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un exposant…" /></SelectTrigger>
+                    <SelectContent className="max-h-[400px]">
+                      {regs.map(r => (
+                        <SelectItem key={r.id} value={r.id}>{r.organization?.name} — {r.venue?.name || 'sans site'} / {r.stand_code || 'libre'}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -537,6 +627,7 @@ function CautionsView() {
         <KpiCard label="Reçues" value={rows.filter(r => r.deposit?.status === 'recue').length} accent="emerald" />
         <KpiCard label="Non demandées" value={rows.filter(r => !r.deposit || r.deposit.status === 'non_demandee').length} accent="slate" />
       </div>
+      <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => exportCautionsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button></div>
       <Card><CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Statut</th><th>Actions</th></tr></thead>
@@ -823,8 +914,57 @@ function DocsBlock({ registrationId, documents = [], onRefresh }) {
   );
 }
 
+function AlertsBadge() {
+  const [alerts, setAlerts] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api('/api/alerts').then(setAlerts).catch(() => {}); const t = setInterval(() => api('/api/alerts').then(setAlerts).catch(() => {}), 30000); return () => clearInterval(t); }, []);
+  if (!alerts) return null;
+  const total = alerts.anomalies_open + alerts.tasks_open + alerts.missing_insurance;
+  return (
+    <div className="relative">
+      <Button size="sm" variant="outline" className="gap-2" onClick={() => setOpen(!open)}>
+        <AlertTriangle className="w-4 h-4" />
+        {total > 0 && <Badge className="bg-red-600 text-white h-5 min-w-[20px] px-1.5 text-[10px]">{total}</Badge>}
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-10 w-80 bg-white border rounded-md shadow-lg p-3 z-50 space-y-2">
+          <div className="font-medium text-sm">Alertes</div>
+          <div className="space-y-1 text-sm">
+            <div className="flex items-center justify-between"><span>Anomalies ouvertes</span><Badge variant={alerts.anomalies_open ? 'destructive' : 'secondary'}>{alerts.anomalies_open}</Badge></div>
+            <div className="flex items-center justify-between"><span>Dont critiques</span><Badge variant={alerts.critical_anomalies ? 'destructive' : 'secondary'}>{alerts.critical_anomalies}</Badge></div>
+            <div className="flex items-center justify-between"><span>Tâches en cours</span><Badge variant="secondary">{alerts.tasks_open}</Badge></div>
+            <div className="flex items-center justify-between"><span>Assurances manquantes</span><Badge variant={alerts.missing_insurance ? 'destructive' : 'secondary'}>{alerts.missing_insurance}</Badge></div>
+          </div>
+          <Button size="sm" variant="ghost" className="w-full" onClick={() => setOpen(false)}>Fermer</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimelineBlock({ registrationId }) {
+  useEffect(() => { api(`/api/activity-logs/timeline?registration_id=${registrationId}`).then(setItems).catch(e => toast.error(e.message)); }, [registrationId]);
+  if (!items) return <div className="text-sm text-slate-500">Chargement…</div>;
+  if (items.length === 0) return <div className="text-sm text-slate-500 py-6 text-center">Aucun événement dans la timeline.</div>;
+  const color = { log: 'bg-slate-100 text-slate-700', doc: 'bg-blue-100 text-blue-700', email: 'bg-violet-100 text-violet-700', event: 'bg-emerald-100 text-emerald-700', anomaly: 'bg-red-100 text-red-700', comment: 'bg-amber-100 text-amber-700', task: 'bg-orange-100 text-orange-700' };
+  return (
+    <div className="relative pl-6 border-l-2 border-slate-200 space-y-4">
+      {items.map((it, i) => (
+        <div key={i} className="relative">
+          <div className={`absolute -left-[27px] top-1 w-3 h-3 rounded-full border-2 border-white ${color[it.type]?.split(' ')[0] || 'bg-slate-400'}`}></div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <Badge variant="secondary" className={`text-[10px] ${color[it.type] || ''}`}>{it.type}</Badge>
+            <span className="text-xs text-slate-500">{new Date(it.at).toLocaleString('fr-FR')}</span>
+          </div>
+          <div className="font-medium text-sm">{it.label}</div>
+          {it.detail && <div className="text-xs text-slate-600 mt-0.5">{it.detail}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function NewSlotForm({ registrationId, venueId, onDone }) {
-  const [show, setShow] = useState(false);
   const [form, setForm] = useState({ day_label: 'vendredi', start_time: '11:00', end_time: '12:00', title: 'Animation' });
   const save = async () => {
     await api('/api/animation-slots', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, venue_id: venueId, ...form }) });

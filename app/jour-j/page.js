@@ -28,22 +28,34 @@ export default function JourJPage() {
   const [venues, setVenues] = useState([]);
   const [venueId, setVenueId] = useState('');
   const [sessions, setSessions] = useState([]);
+  const [liveSites, setLiveSites] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState('');
+  const [showLive, setShowLive] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = async () => {
     setLoading(true);
     try {
       const qs = new URLSearchParams({ event_date: eventDate });
       if (venueId) qs.set('venue_id', venueId);
-      const data = await api('/api/attendance?' + qs.toString());
+      const [data, live] = await Promise.all([
+        api('/api/attendance?' + qs.toString()),
+        api(`/api/dashboard/jour-j-live?event_date=${eventDate}`),
+      ]);
       setSessions(data);
+      setLiveSites(live);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
   useEffect(() => { api('/api/venues').then(setVenues); }, []);
   useEffect(() => { load(); }, [eventDate, venueId]);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, [autoRefresh, eventDate, venueId]);
 
   const filtered = useMemo(() => {
     if (!search) return sessions;
@@ -68,16 +80,62 @@ export default function JourJPage() {
       right={<Link href="/aracom"><Button variant="ghost" size="sm"><ChevronLeft className="w-4 h-4 mr-1" /> Retour ARACOM</Button></Link>}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           {EVENT_DATES.map(d => (
             <Button key={d.value} size="sm" variant={eventDate === d.value ? 'default' : 'outline'} onClick={() => setEventDate(d.value)}>{d.label}</Button>
           ))}
+          <Button size="sm" variant={autoRefresh ? 'default' : 'outline'} onClick={() => setAutoRefresh(!autoRefresh)} className="gap-1">
+            <span className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-slate-300'}`}></span>
+            Live 20s
+          </Button>
           <div className="flex-1"></div>
+          <Button size="sm" variant={showLive ? 'default' : 'outline'} onClick={() => setShowLive(!showLive)}>Vue consolidée</Button>
           <Select value={venueId || 'all'} onValueChange={v => setVenueId(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-[200px]"><SelectValue placeholder="Site" /></SelectTrigger>
             <SelectContent><SelectItem value="all">Tous les sites</SelectItem>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
+
+        {showLive && liveSites && (
+          <Card className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 text-white">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-xs uppercase tracking-widest text-slate-400">Vue consolidée live — {EVENT_DATES.find(d => d.value === eventDate)?.label}</div>
+                  <div className="text-3xl font-bold mt-1">{liveSites.totals.rate}% <span className="text-sm font-normal text-slate-400">de présence globale</span></div>
+                </div>
+                <div className="grid grid-cols-4 gap-3 text-center">
+                  <div><div className="text-2xl font-bold text-emerald-400">{liveSites.totals.present}</div><div className="text-[10px] uppercase text-slate-400">Présents</div></div>
+                  <div><div className="text-2xl font-bold text-slate-300">{liveSites.totals.waiting}</div><div className="text-[10px] uppercase text-slate-400">Attendus</div></div>
+                  <div><div className="text-2xl font-bold text-red-400">{liveSites.totals.absent}</div><div className="text-[10px] uppercase text-slate-400">Absents</div></div>
+                  <div><div className="text-2xl font-bold text-orange-400">{liveSites.totals.anomalies}</div><div className="text-[10px] uppercase text-slate-400">Anomalies</div></div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                {liveSites.by_site.map(s => (
+                  <button key={s.venue_id} onClick={() => setVenueId(s.venue_id === venueId ? '' : s.venue_id)} className={`text-left rounded-md p-3 transition ${venueId === s.venue_id ? 'bg-white text-slate-900' : 'bg-slate-800/80 text-white hover:bg-slate-700'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-sm">{s.venue_name}</div>
+                      {s.anomalies > 0 && <Badge variant="destructive" className="h-4 text-[10px] px-1">{s.anomalies}</Badge>}
+                    </div>
+                    <div className="flex items-end gap-1 mt-1">
+                      <div className="text-xl font-bold">{s.rate}%</div>
+                      <div className="text-[10px] opacity-70 mb-1">{s.present}/{s.total}</div>
+                    </div>
+                    <div className="h-1.5 bg-slate-700 rounded mt-2 overflow-hidden">
+                      <div className="h-full bg-emerald-500" style={{ width: `${s.rate}%` }}></div>
+                    </div>
+                    <div className="flex gap-2 mt-1.5 text-[10px] text-slate-400">
+                      <span>⏱ {s.late}</span>
+                      <span>✗ {s.absent}</span>
+                      <span>🏃 {s.gone}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           <KpiCard label="Attendus" value={kpis.total} accent="slate" icon={Users} />

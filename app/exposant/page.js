@@ -9,8 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { FileUploadButton } from '@/components/file-upload';
 import { toast } from 'sonner';
-import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download } from 'lucide-react';
+import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles } from 'lucide-react';
 import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 const DOC_TYPES = [
   { key: 'assurance', label: 'Attestation d’assurance', icon: FileCheck2 },
@@ -93,6 +94,10 @@ export default function ExposantPortal() {
             </div>
           </CardContent>
         </Card>
+
+        {r.status !== 'confirme' && <ConfirmParticipation registration={r} onRefresh={load} />}
+
+        <PreferencesBlock organizationId={o.id} onRefresh={load} />
 
         <div className="grid md:grid-cols-2 gap-4">
           <Card>
@@ -201,3 +206,74 @@ export default function ExposantPortal() {
     </Shell>
   );
 }
+
+function ConfirmParticipation({ registration, onRefresh }) {
+  const confirmNow = async () => {
+    try {
+      await api(`/api/registrations/${registration.id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('Participation confirmée ! Un email de confirmation a été envoyé.');
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+  };
+  return (
+    <Card className="border-emerald-200 bg-emerald-50/40">
+      <CardContent className="p-5 flex flex-col md:flex-row md:items-center gap-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 font-semibold text-emerald-900"><Sparkles className="w-4 h-4" /> Confirmez votre participation</div>
+          <p className="text-sm text-emerald-800 mt-1">Valider votre inscription au Forum de la Rentrée 2026 (14 & 15 août). Vous recevrez un email de confirmation.</p>
+        </div>
+        <Button onClick={confirmNow} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> Je confirme ma participation</Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PreferencesBlock({ organizationId, onRefresh }) {
+  const [venues, setVenues] = useState([]);
+  const [prefs, setPrefs] = useState([]);
+  const [selected, setSelected] = useState('');
+  const load = async () => {
+    const [v, p] = await Promise.all([api('/api/venues'), api(`/api/organization-preferences?organization_id=${organizationId}`)]);
+    setVenues(v); setPrefs(p);
+  };
+  useEffect(() => { load(); }, [organizationId]);
+  const addPref = async () => {
+    if (!selected) return;
+    if (prefs.some(p => p.venue_id === selected)) { toast.error('Déjà dans vos préférences'); return; }
+    await api('/api/organization-preferences', { method: 'POST', body: JSON.stringify({ organization_id: organizationId, venue_id: selected, preference_rank: prefs.length + 1 }) });
+    toast.success('Préférence enregistrée');
+    setSelected(''); load(); if (onRefresh) onRefresh();
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><Star className="w-4 h-4 text-amber-500" /> Mes sites préférés</CardTitle>
+        <p className="text-xs text-slate-500 mt-1">Classez vos sites souhaités. ARACOM en tiendra compte pour l'affectation.</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {prefs.length === 0 ? <p className="text-sm text-slate-500">Vous n'avez pas encore de préférence exprimée.</p> : (
+          <div className="space-y-1.5">
+            {prefs.map((p, i) => (
+              <div key={p.id} className="flex items-center gap-3 border rounded-md p-3">
+                <div className="w-6 h-6 rounded-full bg-amber-100 text-amber-800 text-xs font-bold flex items-center justify-center">{i + 1}</div>
+                <div className="flex-1">
+                  <div className="font-medium">{p.venue?.name}</div>
+                  <div className="text-xs text-slate-500">{p.source === 'self_service' ? 'Votre choix' : 'Pré-enregistré'}</div>
+                </div>
+                <Badge variant="secondary">Rang {p.preference_rank}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Select value={selected} onValueChange={setSelected}>
+            <SelectTrigger className="flex-1"><SelectValue placeholder="Ajouter un site préféré…" /></SelectTrigger>
+            <SelectContent>{venues.filter(v => !prefs.some(p => p.venue_id === v.id)).map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button onClick={addPref} disabled={!selected}>+ Ajouter</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+

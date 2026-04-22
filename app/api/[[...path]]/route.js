@@ -529,6 +529,79 @@ export async function GET(request, { params }) {
       return new Response(buf, { status: 200, headers: { 'Content-Type': m.mime_type || 'image/jpeg' } });
     }
 
+    if (route === 'activity-logs/timeline') {
+      const reg_id = url.searchParams.get('registration_id');
+      if (!reg_id) return err('registration_id requis', 400);
+      const timeline = [];
+      const sessions = await db.collection('attendance_sessions').find({ registration_id: reg_id }).toArray();
+      const sessionIds = sessions.map(s => s.id);
+      const logs = await db.collection('activity_logs').find({ $or: [{ entity_type: 'registration', entity_id: reg_id }, { entity_type: 'attendance_session', entity_id: { $in: sessionIds } }] }).toArray();
+      logs.forEach(l => timeline.push({ type: 'log', at: l.created_at, label: l.action_type, detail: JSON.stringify(l.new_values_json || {}).slice(0, 120) }));
+      const docs = await db.collection('registration_documents').find({ registration_id: reg_id }, { projection: { file_data: 0 } }).toArray();
+      docs.forEach(d => timeline.push({ type: 'doc', at: d.uploaded_at, label: `Document ${d.document_type}`, detail: `${d.file_name} (${d.status})` }));
+      const emails = await db.collection('email_messages').find({ registration_id: reg_id }).toArray();
+      emails.forEach(e => timeline.push({ type: 'email', at: e.sent_at || e.created_at, label: e.subject, detail: `${e.to_email} - ${e.send_status}` }));
+      const events = await db.collection('attendance_events').find({ attendance_session_id: { $in: sessionIds } }).toArray();
+      events.forEach(e => timeline.push({ type: 'event', at: e.created_at, label: e.event_type, detail: e.short_comment || `à ${e.event_time}` }));
+      const anomalies = await db.collection('registration_anomalies').find({ registration_id: reg_id }).toArray();
+      anomalies.forEach(a => timeline.push({ type: 'anomaly', at: a.detected_at, label: `Anomalie: ${a.anomaly_type}`, detail: a.description, severity: a.severity_level }));
+      const comments = await db.collection('field_comments').find({ registration_id: reg_id }).toArray();
+      comments.forEach(c => timeline.push({ type: 'comment', at: c.created_at, label: c.comment_type, detail: c.comment_text }));
+      const tasks = await db.collection('tasks_or_followups').find({ registration_id: reg_id }).toArray();
+      tasks.forEach(t => timeline.push({ type: 'task', at: t.created_at, label: `Tâche: ${t.title}`, detail: `${t.task_type} - ${t.status}` }));
+      timeline.sort((a, b) => new Date(b.at) - new Date(a.at));
+      return json(timeline);
+    }
+
+    if (route === 'dashboard/jour-j-live') {
+      const event_date = url.searchParams.get('event_date') || '2026-08-14';
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const allSessions = await db.collection('attendance_sessions').find({ event_date }).toArray();
+      const anomalies = await db.collection('registration_anomalies').find({ event_date, resolved_status: { $ne: 'resolu' } }).toArray();
+      const bySite = venues.map(v => {
+        const vs = allSessions.filter(s => s.venue_id === v.id);
+        const present = vs.filter(s => ['arrive','parti','depart_anticipe'].includes(s.presence_status)).length;
+        const absent = vs.filter(s => s.presence_status === 'absent').length;
+        const waiting = vs.filter(s => s.presence_status === 'attendu').length;
+        const late = vs.filter(s => s.actual_arrival_time && s.expected_arrival_time && s.actual_arrival_time > s.expected_arrival_time).length;
+        const gone = vs.filter(s => ['parti','depart_anticipe'].includes(s.presence_status)).length;
+        const anomCount = anomalies.filter(a => a.venue_id === v.id).length;
+        return {
+          venue_id: v.id, venue_name: v.name, venue_code: v.code,
+          total: vs.length, present, absent, waiting, late, gone,
+          anomalies: anomCount,
+          rate: vs.length > 0 ? Math.round((present / vs.length) * 100) : 0,
+        };
+      });
+      const totals = bySite.reduce((acc, s) => { acc.total += s.total; acc.present += s.present; acc.absent += s.absent; acc.waiting += s.waiting; acc.late += s.late; acc.gone += s.gone; acc.anomalies += s.anomalies; return acc; }, { total: 0, present: 0, absent: 0, waiting: 0, late: 0, gone: 0, anomalies: 0 });
+      totals.rate = totals.total > 0 ? Math.round((totals.present / totals.total) * 100) : 0;
+      return json({ event_date, totals, by_site: bySite });
+    }
+
+    if (route === 'alerts') {
+      const anomalies = await db.collection('registration_anomalies').find({ resolved_status: { $in: ['ouvert','en_cours'] } }).toArray();
+      const tasks = await db.collection('tasks_or_followups').find({ status: { $in: ['a_faire','en_cours'] } }).toArray();
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID, status: { $in: ['confirme','a_confirmer'] } }).toArray();
+      const docs = await db.collection('registration_documents').find({}, { projection: { file_data: 0 } }).toArray();
+      const docsByReg = {}; docs.forEach(d => { if (!docsByReg[d.registration_id]) docsByReg[d.registration_id] = []; docsByReg[d.registration_id].push(d); });
+      const missing_insurance = regs.filter(r => !(docsByReg[r.id] || []).some(d => d.document_type === 'assurance' && d.status !== 'refuse')).length;
+      return json({
+        anomalies_open: anomalies.length,
+        critical_anomalies: anomalies.filter(a => a.severity_level === 'critique').length,
+        tasks_open: tasks.length,
+        missing_insurance,
+      });
+    }
+
+    if (route === 'organization-preferences') {
+      const organization_id = url.searchParams.get('organization_id');
+      const q = {}; if (organization_id) q.organization_id = organization_id;
+      const prefs = await db.collection('organization_preferences').find(q).sort({ preference_rank: 1 }).toArray();
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const vById = Object.fromEntries(venues.map(v => [v.id, v]));
+      return json(prefs.map(p => { delete p._id; return { ...p, venue: vById[p.venue_id] }; }));
+    }
+
     return err(`Route inconnue: ${route}`, 404);
   } catch (e) {
     console.error(e);
@@ -947,6 +1020,48 @@ export async function POST(request, { params }) {
       await db.collection('animation_slots').insertOne(s);
       delete s._id;
       return json(s, 201);
+    }
+
+    if (route === 'organization-preferences') {
+      const { organization_id, venue_id, preference_rank, replace_all } = body;
+      if (replace_all) {
+        await db.collection('organization_preferences').deleteMany({ organization_id, edition_id: EDITION_ID });
+      }
+      const pref = {
+        id: uuid(),
+        organization_id,
+        edition_id: EDITION_ID,
+        venue_id,
+        preference_rank: preference_rank || 1,
+        is_eligible: true,
+        source: body.source || 'self_service',
+        created_at: new Date(),
+      };
+      await db.collection('organization_preferences').insertOne(pref);
+      delete pref._id;
+      return json(pref, 201);
+    }
+
+    if (route.match(/^registrations\/[^/]+\/confirm$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Introuvable', 404);
+      await db.collection('registrations').updateOne({ id: regId }, { $set: { status: 'confirme', completion_percent: Math.max(reg.completion_percent || 0, 60), updated_at: new Date() } });
+      // Auto-send confirmation email (mocked)
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (org?.main_email) {
+        await db.collection('email_messages').insertOne({
+          id: uuid(), campaign_id: null, registration_id: regId,
+          to_email: org.main_email, subject: 'Confirmation de votre inscription - Forum de la Rentrée 2026',
+          body_html: `<p>Bonjour,</p><p>Votre inscription au Forum de la Rentrée 2026 est confirmée. Stand ${reg.stand_code}.</p><p>Merci de déposer votre caution de 20 000 XPF.</p>`,
+          send_status: 'envoye', sent_at: new Date(),
+          opened_at: null, clicked_at: null, response_status: 'attente',
+          provider_message_id: `mock_${uuid()}`,
+          created_at: new Date(), updated_at: new Date(),
+        });
+      }
+      await logActivity(db, ctx.userId, 'registration', regId, 'confirm', null, { status: 'confirme' });
+      return json({ ok: true });
     }
 
     return err(`Route POST inconnue: ${route}`, 404);
