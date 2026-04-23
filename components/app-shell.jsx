@@ -48,9 +48,14 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
         </div>
         {tabs.length > 0 && (
           <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex gap-1 overflow-x-auto">
-            {tabs.map(t => (
-              <Link key={t.key} href={t.href} className={`px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${activeTab === t.key ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900'}`}>{t.label}</Link>
-            ))}
+            {tabs.map(t => {
+              const cls = `px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${activeTab === t.key ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900'}`;
+              return t.onClick ? (
+                <button key={t.key} onClick={t.onClick} className={cls}>{t.label}</button>
+              ) : (
+                <Link key={t.key} href={t.href} className={cls}>{t.label}</Link>
+              );
+            })}
           </div>
         )}
       </header>

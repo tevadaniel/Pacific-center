@@ -15,7 +15,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound } from 'lucide-react';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import { exportExposantsCSV, exportCautionsCSV } from '@/lib/csv-export';
@@ -54,7 +54,7 @@ export default function AracomPage() {
       subtitle="Source de vérité pour la préparation et l'exploitation terrain du Forum de la Rentrée 2026."
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
-      tabs={TABS.map(t => ({ ...t, href: `/aracom${t.key === 'dashboard' ? '' : '?tab=' + t.key}` }))}
+      tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
       right={<div className="flex items-center gap-2"><AlertsBadge /><Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link></div>}
     >
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
@@ -173,6 +173,7 @@ function ExposantsView() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
   const [selected, setSelected] = useState(null);
+  const [showNew, setShowNew] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -210,10 +211,14 @@ function ExposantsView() {
           </div>
           <div className="flex items-center justify-between mt-3 pt-3 border-t">
             <div className="text-sm text-slate-600">{rows.length} exposant(s) affiché(s)</div>
-            <Button size="sm" variant="outline" onClick={() => exportExposantsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
+            <div className="flex gap-2">
+              <Button size="sm" className="gap-2 bg-blue-600 hover:bg-blue-700" onClick={() => setShowNew(true)}><Plus className="w-3.5 h-3.5" /> Nouveau exposant</Button>
+              <Button size="sm" variant="outline" onClick={() => exportExposantsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
+            </div>
           </div>
         </CardContent>
       </Card>
+      {showNew && <NewExposantDialog venues={venues} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
@@ -314,6 +319,20 @@ function FicheExposant({ id, onClose }) {
     } catch (e) { toast.error(e.message); }
   };
 
+  const resetPassword = async () => {
+    const newPw = prompt("Nouveau mot de passe pour cet exposant :", "forum2026");
+    if (!newPw) return;
+    // Find user linked to this organization
+    const orgId = data.registration?.organization_id;
+    if (!orgId) { toast.error('Aucun exposant lié'); return; }
+    // Admin reset
+    try {
+      // Use the same endpoint with target_user_id
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ target_user_id: `u-exp-${orgId}`, new_password: newPw }) });
+      toast.success(`Mot de passe réinitialisé : ${newPw}`);
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <Sheet open={true} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
@@ -333,6 +352,14 @@ function FicheExposant({ id, onClose }) {
                 <Button onClick={confirmReg} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> Confirmer</Button>
               </div>
             )}
+
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <div className="font-medium text-sm">Gestion du compte exposant</div>
+                <div className="text-xs text-slate-500">Réinitialiser le mot de passe de l'exposant lié à cette structure.</div>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPassword}><KeyRound className="w-3.5 h-3.5" /> Reset mot de passe</Button>
+            </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <KpiCard label="Statut" value={REGISTRATION_STATUS_LABEL[data.registration?.status] || '—'} accent="blue" />
@@ -911,6 +938,60 @@ function DocsBlock({ registrationId, documents = [], onRefresh }) {
         </div>
       )}
     </div>
+  );
+}
+
+function NewExposantDialog({ venues, onClose, onCreated }) {
+  const [form, setForm] = useState({ name: '', discipline: 'Sport', email: '', phone: '', contact_name: '', priority_level: 'B', venue_id: '', animation_type: '', password: 'forum2026' });
+  const [loading, setLoading] = useState(false);
+  const create = async () => {
+    if (!form.name) { toast.error('Nom requis'); return; }
+    setLoading(true);
+    try {
+      await api('/api/organizations', { method: 'POST', body: JSON.stringify({ ...form, status: 'contacte', source: 'aracom_manual' }) });
+      toast.success(`Exposant créé${form.email ? ' — mot de passe par défaut : ' + form.password : ''}`);
+      onCreated();
+    } catch (e) { toast.error(e.message); }
+    setLoading(false);
+  };
+  return (
+    <Sheet open={true} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Nouveau exposant</SheetTitle>
+          <SheetDescription>Créez un dossier exposant manuellement. Si vous renseignez un email, un compte sera créé avec le mot de passe par défaut que l'exposant pourra changer.</SheetDescription>
+        </SheetHeader>
+        <div className="mt-4 space-y-3">
+          <div><Label>Nom de la structure *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ex : Tahitian Explorers" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Discipline</Label>
+              <Select value={form.discipline} onValueChange={v => setForm({ ...form, discipline: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DISCIPLINES.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent></Select>
+            </div>
+            <div><Label>Priorité</Label>
+              <Select value={form.priority_level} onValueChange={v => setForm({ ...form, priority_level: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORITY_LEVELS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Contact principal</Label><Input value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} /></div>
+            <div><Label>Téléphone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+          </div>
+          <div><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="contact@structure.pf" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Site proposé</Label>
+              <Select value={form.venue_id} onValueChange={v => setForm({ ...form, venue_id: v })}><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger><SelectContent>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select>
+            </div>
+            <div><Label>Animation prévue</Label><Input value={form.animation_type} onChange={e => setForm({ ...form, animation_type: e.target.value })} placeholder="Démo, atelier..." /></div>
+          </div>
+          {form.email && (
+            <div><Label>Mot de passe par défaut (à communiquer à l'exposant)</Label><Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></div>
+          )}
+          <div className="flex gap-2 pt-3">
+            <Button onClick={create} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 gap-2">{loading ? '...' : <><CheckCircle2 className="w-4 h-4" /> Créer</>}</Button>
+            <Button variant="ghost" onClick={onClose}>Annuler</Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

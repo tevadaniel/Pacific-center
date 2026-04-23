@@ -1011,8 +1011,11 @@ export async function POST(request, { params }) {
         event_date: body.event_date || (body.day_label === 'vendredi' ? '2026-08-14' : '2026-08-15'),
         start_time: body.start_time || '10:00',
         end_time: body.end_time || '12:00',
+        duration_minutes: body.duration_minutes || null,
         title: body.title || 'Animation',
-        slot_type: body.slot_type || 'animation',
+        description: body.description || null,
+        slot_type: body.slot_type || 'animation', // animation, stand, zone_animation, spectacle
+        location_type: body.location_type || 'stand', // stand, zone_animation
         status: body.status || 'planifié',
         notes: body.notes || null,
         created_at: new Date(), updated_at: new Date(),
@@ -1064,6 +1067,140 @@ export async function POST(request, { params }) {
       return json({ ok: true });
     }
 
+    if (route === 'organizations') {
+      // Create new organization + registration (ARACOM from Nouveau exposant OR self-register)
+      const orgId = body.organization_id || `org-${uuid()}`;
+      const existing = body.organization_id ? await db.collection('organizations').findOne({ id: body.organization_id }) : null;
+      if (!existing) {
+        await db.collection('organizations').insertOne({
+          id: orgId,
+          name: body.name,
+          discipline: body.discipline || 'Autre',
+          priority_level: body.priority_level || 'prospect',
+          main_email: body.email || null,
+          main_phone: body.phone || null,
+          contact_name: body.contact_name || null,
+          notes: body.notes || null,
+          source_origin: body.source || 'aracom_manual',
+          created_at: new Date(), updated_at: new Date(),
+        });
+      }
+      // Create user account for exposant if email provided
+      if (body.email) {
+        const existingUser = await db.collection('users').findOne({ email: body.email.toLowerCase().trim() });
+        if (!existingUser) {
+          await db.collection('users').insertOne({
+            id: `u-exp-${orgId}`, email: body.email.toLowerCase().trim(),
+            full_name: body.contact_name || body.name,
+            phone: body.phone, role_id: 'role-exposant', role_code: 'exposant',
+            password: body.password || 'forum2026',
+            organization_id: orgId, is_active: true,
+            password_changed: false,
+            created_at: new Date(), updated_at: new Date(),
+          });
+        }
+      }
+      // Optionally create a registration
+      let registration = null;
+      if (body.create_registration !== false) {
+        const regId = `reg-${orgId}`;
+        const existingReg = await db.collection('registrations').findOne({ id: regId });
+        if (!existingReg) {
+          registration = {
+            id: regId, edition_id: EDITION_ID, organization_id: orgId,
+            venue_id: body.venue_id || null, status: body.status || 'prospect',
+            animation_type: body.animation_type || null,
+            friday_slot_label: null, saturday_slot_label: null,
+            stand_needed: true, completion_percent: 10,
+            is_convention_signed: false, is_deposit_required: true, is_deposit_received: false,
+            is_insurance_uploaded: false, is_guide_sent: false,
+            planned_arrival_time: '10:30', planned_departure_time: '17:00',
+            post_event_status: 'en_attente', post_event_summary: null,
+            internal_notes: null, stand_code: body.stand_code || null,
+            exposant_notes: null,
+            created_at: new Date(), updated_at: new Date(),
+          };
+          await db.collection('registrations').insertOne(registration);
+          await db.collection('deposit_transactions').insertOne({
+            id: uuid(), registration_id: regId, amount_xpf: 20000,
+            status: 'non_demandee', payment_method: null,
+            received_at: null, expected_return_date: '2026-08-30', returned_at: null,
+            retained_reason: null, retained_amount_xpf: 0, receipt_document_id: null,
+            post_event_review_status: 'non_revu', post_event_review_comment: null,
+            recommended_return_amount_xpf: 20000, notes: null,
+            created_at: new Date(), updated_at: new Date(),
+          });
+          delete registration._id;
+        }
+      }
+      await logActivity(db, ctx.userId, 'organization', orgId, 'create', null, { name: body.name });
+      return json({ ok: true, organization_id: orgId, registration }, 201);
+    }
+
+    if (route === 'auth/register') {
+      // Self-service exposant registration (from landing page)
+      const { email, password, name, discipline, phone, contact_name } = body;
+      if (!email || !password || !name) return err('Email, mot de passe et nom requis', 400);
+      const existing = await db.collection('users').findOne({ email: email.toLowerCase().trim() });
+      if (existing) return err('Cet email est déjà inscrit', 409);
+      const orgId = `org-${uuid()}`;
+      await db.collection('organizations').insertOne({
+        id: orgId, name, discipline: discipline || 'Autre', priority_level: 'prospect',
+        main_email: email, main_phone: phone || null, contact_name: contact_name || name,
+        notes: null, source_origin: 'self_register',
+        created_at: new Date(), updated_at: new Date(),
+      });
+      const userId = `u-exp-${orgId}`;
+      await db.collection('users').insertOne({
+        id: userId, email: email.toLowerCase().trim(),
+        full_name: contact_name || name, phone: phone || null,
+        role_id: 'role-exposant', role_code: 'exposant',
+        password, organization_id: orgId, is_active: true,
+        password_changed: true,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      const regId = `reg-${orgId}`;
+      await db.collection('registrations').insertOne({
+        id: regId, edition_id: EDITION_ID, organization_id: orgId,
+        venue_id: null, status: 'prospect',
+        animation_type: null,
+        stand_needed: true, completion_percent: 10,
+        is_convention_signed: false, is_deposit_required: true, is_deposit_received: false,
+        is_insurance_uploaded: false, is_guide_sent: false,
+        planned_arrival_time: '10:30', planned_departure_time: '17:00',
+        post_event_status: 'en_attente', internal_notes: null, stand_code: null,
+        exposant_notes: null,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      await db.collection('deposit_transactions').insertOne({
+        id: uuid(), registration_id: regId, amount_xpf: 20000,
+        status: 'non_demandee', expected_return_date: '2026-08-30',
+        retained_amount_xpf: 0, recommended_return_amount_xpf: 20000,
+        post_event_review_status: 'non_revu',
+        created_at: new Date(), updated_at: new Date(),
+      });
+      const user = await db.collection('users').findOne({ id: userId });
+      delete user.password; delete user._id;
+      return json({ user }, 201);
+    }
+
+    if (route === 'auth/change-password') {
+      const { current_password, new_password, target_user_id } = body;
+      if (!new_password) return err('Nouveau mot de passe requis', 400);
+      // Admin resets without needing current password
+      if (ctx.role === 'aracom_admin' && target_user_id) {
+        await db.collection('users').updateOne({ id: target_user_id }, { $set: { password: new_password, password_changed: false, updated_at: new Date() } });
+        await logActivity(db, ctx.userId, 'user', target_user_id, 'password_reset_by_admin', null, null);
+        return json({ ok: true });
+      }
+      if (!ctx.userId) return err('Non authentifié', 401);
+      const user = await db.collection('users').findOne({ id: ctx.userId });
+      if (!user) return err('Utilisateur introuvable', 404);
+      if (user.password !== current_password) return err('Mot de passe actuel incorrect', 401);
+      await db.collection('users').updateOne({ id: ctx.userId }, { $set: { password: new_password, password_changed: true, updated_at: new Date() } });
+      return json({ ok: true });
+    }
+
     return err(`Route POST inconnue: ${route}`, 404);
   } catch (e) {
     console.error(e);
@@ -1083,7 +1220,7 @@ export async function PUT(request, { params }) {
       const id = p[1];
       const old = await db.collection('registrations').findOne({ id });
       if (!old) return err('Introuvable', 404);
-      const allowed = ['status','animation_type','friday_slot_label','saturday_slot_label','stand_needed','is_convention_signed','is_deposit_required','is_deposit_received','is_insurance_uploaded','is_guide_sent','planned_arrival_time','planned_departure_time','post_event_status','post_event_summary','internal_notes','venue_id','stand_code','completion_percent'];
+      const allowed = ['status','animation_type','friday_slot_label','saturday_slot_label','stand_needed','is_convention_signed','is_deposit_required','is_deposit_received','is_insurance_uploaded','is_guide_sent','planned_arrival_time','planned_departure_time','post_event_status','post_event_summary','internal_notes','exposant_notes','venue_id','stand_code','completion_percent'];
       const upd = {};
       for (const k of allowed) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();
@@ -1169,7 +1306,7 @@ export async function PUT(request, { params }) {
 
     if (route.startsWith('animation-slots/')) {
       const id = p[1];
-      const allowed = ['day_label','event_date','start_time','end_time','title','slot_type','status','notes'];
+      const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes'];
       const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();
       await db.collection('animation_slots').updateOne({ id }, { $set: upd });
