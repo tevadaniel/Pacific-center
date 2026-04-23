@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
 import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
+import Anthropic from '@anthropic-ai/sdk';
 
 const EDITION_ID = 'edition-2026';
 
@@ -1261,6 +1262,153 @@ export async function POST(request, { params }) {
       }
       if (tasks.length) await db.collection('tasks_or_followups').insertMany(tasks);
       return json({ ok: true, created: tasks.length });
+    }
+
+    // ---- AI-powered email generation (Claude Sonnet 4.5) ----
+    if (route === 'mailing/generate-ai') {
+      const { mail_type, registration_ids, tone = 'professionnel chaleureux', custom_instruction = '', preview_only = true } = body;
+      if (!process.env.ANTHROPIC_API_KEY) return err('Clé Anthropic non configurée', 500);
+      if (!mail_type) return err('mail_type requis', 400);
+
+      const regs = registration_ids?.length
+        ? await db.collection('registrations').find({ id: { $in: registration_ids } }).toArray()
+        : [];
+      const orgIds = [...new Set(regs.map(r => r.organization_id))];
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const venueIds = [...new Set(regs.map(r => r.venue_id))];
+      const venues = await db.collection('venues').find({ id: { $in: venueIds } }).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      // Context — first registration used for sample generation
+      let contextDescription = '';
+      if (regs.length === 1) {
+        const r = regs[0]; const o = orgById[r.organization_id]; const v = venueById[r.venue_id];
+        contextDescription = `Destinataire unique : ${o?.name} (${o?.discipline}), contact ${o?.contact_name || 'responsable'}.
+Site : ${v?.name}, stand ${r.stand_code || 'non attribué'}.
+Statut du dossier : ${r.status}. Complétion : ${r.completion_percent || 0}%.
+Documents : assurance ${r.is_insurance_uploaded ? '✅' : '❌ manquante'}, convention ${r.is_convention_signed ? '✅' : '❌ non signée'}, caution ${r.is_deposit_received ? '✅ reçue' : '❌ non reçue'}.`;
+      } else if (regs.length > 1) {
+        contextDescription = `Mail groupé à ${regs.length} exposants (exemples : ${regs.slice(0, 3).map(r => orgById[r.organization_id]?.name).join(', ')}...).
+Utilise [[NOM_EXPOSANT]], [[STAND]], [[SITE]] comme variables de personnalisation.`;
+      } else {
+        contextDescription = 'Mail à personnaliser — pas de destinataire spécifique encore sélectionné. Utilise des variables [[NOM_EXPOSANT]], [[STAND]], [[SITE]].';
+      }
+
+      const MAIL_TYPES = {
+        relance_caution: 'Relance pour la caution de 20 000 XPF non reçue',
+        relance_convention: 'Relance pour la convention de participation non signée',
+        relance_assurance: "Relance pour l'attestation d'assurance manquante",
+        relance_generale: 'Relance générale pour dossier incomplet',
+        confirmation: 'Confirmation officielle de participation',
+        invitation_inscription: 'Invitation à compléter son inscription',
+        invitation_satisfaction: 'Invitation à remplir le questionnaire de satisfaction post-événement',
+        remerciement: 'Remerciement post-événement',
+        info_pratique: 'Informations pratiques (horaires, logistique, accès site)',
+        annonce: 'Annonce ou information générale',
+      };
+      const typeLabel = MAIL_TYPES[mail_type] || mail_type;
+
+      const systemPrompt = `Tu es un assistant rédactionnel expert pour ARACOM, l'organisateur du Forum de la Rentrée 2026 en Polynésie française.
+Ton rôle : rédiger des emails professionnels en français à destination d'associations sportives et culturelles (exposants du forum).
+Contexte de l'événement :
+- Forum de la Rentrée 2026, vendredi 14 & samedi 15 août 2026
+- 6 sites simultanés en Polynésie française (Faa'a, Punaauia, Arue, Taravao, Mahina, Moorea)
+- 66 associations inscrites, 67 stands
+- Caution de 20 000 XPF par exposant requise
+- Organisé par ARACOM, en partenariat avec Pacific Centers
+
+Ton style : ${tone}. Le français doit être soigné, chaleureux mais professionnel. Utilise le vouvoiement. Signe toujours "L'équipe ARACOM".
+Le HTML doit être propre et inline (email-compatible) : <p>, <b>, <a>, <ul>/<li>, pas de CSS externe.
+Tu peux utiliser des variables [[NOM_EXPOSANT]], [[DISCIPLINE]], [[STAND]], [[SITE]], [[CONTACT_NAME]] pour la personnalisation si le mail est groupé.
+Tu retournes UNIQUEMENT un JSON valide de la forme : {"subject": "...", "body_html": "..."}
+Pas de markdown, pas de backticks, pas d'explication, juste le JSON.`;
+
+      const userPrompt = `Rédige un email de type : **${typeLabel}**.
+
+Contexte du destinataire :
+${contextDescription}
+
+${custom_instruction ? `Instructions spécifiques : ${custom_instruction}` : ''}
+
+Contraintes :
+- Objet (subject) : court et accrocheur, 60 caractères max.
+- Corps (body_html) : 3-5 paragraphes max, avec un bouton d'action en HTML si pertinent (ex: <a href="{{LIEN}}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:4px;font-weight:600">Texte du bouton</a>).
+- Termine par "Bien cordialement,<br>L'équipe ARACOM".
+
+Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
+
+      try {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const res = await client.messages.create({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 2000,
+          temperature: 0.7,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        });
+        const text = res.content?.[0]?.text || '';
+        // Extract JSON (Claude sometimes wraps in backticks)
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
+        let parsed;
+        try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
+        return json({ ok: true, mail_type, subject: parsed.subject, body_html: parsed.body_html, target_count: regs.length, usage: res.usage });
+      } catch (e) {
+        console.error('Anthropic error:', e);
+        return err('Erreur IA : ' + (e.message || 'inconnue'), 500);
+      }
+    }
+
+    // ---- Send a composed AI email to selected registrations (mocked delivery) ----
+    if (route === 'mailing/send') {
+      const { subject, body_html, registration_ids, mail_type } = body;
+      if (!subject || !body_html) return err('subject et body_html requis', 400);
+      if (!registration_ids?.length) return err('registration_ids requis', 400);
+      const regs = await db.collection('registrations').find({ id: { $in: registration_ids } }).toArray();
+      const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+      const venues = await db.collection('venues').find({ id: { $in: regs.map(r => r.venue_id) } }).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      const campaignId = uuid();
+      await db.collection('email_campaigns').insertOne({
+        id: campaignId, edition_id: EDITION_ID,
+        name: `IA — ${mail_type || 'custom'} — ${new Date().toISOString().slice(0,16)}`,
+        template: mail_type || 'ai_custom', status: 'envoyee',
+        target_filter: { registration_ids },
+        sent_count: 0, opened_count: 0, clicked_count: 0,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      let sent = 0;
+      for (const r of regs) {
+        const o = orgById[r.organization_id];
+        const v = venueById[r.venue_id];
+        if (!o?.main_email) continue;
+        const personalizedSubject = subject
+          .replaceAll('[[NOM_EXPOSANT]]', o.name || '')
+          .replaceAll('[[DISCIPLINE]]', o.discipline || '')
+          .replaceAll('[[STAND]]', r.stand_code || '')
+          .replaceAll('[[SITE]]', v?.name || '')
+          .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
+        const personalizedBody = body_html
+          .replaceAll('[[NOM_EXPOSANT]]', o.name || '')
+          .replaceAll('[[DISCIPLINE]]', o.discipline || '')
+          .replaceAll('[[STAND]]', r.stand_code || '')
+          .replaceAll('[[SITE]]', v?.name || '')
+          .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
+        await db.collection('email_messages').insertOne({
+          id: uuid(), campaign_id: campaignId, registration_id: r.id,
+          to_email: o.main_email, subject: personalizedSubject, body_html: personalizedBody,
+          send_status: 'envoye', sent_at: new Date(),
+          opened_at: null, clicked_at: null, response_status: 'attente',
+          provider_message_id: `mock_${uuid()}`,
+          created_at: new Date(), updated_at: new Date(),
+        });
+        sent++;
+      }
+      await db.collection('email_campaigns').updateOne({ id: campaignId }, { $set: { sent_count: sent, updated_at: new Date() } });
+      return json({ ok: true, sent, campaign_id: campaignId });
     }
 
     // ---- Send satisfaction survey invitation campaign (mocked) ----

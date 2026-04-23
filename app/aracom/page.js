@@ -836,46 +836,208 @@ function CautionsView() {
   );
 }
 
+const MAIL_TYPES = [
+  { value: 'relance_caution', label: 'Relance caution (20 000 XPF)', icon: '💰' },
+  { value: 'relance_convention', label: 'Relance convention non signée', icon: '📝' },
+  { value: 'relance_assurance', label: 'Relance attestation assurance', icon: '🛡️' },
+  { value: 'relance_generale', label: 'Relance dossier incomplet', icon: '⚠️' },
+  { value: 'confirmation', label: 'Confirmation de participation', icon: '✅' },
+  { value: 'invitation_inscription', label: "Invitation à s'inscrire", icon: '📨' },
+  { value: 'invitation_satisfaction', label: 'Questionnaire satisfaction', icon: '⭐' },
+  { value: 'remerciement', label: 'Remerciement post-événement', icon: '🙏' },
+  { value: 'info_pratique', label: 'Infos pratiques (horaires, accès)', icon: 'ℹ️' },
+  { value: 'annonce', label: 'Annonce générale', icon: '📣' },
+];
+
 function MailingView() {
   const [emails, setEmails] = useState([]);
-  const [subject, setSubject] = useState('Forum de la Rentrée 2026 — Confirmation de votre inscription');
-  const [body, setBody] = useState('<p>Bonjour,</p><p>Nous vous confirmons votre inscription au Forum de la Rentrée 2026 (14 et 15 août 2026).</p><p>Merci de nous retourner la convention signée et votre caution de 20 000 XPF.</p><p>Cordialement,<br/>L’équipe ARACOM</p>');
-  const [type, setType] = useState('confirmation');
-  const [filter, setFilter] = useState('all');
-  const load = () => api('/api/emails').then(setEmails);
+  const [regs, setRegs] = useState([]);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [type, setType] = useState('relance_caution');
+  const [tone, setTone] = useState('professionnel chaleureux');
+  const [customInstruction, setCustomInstruction] = useState('');
+  const [filter, setFilter] = useState('a_relancer');
+  const [siteFilter, setSiteFilter] = useState('all');
+  const [generating, setGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [lastUsage, setLastUsage] = useState(null);
+
+  const load = () => Promise.all([api('/api/emails').then(setEmails), api('/api/registrations').then(setRegs)]);
   useEffect(() => { load(); }, []);
-  const send = async () => {
+
+  const targetRegs = regs.filter(r => {
+    if (filter === 'a_relancer' && r.status !== 'a_relancer') return false;
+    if (filter === 'a_confirmer' && r.status !== 'a_confirmer') return false;
+    if (filter === 'confirme' && r.status !== 'confirme') return false;
+    if (filter === 'no_caution' && r.deposit?.status === 'recue') return false;
+    if (filter === 'no_insurance' && r.is_insurance_uploaded) return false;
+    if (siteFilter !== 'all' && r.venue?.name !== siteFilter) return false;
+    return true;
+  });
+  const venues = [...new Set(regs.map(r => r.venue?.name).filter(Boolean))].sort();
+
+  const generateAI = async () => {
+    setGenerating(true);
     try {
-      const regs = await api('/api/registrations' + (filter === 'a_relancer' ? '?status=a_relancer' : filter === 'a_confirmer' ? '?status=a_confirmer' : ''));
-      const ids = regs.map(r => r.id);
-      const res = await api('/api/emails/send', { method: 'POST', body: JSON.stringify({ subject, body_html: body, registration_ids: ids, campaign_type: type }) });
+      const sampleIds = targetRegs.slice(0, Math.min(3, targetRegs.length)).map(r => r.id);
+      const res = await api('/api/mailing/generate-ai', {
+        method: 'POST',
+        body: JSON.stringify({ mail_type: type, registration_ids: sampleIds, tone, custom_instruction: customInstruction }),
+      });
+      setSubject(res.subject || '');
+      setBody(res.body_html || '');
+      setLastUsage(res.usage);
+      toast.success(`✨ Mail généré par Claude Sonnet (${res.target_count} destinataire${res.target_count > 1 ? 's' : ''} ciblé${res.target_count > 1 ? 's' : ''})`);
+    } catch (e) { toast.error(`IA: ${e.message}`); }
+    finally { setGenerating(false); }
+  };
+
+  const send = async () => {
+    if (!subject || !body) { toast.error('Objet et corps requis'); return; }
+    if (!targetRegs.length) { toast.error('Aucun destinataire'); return; }
+    if (!confirm(`Envoyer ce mail à ${targetRegs.length} destinataire(s) ? (MOCK — pas d'envoi réel)`)) return;
+    setSending(true);
+    try {
+      const res = await api('/api/mailing/send', {
+        method: 'POST',
+        body: JSON.stringify({ subject, body_html: body, registration_ids: targetRegs.map(r => r.id), mail_type: type }),
+      });
       toast.success(`✉️ ${res.sent} email(s) envoyé(s) (mock)`);
       load();
     } catch (e) { toast.error(e.message); }
+    finally { setSending(false); }
   };
+
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Nouvelle campagne <Badge variant="secondary" className="ml-2">MOCK</Badge></CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <div><Label>Type</Label><Select value={type} onValueChange={setType}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['reinscription','relance','confirmation','documents','caution'].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-          <div><Label>Destinataires</Label><Select value={filter} onValueChange={setFilter}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Tous les exposants</SelectItem><SelectItem value="a_relancer">À relancer</SelectItem><SelectItem value="a_confirmer">À confirmer</SelectItem></SelectContent></Select></div>
-          <div><Label>Objet</Label><Input value={subject} onChange={e => setSubject(e.target.value)} /></div>
-          <div><Label>Corps HTML</Label><Textarea rows={8} value={body} onChange={e => setBody(e.target.value)} /></div>
-          <Button className="gap-2" onClick={send}><Send className="w-4 h-4" /> Envoyer la campagne</Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Historique (200 derniers)</CardTitle></CardHeader>
-        <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
-          {emails.length === 0 ? <p className="text-slate-500 text-sm">Aucun email.</p> : emails.map(e => (
-            <div key={e.id} className="border rounded-md p-3">
-              <div className="flex items-center justify-between"><div className="font-medium text-sm">{e.subject}</div><Badge variant="secondary">{e.send_status}</Badge></div>
-              <div className="text-xs text-slate-500 mt-1"><Mail className="w-3 h-3 inline mr-1" /> {e.to_email} • {e.sent_at && new Date(e.sent_at).toLocaleString('fr-FR')}</div>
+    <div className="grid lg:grid-cols-3 gap-4">
+      {/* Colonne 1 : composition */}
+      <div className="lg:col-span-2 space-y-4">
+        <Card className="border-violet-200 bg-gradient-to-br from-violet-50/40 to-white">
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-600" /> Rédaction IA — Claude Sonnet 4.5</CardTitle>
+              <Badge variant="secondary" className="bg-violet-100 text-violet-700">Boosté IA</Badge>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+            <p className="text-xs text-slate-500 mt-1">Sélectionne un type, des destinataires, et laisse l'IA rédiger un mail professionnel personnalisé que tu pourras éditer avant envoi.</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs uppercase text-slate-500">Type de mail</Label>
+                <Select value={type} onValueChange={setType}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{MAIL_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.icon} {t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs uppercase text-slate-500">Ton</Label>
+                <Select value={tone} onValueChange={setTone}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="professionnel chaleureux">Professionnel chaleureux</SelectItem>
+                    <SelectItem value="formel et institutionnel">Formel et institutionnel</SelectItem>
+                    <SelectItem value="direct et efficace">Direct et efficace</SelectItem>
+                    <SelectItem value="amical et convivial">Amical et convivial</SelectItem>
+                    <SelectItem value="ferme (pour relance urgente)">Ferme (pour relance urgente)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Instructions spécifiques <span className="normal-case text-slate-400">(optionnel)</span></Label>
+              <Textarea rows={2} value={customInstruction} onChange={e => setCustomInstruction(e.target.value)} placeholder="Ex: mentionner la date limite du 15 juillet, inclure un lien vers le portail exposant…" className="mt-1" />
+            </div>
+            <Button onClick={generateAI} disabled={generating} size="lg" className="w-full bg-violet-600 hover:bg-violet-700 gap-2">
+              <Sparkles className="w-4 h-4" />
+              {generating ? 'Claude rédige le mail…' : targetRegs.length > 0 ? `Générer un mail pour ${targetRegs.length} destinataire(s)` : 'Sélectionnez des destinataires'}
+            </Button>
+            {lastUsage && <p className="text-[11px] text-slate-400">Claude Sonnet 4.5 • {lastUsage.input_tokens} tokens in / {lastUsage.output_tokens} out</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Mail className="w-4 h-4 text-blue-600" /> Aperçu & édition</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Objet</Label>
+              <Input value={subject} onChange={e => setSubject(e.target.value)} placeholder="L'objet apparaîtra ici après génération…" className="mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Corps HTML</Label>
+              <Textarea rows={12} value={body} onChange={e => setBody(e.target.value)} placeholder="Le corps HTML apparaîtra ici après génération…" className="mt-1 font-mono text-xs" />
+            </div>
+            {body && (
+              <div>
+                <Label className="text-xs uppercase text-slate-500">Aperçu rendu</Label>
+                <div className="mt-1 rounded-md border bg-white p-4 text-sm max-h-[300px] overflow-y-auto" dangerouslySetInnerHTML={{ __html: body }} />
+              </div>
+            )}
+            <Button className="w-full gap-2" onClick={send} disabled={sending || !subject || !body}>
+              <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer à ${targetRegs.length} destinataire(s)`} <Badge variant="secondary" className="ml-1">MOCK</Badge>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Colonne 2 : destinataires + historique */}
+      <div className="space-y-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /> Destinataires</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Statut dossier</Label>
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les exposants</SelectItem>
+                  <SelectItem value="a_relancer">À relancer</SelectItem>
+                  <SelectItem value="a_confirmer">À confirmer</SelectItem>
+                  <SelectItem value="confirme">Confirmés uniquement</SelectItem>
+                  <SelectItem value="no_caution">Sans caution reçue</SelectItem>
+                  <SelectItem value="no_insurance">Sans assurance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Site</Label>
+              <Select value={siteFilter} onValueChange={setSiteFilter}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les sites</SelectItem>
+                  {venues.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="pt-2 border-t">
+              <div className="text-2xl font-bold text-blue-600">{targetRegs.length}</div>
+              <p className="text-xs text-slate-500">destinataire(s) sélectionné(s)</p>
+            </div>
+            <div className="max-h-[240px] overflow-y-auto text-xs space-y-1 pt-2 border-t">
+              {targetRegs.slice(0, 20).map(r => (
+                <div key={r.id} className="flex items-center justify-between py-1 border-b border-slate-100">
+                  <span className="truncate">{r.organization?.name}</span>
+                  <span className="text-slate-400 shrink-0 ml-2">{r.stand_code}</span>
+                </div>
+              ))}
+              {targetRegs.length > 20 && <div className="text-slate-400 text-center pt-1">+ {targetRegs.length - 20} autre(s)…</div>}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Clock className="w-4 h-4 text-slate-500" /> Historique</CardTitle></CardHeader>
+          <CardContent className="space-y-2 max-h-[400px] overflow-y-auto">
+            {emails.length === 0 ? <p className="text-slate-500 text-sm">Aucun email envoyé.</p> : emails.slice(0, 30).map(e => (
+              <div key={e.id} className="border rounded-md p-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2"><div className="font-medium truncate">{e.subject}</div><Badge variant="secondary" className="shrink-0">{e.send_status}</Badge></div>
+                <div className="text-slate-500 mt-1"><Mail className="w-3 h-3 inline mr-1" /> {e.to_email}</div>
+                <div className="text-slate-400 mt-0.5">{e.sent_at && new Date(e.sent_at).toLocaleString('fr-FR')}</div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
