@@ -21,6 +21,7 @@ import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COL
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
+import { exportFullXLSX } from '@/lib/xlsx-export';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -233,8 +234,16 @@ function AracomTools({ onRefresh }) {
     } catch (e) { toast.error(e.message); }
     finally { setBusy(null); }
   };
+  const runExport = async () => {
+    setBusy('xlsx');
+    try {
+      const res = await exportFullXLSX(api);
+      toast.success(`📊 Export Excel généré (${res.sheets.length} feuilles)`);
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
       <Button
         variant="outline" className="h-auto py-3 flex-col items-start gap-1 text-left"
         disabled={busy !== null} onClick={() => run('/api/tools/recompute-completion', (r) => `Complétion recalculée pour ${r.total} dossiers (${r.updated} mis à jour)`)}
@@ -258,6 +267,14 @@ function AracomTools({ onRefresh }) {
         <div className="flex items-center gap-2 font-semibold"><ThumbsUp className="w-4 h-4 text-emerald-600" /> Campagne satisfaction</div>
         <div className="text-xs text-slate-500 font-normal">Envoie l'invitation au questionnaire à tous les exposants inscrits</div>
         {busy === '/api/emails/send-satisfaction' && <Badge className="mt-1">En cours…</Badge>}
+      </Button>
+      <Button
+        variant="outline" className="h-auto py-3 flex-col items-start gap-1 text-left border-emerald-300"
+        disabled={busy !== null} onClick={runExport}
+      >
+        <div className="flex items-center gap-2 font-semibold"><Download className="w-4 h-4 text-emerald-600" /> Export Excel complet</div>
+        <div className="text-xs text-slate-500 font-normal">Télécharge un fichier .xlsx avec toutes les données : exposants, stands, cautions, satisfaction, tâches, anomalies</div>
+        {busy === 'xlsx' && <Badge className="mt-1">Export…</Badge>}
       </Button>
     </div>
   );

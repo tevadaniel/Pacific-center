@@ -56,41 +56,6 @@ export default function VenueMapReal({ venue, stands = [], highlightStandCode, o
       root.innerHTML = plan.svg;
       root.setAttribute('viewBox', plan.viewBox);
       root.setAttribute('data-plan-key', planKey);
-
-      // Invert plan background: black → white, white text → dark
-      const allRects = root.querySelectorAll('rect');
-      // Collect dark rects AFTER we transform them
-      const darkRects = [];
-      allRects.forEach((r, idx) => {
-        const f = (r.getAttribute('fill') || '').toLowerCase();
-        if (idx === 0 && (f === '#000' || f === '#000000' || f === 'black')) {
-          r.setAttribute('fill', '#ffffff');
-          return;
-        }
-        if (f === '#000' || f === '#000000' || f === '#0a0a0a' || f === '#111' || f === '#222') {
-          r.setAttribute('fill', '#334155');
-          const x = parseFloat(r.getAttribute('x') || '0');
-          const y = parseFloat(r.getAttribute('y') || '0');
-          const w = parseFloat(r.getAttribute('width') || '0');
-          const h = parseFloat(r.getAttribute('height') || '0');
-          darkRects.push({ x1: x, y1: y, x2: x + w, y2: y + h });
-        }
-      });
-      // White texts: keep white if inside a dark rect, else slate-900
-      const allTexts = root.querySelectorAll('text');
-      allTexts.forEach(t => {
-        if (t.classList.contains('snum') || t.classList.contains('snom')) return;
-        const f = (t.getAttribute('fill') || '').toLowerCase();
-        if (f === 'white' || f === '#fff' || f === '#ffffff') {
-          const tx = parseFloat(t.getAttribute('x') || '0');
-          const ty = parseFloat(t.getAttribute('y') || '0');
-          const insideDark = darkRects.some(d => tx >= d.x1 && tx <= d.x2 && ty >= d.y1 && ty <= d.y2);
-          t.setAttribute('fill', insideDark ? '#ffffff' : '#0f172a');
-        }
-      });
-      // rgba(255,255,255,.8) → slate-500
-      const whitish = root.querySelectorAll('text[fill*="255,255,255"]');
-      whitish.forEach(t => t.setAttribute('fill', 'rgba(100,116,139,0.8)'));
     }
     const snumTexts = root.querySelectorAll('text.snum');
     const handlers = [];
@@ -221,7 +186,7 @@ export default function VenueMapReal({ venue, stands = [], highlightStandCode, o
       </div>
 
       {/* Vrai plan SVG */}
-      <div className="relative rounded-xl overflow-hidden border bg-white shadow-lg">
+      <div className="relative rounded-xl overflow-hidden border bg-black shadow-lg">
         <div className="flex items-center justify-between bg-gradient-to-r from-slate-900 to-slate-800 px-4 py-2 text-white text-xs">
           <div className="flex items-center gap-2">
             <DoorOpen className="w-3.5 h-3.5 text-emerald-400" />
@@ -229,7 +194,7 @@ export default function VenueMapReal({ venue, stands = [], highlightStandCode, o
           </div>
           <span className="text-slate-400">{stands.length} stands</span>
         </div>
-        <div className="p-2 sm:p-4 bg-white">
+        <div className="p-2 sm:p-4">
           <svg
             ref={svgRef}
             xmlns="http://www.w3.org/2000/svg"
