@@ -17,30 +17,33 @@ const BG_BY_VENUE = {
 };
 
 // Default layout positions (percentages). Used when stand has no saved position.
-// These are visual estimations — admin can drag & save new positions.
+// These coordinates have been detected automatically from the PNG plans
+// and then refined manually. Admin can drag them and save if needed.
 const DEFAULT_POSITIONS = {
-  ARU: { // 12 stands horizontal
-    'A-C01': { x: 13, y: 50 }, 'A-C02': { x: 19, y: 50 }, 'A-C03': { x: 25, y: 50 }, 'A-C04': { x: 31, y: 50 },
-    'A-C05': { x: 37, y: 50 }, 'A-C06': { x: 43, y: 50 }, 'A-C07': { x: 49, y: 50 }, 'A-C08': { x: 55, y: 50 },
-    'A-C09': { x: 61, y: 50 }, 'A-C10': { x: 72, y: 50 }, 'A-C11': { x: 78, y: 50 }, 'A-C12': { x: 84, y: 50 },
+  ARU: { // 12 stands : 8 à gauche + DEMO + 4 à droite + Kiosque
+    'A-C01': { x: 20.2, y: 26.3 }, 'A-C02': { x: 23.3, y: 26.3 }, 'A-C03': { x: 26.6, y: 26.3 }, 'A-C04': { x: 29.9, y: 26.3 },
+    'A-C05': { x: 33.2, y: 26.2 }, 'A-C06': { x: 36.4, y: 26.2 }, 'A-C07': { x: 39.8, y: 25.8 }, 'A-C08': { x: 43.0, y: 25.6 },
+    'A-C09': { x: 64.1, y: 24.7 }, 'A-C10': { x: 67.4, y: 24.7 }, 'A-C11': { x: 70.9, y: 24.7 }, 'A-C12': { x: 74.1, y: 24.7 },
   },
-  TAR: { // 6 + DEMO + 6
-    'T-D01': { x: 16, y: 50 }, 'T-D02': { x: 22, y: 50 }, 'T-D03': { x: 28, y: 50 }, 'T-D04': { x: 34, y: 50 },
-    'T-D05': { x: 40, y: 50 }, 'T-D06': { x: 46, y: 50 },
-    'T-D07': { x: 58, y: 50 }, 'T-D08': { x: 64, y: 50 }, 'T-D09': { x: 70, y: 50 }, 'T-D10': { x: 76, y: 50 },
-    'T-D11': { x: 82, y: 50 }, 'T-D12': { x: 88, y: 50 },
+  TAR: { // 12 stands : 6 à gauche + DEMO + 6 à droite + Kiosque
+    'T-D01': { x: 16.5, y: 50 }, 'T-D02': { x: 20.3, y: 50 }, 'T-D03': { x: 24.1, y: 50 }, 'T-D04': { x: 27.9, y: 50 },
+    'T-D05': { x: 31.7, y: 50 }, 'T-D06': { x: 35.5, y: 50 },
+    'T-D07': { x: 58.5, y: 50 }, 'T-D08': { x: 62.3, y: 50 }, 'T-D09': { x: 66.1, y: 50 }, 'T-D10': { x: 69.9, y: 50 },
+    'T-D11': { x: 73.7, y: 50 }, 'T-D12': { x: 77.5, y: 50 },
   },
-  FAAA: { // 16 stands in a row with 2 kiosques intercalés
-    'F-A01': { x: 10, y: 55 }, 'F-A02': { x: 14, y: 55 }, 'F-A03': { x: 18, y: 55 }, 'F-A04': { x: 24, y: 55 },
-    'F-A05': { x: 28, y: 55 }, 'F-A06': { x: 32, y: 55 }, 'F-A07': { x: 36, y: 55 }, 'F-A08': { x: 40, y: 55 },
-    'F-A09': { x: 44, y: 55 }, 'F-A10': { x: 54, y: 55 }, 'F-A11': { x: 58, y: 55 }, 'F-A12': { x: 62, y: 55 },
-    'F-A13': { x: 66, y: 55 }, 'F-A14': { x: 78, y: 55 }, 'F-A15': { x: 82, y: 55 }, 'F-A16': { x: 86, y: 55 },
+  FAAA: { // 16 stands : 3 groupes séparés par 2 Kiosques
+    'F-A01': { x: 19.5, y: 48 }, 'F-A02': { x: 21.9, y: 48 }, 'F-A03': { x: 24.3, y: 48 }, 'F-A04': { x: 26.8, y: 48 },
+    'F-A05': { x: 30.8, y: 48 }, 'F-A06': { x: 33.3, y: 48 }, 'F-A07': { x: 35.7, y: 48 },
+    'F-A08': { x: 38.7, y: 48.1 }, 'F-A09': { x: 40.9, y: 48.1 }, 'F-A10': { x: 43.2, y: 48.1 },
+    'F-A11': { x: 51.0, y: 48.1 }, 'F-A12': { x: 53.2, y: 48.1 }, 'F-A13': { x: 55.5, y: 48.1 },
+    'F-A14': { x: 61.7, y: 49 }, 'F-A15': { x: 64.0, y: 49 }, 'F-A16': { x: 66.3, y: 49 },
   },
-  PUN: { // 3 + DEMO + 9 + Kiosque
-    'P-B01': { x: 18, y: 50 }, 'P-B02': { x: 22, y: 50 }, 'P-B03': { x: 26, y: 50 },
-    'P-B04': { x: 42, y: 50 }, 'P-B05': { x: 46, y: 50 }, 'P-B06': { x: 50, y: 50 }, 'P-B07': { x: 54, y: 50 },
-    'P-B08': { x: 58, y: 50 }, 'P-B09': { x: 62, y: 50 }, 'P-B10': { x: 66, y: 50 }, 'P-B11': { x: 70, y: 50 },
-    'P-B12': { x: 74, y: 50 }, 'P-B13': { x: 78, y: 50 },
+  PUN: { // 13 stands : Kiosque + 3 + DEMO + 9 + Kiosque
+    'P-B01': { x: 23.3, y: 32.5 }, 'P-B02': { x: 26.3, y: 32.5 }, 'P-B03': { x: 29.0, y: 32.5 },
+    'P-B04': { x: 50.9, y: 32.5 }, 'P-B05': { x: 53.9, y: 32.5 }, 'P-B06': { x: 56.6, y: 32.5 },
+    'P-B07': { x: 59.2, y: 33 }, 'P-B08': { x: 62.2, y: 33 }, 'P-B09': { x: 64.9, y: 33 },
+    'P-B10': { x: 67.6, y: 33 }, 'P-B11': { x: 70.6, y: 33 }, 'P-B12': { x: 73.3, y: 33 },
+    'P-B13': { x: 76.0, y: 33 },
   },
 };
 
