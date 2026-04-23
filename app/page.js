@@ -19,11 +19,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [bootChecked, setBootChecked] = useState(false);
+  const [stats, setStats] = useState({ sites: 6, associations: 66, stands: 67 });
 
   useEffect(() => {
     const s = getSession();
     if (s?.role) redirectByRole(s.role, router);
     setBootChecked(true);
+    fetch('/api/stats/public').then(r => r.json()).then(d => d?.sites && setStats(d)).catch(() => {});
   }, [router]);
 
   const redirectByRole = (role, r) => {
@@ -84,11 +86,11 @@ export default function LoginPage() {
               <span className="text-blue-600">de A à Z.</span>
             </h2>
             <p className="mt-4 text-slate-600 leading-relaxed">
-              La source de vérité pour les 6 sites, 67 associations et le suivi terrain du vendredi 14 &amp; samedi 15 août 2026. Exit Excel, mails et relances manuelles.
+              La source de vérité pour les {stats.sites} sites, {stats.associations} associations et le suivi terrain du vendredi 14 &amp; samedi 15 août 2026. Exit Excel, mails et relances manuelles.
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            {[{ t: '6', l: 'sites' }, { t: '67', l: 'associations' }, { t: '57', l: 'stands' }].map((k, i) => (
+            {[{ t: String(stats.sites), l: 'sites' }, { t: String(stats.associations), l: 'associations' }, { t: String(stats.stands), l: 'stands' }].map((k, i) => (
               <div key={i} className="rounded-xl border bg-white p-4 text-center shadow-sm">
                 <div className="text-2xl font-bold text-slate-900">{k.t}</div>
                 <div className="text-xs uppercase tracking-wider text-slate-500">{k.l}</div>
@@ -161,7 +163,7 @@ export default function LoginPage() {
                 {seeding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                 Initialiser / réinitialiser les données démo
               </Button>
-              <p className="text-[11px] text-slate-400 mt-1 text-center">Crée les 6 sites, 67 associations, 57 stands et les utilisateurs démo.</p>
+              <p className="text-[11px] text-slate-400 mt-1 text-center">Crée les {stats.sites} sites, {stats.associations} associations, {stats.stands} stands et les utilisateurs démo.</p>
             </div>
           </CardContent>
         </Card>

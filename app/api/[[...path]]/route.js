@@ -248,6 +248,14 @@ export async function GET(request, { params }) {
 
     if (route === '' || route === 'health') return json({ ok: true, service: 'Forum Rentrée 2026' });
 
+    if (route === 'stats/public') {
+      // Public stats for landing page — no auth required
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const stands = await db.collection('venue_stands').countDocuments({});
+      const orgs = await db.collection('organizations').countDocuments({ source_origin: { $ne: 'self_register' } });
+      return json({ sites: venues.length, stands, associations: orgs });
+    }
+
     if (route === 'auth/me') {
       const ctx = getUserContext(request);
       if (!ctx.userId) return err('Non authentifié', 401);

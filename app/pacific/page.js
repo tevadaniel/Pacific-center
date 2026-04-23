@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Sparkles, LayoutGrid, FileText, Activity } from 'lucide-react';
+import VenueMap from '@/components/venue-map';
 
 export default function PacificCentersPage() {
   return (
@@ -129,25 +130,11 @@ function SitesView() {
       </div>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-violet-600" /> Plan stands — {selectedVenue?.name}</CardTitle>
+          <CardTitle className="text-base flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-violet-600" /> Plan interactif — {selectedVenue?.name}</CardTitle>
           <p className="text-xs text-slate-500 mt-1">{stands.length} stands • {occupied} attribués • {stands.length - occupied} libres</p>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4 text-xs mb-3 flex-wrap">
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200 border border-emerald-300"></span> confirmé</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-200 border border-amber-300"></span> à confirmer</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-200 border border-orange-300"></span> à relancer</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-white border"></span> libre</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
-            {stands.map(s => (
-              <div key={s.id} className={`rounded-md border p-3 ${s.organization ? (s.registration_status === 'confirme' ? 'bg-emerald-50 border-emerald-200' : s.registration_status === 'a_confirmer' ? 'bg-amber-50 border-amber-200' : s.registration_status === 'a_relancer' ? 'bg-orange-50 border-orange-200' : 'bg-slate-50') : 'bg-white'}`}>
-                <div className="font-mono text-xs font-bold">{s.stand_code}</div>
-                <div className="text-xs text-slate-700 mt-1 truncate">{s.organization?.name || <span className="text-slate-400 italic">libre</span>}</div>
-                {s.organization && <div className="text-[10px] text-slate-500 truncate">{s.organization.discipline}</div>}
-              </div>
-            ))}
-          </div>
+          <VenueMap stands={stands} venue={selectedVenue} />
         </CardContent>
       </Card>
       <Card>

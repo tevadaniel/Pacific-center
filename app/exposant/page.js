@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { FileUploadButton } from '@/components/file-upload';
+import VenueMap from '@/components/venue-map';
 import { toast } from 'sonner';
 import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft, ListChecks, MessageCircle } from 'lucide-react';
 import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL, EVENT_DATES } from '@/lib/constants';
@@ -307,6 +308,7 @@ function StandMapBlock({ venueId, currentStandCode }) {
   const selectedVenue = venues.find(v => v.id === selectedVenueId);
   const occupied = stands.filter(s => s.organization).length;
   const free = stands.length - occupied;
+  const isOwnVenue = selectedVenueId === venueId;
   return (
     <Card>
       <CardHeader>
@@ -318,26 +320,19 @@ function StandMapBlock({ venueId, currentStandCode }) {
           </Select>
         </div>
         <p className="text-xs text-slate-500 mt-1">{selectedVenue?.name} — {stands.length} stands • {occupied} attribués • {free} libres</p>
+        {currentStandCode && isOwnVenue && (
+          <div className="mt-2 inline-flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5">
+            <MapPin className="w-3.5 h-3.5 text-blue-600" />
+            <span>Votre stand : <span className="font-mono font-bold text-blue-700">{currentStandCode}</span></span>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
-        <div className="flex items-center gap-4 text-xs mb-3 flex-wrap">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500 border border-blue-600"></span> votre stand</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300"></span> attribué</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-white border"></span> libre</span>
-        </div>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-          {stands.map(s => {
-            const isMine = s.stand_code === currentStandCode && s.venue_id === venueId;
-            const occupied = !!s.organization;
-            return (
-              <div key={s.id} className={`rounded-md border p-2.5 text-xs ${isMine ? 'bg-blue-500 text-white border-blue-600 ring-2 ring-blue-400' : occupied ? 'bg-emerald-50 border-emerald-200' : 'bg-white'}`}>
-                <div className="font-mono font-bold text-[11px]">{s.stand_code}</div>
-                <div className={`text-[10px] mt-0.5 truncate ${isMine ? 'text-blue-50' : 'text-slate-600'}`}>{s.organization?.name || <span className="italic">libre</span>}</div>
-              </div>
-            );
-          })}
-        </div>
-        {currentStandCode && <div className="mt-3 text-xs text-slate-500">Votre stand actuel : <span className="font-mono font-bold text-blue-700">{currentStandCode}</span></div>}
+        <VenueMap
+          stands={stands}
+          venue={selectedVenue}
+          highlightStandCode={isOwnVenue ? currentStandCode : null}
+        />
       </CardContent>
     </Card>
   );
