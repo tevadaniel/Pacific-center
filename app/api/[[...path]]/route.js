@@ -1264,6 +1264,43 @@ export async function POST(request, { params }) {
       return json({ ok: true, created: tasks.length });
     }
 
+    // ---- Venue stands CRUD (edit plan) ----
+    if (route === 'venue-stands') {
+      const { venue_id, stand_code, zone = 'Zone 1', pos_x, pos_y } = body;
+      if (!venue_id || !stand_code) return err('venue_id et stand_code requis', 400);
+      const exists = await db.collection('venue_stands').findOne({ venue_id, stand_code });
+      if (exists) return err('Un stand avec ce code existe déjà sur ce site', 400);
+      const venue = await db.collection('venues').findOne({ id: venue_id });
+      const stand = {
+        id: uuid(), venue_id, stand_code, zone, capacity: 1, is_accessible: true,
+        pos_x: typeof pos_x === 'number' ? pos_x : 50,
+        pos_y: typeof pos_y === 'number' ? pos_y : 50,
+        created_at: new Date(), updated_at: new Date(),
+      };
+      await db.collection('venue_stands').insertOne(stand);
+      if (venue) await db.collection('venues').updateOne({ id: venue_id }, { $set: { capacity_stands: (venue.capacity_stands || 0) + 1 } });
+      delete stand._id;
+      return json(stand, 201);
+    }
+
+    if (route === 'venue-stands/positions') {
+      const { updates } = body;
+      if (!Array.isArray(updates)) return err('updates requis', 400);
+      let count = 0;
+      for (const u of updates) {
+        if (!u.id) continue;
+        const upd = {};
+        if (typeof u.pos_x === 'number') upd.pos_x = u.pos_x;
+        if (typeof u.pos_y === 'number') upd.pos_y = u.pos_y;
+        if (Object.keys(upd).length) {
+          upd.updated_at = new Date();
+          await db.collection('venue_stands').updateOne({ id: u.id }, { $set: upd });
+          count++;
+        }
+      }
+      return json({ ok: true, updated: count });
+    }
+
     // ---- AI-powered email generation (Claude Sonnet 4.5) ----
     if (route === 'mailing/generate-ai') {
       const { mail_type, registration_ids, tone = 'professionnel chaleureux', custom_instruction = '', preview_only = true } = body;
@@ -1746,6 +1783,16 @@ export async function DELETE(request, { params }) {
     }
     if (route.startsWith('animation-slots/')) {
       await db.collection('animation_slots').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('venue-stands/')) {
+      const stand = await db.collection('venue_stands').findOne({ id: p[1] });
+      if (!stand) return err('Stand introuvable', 404);
+      // Check if any active assignment exists
+      const assignment = await db.collection('stand_assignments').findOne({ venue_stand_id: stand.id, status: { $ne: 'annule' } });
+      if (assignment) return err('Ce stand est attribué à un exposant — libérez-le d\'abord', 400);
+      await db.collection('venue_stands').deleteOne({ id: p[1] });
+      await db.collection('venues').updateOne({ id: stand.venue_id }, { $inc: { capacity_stands: -1 } });
       return json({ ok: true });
     }
     return err('Route DELETE inconnue', 404);

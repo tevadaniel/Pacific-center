@@ -1,25 +1,25 @@
 'use client';
 
 import VenueMap from '@/components/venue-map';
-import VenueMapReal from '@/components/venue-map-real';
-import { PLAN_KEY_BY_VENUE } from '@/lib/venue-plans';
+import VenueMapPng from '@/components/venue-map-png';
+
+const HAS_PNG = ['FAAA', 'PUN', 'ARU', 'TAR'];
 
 /**
- * SmartVenueMap — Affiche le vrai plan SVG si disponible pour ce site,
- * sinon fallback sur le plan schématique (grille type ENTRÉE/SCÈNE).
- *
- * Accepte les mêmes props que VenueMap + VenueMapReal.
+ * SmartVenueMap — Dispatch automatique :
+ *  - Sites avec PNG (FAAA/PUN/ARU/TAR) → VenueMapPng (plan réel + drag & drop)
+ *  - Autres (MAH/MOO) → VenueMap schématique
  */
-export default function SmartVenueMap({ venue, stands, highlightStandCode, highlightRegId, onStandClick, showFilters = true, compact = false }) {
-  const hasRealPlan = venue?.code && PLAN_KEY_BY_VENUE[venue.code];
-
-  if (hasRealPlan) {
+export default function SmartVenueMap({ venue, stands, highlightStandCode, highlightRegId, onStandClick, onStandsReload, editable = false, showFilters = true, compact = false }) {
+  if (venue?.code && HAS_PNG.includes(venue.code)) {
     return (
-      <VenueMapReal
+      <VenueMapPng
         venue={venue}
         stands={stands}
         highlightStandCode={highlightStandCode}
         onStandClick={onStandClick}
+        onStandsReload={onStandsReload}
+        editable={editable}
       />
     );
   }

@@ -703,6 +703,8 @@ function SitesView() {
           stands={stands}
           venue={venues.find(v => v.id === selected)}
           onStandClick={(s) => setEditStand(s)}
+          onStandsReload={reload}
+          editable={true}
         />
       )}
 
