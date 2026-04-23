@@ -198,6 +198,17 @@ async function doSeed(force = false) {
 }
 
 // ---------- KPI ----------
+function computeCompletion(reg, hasStand) {
+  let pct = 0;
+  if (reg.status && reg.status !== 'prospect') pct += 15;              // inscription démarrée
+  if (hasStand || reg.stand_code) pct += 20;                           // stand affecté
+  if (reg.is_insurance_uploaded) pct += 25;                            // assurance
+  if (reg.is_deposit_received) pct += 20;                              // caution reçue
+  if (reg.is_convention_signed) pct += 15;                             // convention signée
+  if (reg.status === 'confirme') pct += 5;                             // confirmation finale
+  return Math.min(100, pct);
+}
+
 async function computeKpis(db) {
   const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
   const deposits = await db.collection('deposit_transactions').find({}).toArray();
@@ -1153,6 +1164,97 @@ export async function POST(request, { params }) {
         delete created._id;
         return json(created, 201);
       }
+    }
+
+    // ---- Recompute completion % for all registrations (ARACOM tool) ----
+    if (route === 'tools/recompute-completion') {
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      const assignments = await db.collection('stand_assignments').find({}).toArray();
+      const assignByReg = {};
+      assignments.forEach(a => { if (a.status !== 'annule') assignByReg[a.registration_id] = a; });
+      let updated = 0;
+      for (const r of regs) {
+        const pct = computeCompletion(r, !!assignByReg[r.id]);
+        if (pct !== r.completion_percent) {
+          await db.collection('registrations').updateOne({ id: r.id }, { $set: { completion_percent: pct, updated_at: new Date() } });
+          updated++;
+        }
+      }
+      return json({ ok: true, total: regs.length, updated });
+    }
+
+    // ---- Auto-generate relance tasks for incomplete dossiers ----
+    if (route === 'tools/generate-relances') {
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      const deposits = await db.collection('deposit_transactions').find({}).toArray();
+      const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
+      const existingTasks = await db.collection('tasks_or_followups').find({ status: { $in: ['a_faire', 'en_cours'] } }).toArray();
+      const now = new Date();
+      const tasks = [];
+
+      for (const r of regs) {
+        if (r.status === 'annule' || r.status === 'prospect') continue;
+        const d = depByReg[r.id];
+
+        const checks = [
+          { cond: !r.is_insurance_uploaded, type: 'document', title: 'Relancer : attestation d\'assurance manquante', priority: 'haute' },
+          { cond: d && d.status !== 'recue' && r.is_deposit_required, type: 'caution', title: 'Relancer : caution 20 000 XPF non reçue', priority: 'haute' },
+          { cond: !r.is_convention_signed, type: 'validation', title: 'Relancer : convention non signée', priority: 'moyenne' },
+          { cond: r.status === 'a_relancer', type: 'appel', title: 'Relance téléphonique exposant', priority: 'moyenne' },
+        ];
+        for (const c of checks) {
+          if (!c.cond) continue;
+          // Avoid duplicates — same reg + same title already open
+          if (existingTasks.some(t => t.registration_id === r.id && t.title === c.title)) continue;
+          const due = new Date(now); due.setDate(due.getDate() + 7);
+          tasks.push({
+            id: uuid(), registration_id: r.id, task_type: c.type, title: c.title,
+            description: `Auto-généré le ${now.toLocaleDateString('fr-FR')}`,
+            priority: c.priority, status: 'a_faire',
+            due_date: due.toISOString().slice(0, 10),
+            auto_generated: true,
+            created_at: now, updated_at: now,
+          });
+        }
+      }
+      if (tasks.length) await db.collection('tasks_or_followups').insertMany(tasks);
+      return json({ ok: true, created: tasks.length });
+    }
+
+    // ---- Send satisfaction survey invitation campaign (mocked) ----
+    if (route === 'emails/send-satisfaction') {
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID, status: { $in: ['confirme', 'a_confirmer', 'a_relancer'] } }).toArray();
+      const orgIds = [...new Set(regs.map(r => r.organization_id))];
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+
+      const campaignId = uuid();
+      await db.collection('email_campaigns').insertOne({
+        id: campaignId, edition_id: EDITION_ID,
+        name: 'Questionnaire de satisfaction — Forum 2026',
+        template: 'satisfaction_invite', status: 'envoyee',
+        target_filter: { status: ['confirme','a_confirmer','a_relancer'] },
+        sent_count: 0, opened_count: 0, clicked_count: 0,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      let sent = 0;
+      for (const r of regs) {
+        const org = orgById[r.organization_id];
+        if (!org?.main_email) continue;
+        await db.collection('email_messages').insertOne({
+          id: uuid(), campaign_id: campaignId, registration_id: r.id,
+          to_email: org.main_email,
+          subject: '📝 Votre retour sur le Forum de la Rentrée 2026',
+          body_html: `<p>Bonjour ${org.contact_name || ''},</p><p>Merci d'avoir participé au Forum de la Rentrée 2026 !</p><p>Votre avis nous est précieux pour améliorer les prochaines éditions. Merci de prendre 2 minutes pour remplir ce court questionnaire.</p><p><a href="${process.env.NEXT_PUBLIC_BASE_URL || ''}/exposant?tab=satisfaction" style="background:#10b981;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Donner mon avis →</a></p><p>Merci encore et à l'année prochaine !<br>L'équipe ARACOM</p>`,
+          send_status: 'envoye', sent_at: new Date(),
+          opened_at: null, clicked_at: null, response_status: 'attente',
+          provider_message_id: `mock_${uuid()}`,
+          created_at: new Date(), updated_at: new Date(),
+        });
+        sent++;
+      }
+      await db.collection('email_campaigns').updateOne({ id: campaignId }, { $set: { sent_count: sent, updated_at: new Date() } });
+      return json({ ok: true, sent, campaign_id: campaignId });
     }
 
     if (route.match(/^registrations\/[^/]+\/confirm$/)) {

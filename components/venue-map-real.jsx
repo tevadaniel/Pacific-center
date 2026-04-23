@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DoorOpen, Search } from 'lucide-react';
+import { DoorOpen, Search, Printer } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { SVG_PLANS, PLAN_KEY_BY_VENUE, svgCodeToDbCode } from '@/lib/venue-plans';
 
 const STATUS_COLORS = {
@@ -141,14 +142,34 @@ export default function VenueMapReal({ venue, stands = [], highlightStandCode, o
     return <div className="py-6 text-center text-slate-500 text-sm">Plan terrain non disponible pour ce site (affichage schématique utilisé).</div>;
   }
 
-  const counts = useMemo(() => {
+  const printPlan = () => {
+    if (!svgRef.current) return;
+    const svgHtml = svgRef.current.outerHTML;
+    const rows = stands.map(function(s) {
+      const name = (s.organization && s.organization.name) || '—';
+      const disc = (s.organization && s.organization.discipline) || '';
+      const st = s.registration_status || 'libre';
+      return '<tr><td>' + s.stand_code + '</td><td>' + name + '</td><td>' + disc + '</td><td>' + st + '</td></tr>';
+    }).join('');
+    const title = (venue && venue.name) || '';
+    const now = new Date().toLocaleDateString('fr-FR');
+    const head = '<style>body{font-family:Arial,sans-serif;padding:20px;background:#fff;color:#000}h1{margin:0 0 4px}.meta{color:#666;font-size:12px;margin-bottom:16px}.plan{background:#0f172a;padding:12px;border-radius:8px;margin-bottom:20px}svg{width:100%;height:auto;display:block}table{border-collapse:collapse;width:100%;font-size:12px;margin-top:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left}th{background:#f1f5f9;font-weight:600}@media print{.no-print{display:none}}</style>';
+    const body = '<h1>Plan terrain — ' + title + '</h1><div class="meta">Forum de la Rentrée 2026 — ' + now + ' — ' + stands.length + ' stands</div><div class="plan">' + svgHtml + '</div><h2 style="margin-top:24px">Liste des stands et exposants</h2><table><thead><tr><th>Stand</th><th>Exposant</th><th>Discipline</th><th>Statut</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    const w = window.open('', '_blank', 'width=1200,height=900');
+    if (!w) return;
+    w.document.write('<!doctype html><html><head><title>Plan ' + title + '</title>' + head + '</head><body>' + body + '</body></html>');
+    w.document.close();
+    setTimeout(function() { w.print(); }, 600);
+  };
+
+  const counts = (() => {
     const c = { confirme: 0, a_confirmer: 0, a_relancer: 0, prospect: 0, libre: 0 };
     stands.forEach(s => {
       const st = s.organization ? (s.registration_status || 'prospect') : 'libre';
       if (c[st] !== undefined) c[st]++;
     });
     return c;
-  }, [stands]);
+  })();
 
   return (
     <div className="space-y-3">
@@ -161,6 +182,7 @@ export default function VenueMapReal({ venue, stands = [], highlightStandCode, o
           <button onClick={() => setMode('status')} className={`px-3 py-1 text-xs font-medium rounded ${mode === 'status' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Numéros</button>
           <button onClick={() => setMode('names')} className={`px-3 py-1 text-xs font-medium rounded ${mode === 'names' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Noms exposants</button>
         </div>
+        <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={printPlan}><Printer className="w-3.5 h-3.5" /> Imprimer</Button>
       </div>
 
       {/* Vrai plan SVG */}

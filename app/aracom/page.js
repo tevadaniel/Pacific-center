@@ -15,7 +15,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer } from 'lucide-react';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
@@ -162,6 +163,102 @@ function DashboardView({ onGoto }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Graphiques */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Remplissage par site</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={sites.map(s => ({ name: s.venue_name, Attribués: s.assigned, Confirmés: s.confirmed, Libres: s.capacity_stands - s.assigned }))}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Attribués" fill="#94a3b8" />
+                <Bar dataKey="Confirmés" fill="#10b981" />
+                <Bar dataKey="Libres" fill="#e2e8f0" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-600" /> Répartition des statuts</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Confirmés', value: kpis.by_status?.confirme || 0, color: '#10b981' },
+                    { name: 'À confirmer', value: kpis.by_status?.a_confirmer || 0, color: '#f59e0b' },
+                    { name: 'À relancer', value: kpis.by_status?.a_relancer || 0, color: '#f97316' },
+                    { name: 'Prospects', value: kpis.by_status?.prospect || 0, color: '#94a3b8' },
+                  ]}
+                  dataKey="value" nameKey="name" outerRadius={85} innerRadius={50}
+                  label={e => `${e.name} ${e.value}`}
+                  labelLine={false}
+                >
+                  {[0, 1, 2, 3].map(i => <Cell key={i} fill={['#10b981', '#f59e0b', '#f97316', '#94a3b8'][i]} />)}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Outils ARACOM */}
+      <Card className="border-violet-200 bg-gradient-to-br from-violet-50/40 to-white">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Zap className="w-4 h-4 text-violet-600" /> Outils rapides ARACOM</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Automatisations en un clic</p>
+        </CardHeader>
+        <CardContent>
+          <AracomTools onRefresh={load} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AracomTools({ onRefresh }) {
+  const [busy, setBusy] = useState(null);
+  const run = async (route, successMsg, confirmMsg) => {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    setBusy(route);
+    try {
+      const res = await api(route, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(successMsg(res));
+      onRefresh && onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <Button
+        variant="outline" className="h-auto py-3 flex-col items-start gap-1 text-left"
+        disabled={busy !== null} onClick={() => run('/api/tools/recompute-completion', (r) => `Complétion recalculée pour ${r.total} dossiers (${r.updated} mis à jour)`)}
+      >
+        <div className="flex items-center gap-2 font-semibold"><Activity className="w-4 h-4 text-blue-600" /> Recalculer complétion</div>
+        <div className="text-xs text-slate-500 font-normal">Met à jour le % d'avancement de tous les dossiers en fonction des docs/caution/convention</div>
+        {busy === '/api/tools/recompute-completion' && <Badge className="mt-1">En cours…</Badge>}
+      </Button>
+      <Button
+        variant="outline" className="h-auto py-3 flex-col items-start gap-1 text-left"
+        disabled={busy !== null} onClick={() => run('/api/tools/generate-relances', (r) => `${r.created} tâches de relance créées`, 'Générer automatiquement des tâches de relance pour les dossiers incomplets ?')}
+      >
+        <div className="flex items-center gap-2 font-semibold"><Clock className="w-4 h-4 text-orange-600" /> Générer relances auto</div>
+        <div className="text-xs text-slate-500 font-normal">Crée des tâches pour tous les dossiers avec assurance/caution/convention manquantes</div>
+        {busy === '/api/tools/generate-relances' && <Badge className="mt-1">En cours…</Badge>}
+      </Button>
+      <Button
+        variant="outline" className="h-auto py-3 flex-col items-start gap-1 text-left"
+        disabled={busy !== null} onClick={() => run('/api/emails/send-satisfaction', (r) => `${r.sent} invitations satisfaction envoyées (mock)`, 'Envoyer la campagne de questionnaire de satisfaction à tous les exposants confirmés ?')}
+      >
+        <div className="flex items-center gap-2 font-semibold"><ThumbsUp className="w-4 h-4 text-emerald-600" /> Campagne satisfaction</div>
+        <div className="text-xs text-slate-500 font-normal">Envoie l'invitation au questionnaire à tous les exposants inscrits</div>
+        {busy === '/api/emails/send-satisfaction' && <Badge className="mt-1">En cours…</Badge>}
+      </Button>
     </div>
   );
 }

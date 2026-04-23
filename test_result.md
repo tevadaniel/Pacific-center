@@ -330,6 +330,51 @@ backend:
         agent: "testing"
         comment: "✅ TESTÉ - POST satisfaction: upsert fonctionne (200 update, 201 create), validation 400 sans registration_id, 404 registration_id inexistant. GET satisfaction: liste enrichie avec organization_name/venue_name/stand_code, filtre registration_id OK. GET satisfaction/stats: total_responses=2, avg_overall=4.0, NPS=0 calculé correctement (promoters≥9, detractors≤6), will_participate répartition OK, by_site avec moyennes par venue. Tous les 9 scénarios de test passés."
 
+  - task: "Outils ARACOM automatisation : recompute-completion"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/tools/recompute-completion recalcule le % de complétion de TOUTES les registrations. Utilise les flags is_insurance_uploaded, is_deposit_received, is_convention_signed, présence d'un stand_code, status. Retourne { ok: true, total: <nb_total>, updated: <nb_modifiés> }."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - POST /api/tools/recompute-completion avec body vide {} retourne 200 avec total=67, updated=67. Recalcule correctement le pourcentage de complétion pour toutes les registrations de l'édition en cours. Logique basée sur status, stand affecté, assurance, caution, convention."
+
+  - task: "Outils ARACOM automatisation : generate-relances"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/tools/generate-relances génère des tâches de relance auto pour dossiers incomplets. Pour chaque registration active, crée des tasks dans tasks_or_followups si manque: assurance → tâche 'Relancer : attestation d'assurance manquante' (priorité haute), caution non reçue → 'Relancer : caution 20 000 XPF non reçue' (haute), convention non signée → 'Relancer : convention non signée' (moyenne), status = a_relancer → 'Relance téléphonique exposant' (moyenne). IDEMPOTENT."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - POST /api/tools/generate-relances avec body vide {} retourne 200. Premier appel: created=202 tâches auto-générées avec auto_generated=true, priorités haute/moyenne selon type. Deuxième appel: created=0 (idempotent). Tâches créées pour assurance manquante, caution non reçue, convention non signée, relances téléphoniques. Évite les doublons."
+
+  - task: "Outils ARACOM automatisation : send-satisfaction"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/emails/send-satisfaction lance campagne questionnaire satisfaction (mock). Crée une entrée dans email_campaigns avec template 'satisfaction_invite'. Crée des documents dans email_messages avec subject contenant 'Votre retour sur le Forum'. Un message par registration avec status confirme/a_confirmer/a_relancer qui a un main_email. Retourne { ok: true, sent: <nb>, campaign_id: <uuid> }."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - POST /api/emails/send-satisfaction avec body vide {} retourne 200 avec sent=46, campaign_id généré. Crée campagne avec template 'satisfaction_invite' et 46 messages email avec subject '📝 Votre retour sur le Forum de la Rentrée 2026'. Emails envoyés aux registrations avec status confirme/a_confirmer/a_relancer ayant un main_email. Campagne visible via GET /api/emails."
+
 frontend:
   - task: "Page de connexion + seed démo"
     implemented: true
@@ -399,8 +444,8 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.1"
-  test_sequence: 2
+  version: "2.2"
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -441,3 +486,5 @@ agent_communication:
     message: "PLANS TERRAIN OFFICIELS INTÉGRÉS (session 5) :\n1. L'utilisateur a partagé /artifacts/plans_terrain_v5.html — 4 vrais plans SVG des sites (Arue 12 stands, Taravao 12, Faa'a 16, Punaauia 13).\n2. Extraction automatique via Python des 4 SVG → stockés dans /app/lib/venue-plans.js avec mapping SVG code (A01) → DB code (A-C01) etc.\n3. Nouveau composant /app/components/venue-map-real.jsx :\n   - Rend le vrai plan SVG (noir, ENTRÉE, Carrefour, DÉMO ovale, Kiosque, Commerce)\n   - Injection DOM via innerHTML dans useEffect (pas dangerouslySetInnerHTML) pour contrôler le timing\n   - Coloration des stands par statut via setAttribute/style (confirme emerald / a_confirmer amber / a_relancer orange / prospect slate / libre cyan)\n   - Toggle Numéros / Noms exposants sur le SVG directement\n   - Recherche qui dim les stands non matchés (opacity)\n   - Click + hover avec tooltip info\n   - Highlight stroke bleu + drop-shadow du stand de l'exposant\n4. Nouveau composant /app/components/smart-venue-map.jsx qui dispatch automatiquement : si site a un plan SVG → VenueMapReal, sinon → VenueMap schématique (Mahina/Moorea).\n5. Intégré dans ARACOM, Pacific Centers, Exposant. Testé : coloration OK, click ouvre le Sheet d'affectation, highlight stand de l'exposant OK.\nAucun changement backend. Pas de re-test backend nécessaire."
   - agent: "testing"
     message: "TESTS ENDPOINTS SATISFACTION COMPLÉTÉS ✅. Testé les 3 nouveaux endpoints selon les 9 scénarios requis : POST /api/satisfaction (upsert par registration_id avec validation 400/404), GET /api/satisfaction (liste enrichie + filtre registration_id), GET /api/satisfaction/stats (agrégats complets). Vérifications : upsert fonctionne (200 update, 201 create), enrichissement avec organization_name/venue_name/stand_code, NPS calculé correctement (promoters≥9, detractors≤6), moyennes exactes, répartition will_participate, stats par site. Tous les tests passés, API satisfaction prête pour production."
+  - agent: "testing"
+    message: "TESTS 3 NOUVEAUX ENDPOINTS ARACOM AUTOMATISATION — 7/7 TESTS PASSÉS ✅. Testé exhaustivement selon les scénarios requis : 1) POST /api/seed force=true → 66 associations, 67 stands. 2) POST /api/tools/recompute-completion → total=67, updated=67 (recalcule % complétion). 3) POST /api/tools/generate-relances → created=202 tâches (1er appel), created=0 (2e appel idempotent). 4) POST /api/emails/send-satisfaction → sent=46 emails, campaign_id généré. Vérifications : tâches auto-générées avec auto_generated=true, priorités haute/moyenne, emails avec subject 'Votre retour sur le Forum', campagne satisfaction_invite créée. Tous les endpoints fonctionnent parfaitement selon les spécifications."
