@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { FileUploadButton } from '@/components/file-upload';
-import VenueMap from '@/components/venue-map';
+import SmartVenueMap from '@/components/smart-venue-map';
 import { toast } from 'sonner';
 import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft, ListChecks, MessageCircle, ThumbsUp, Send, Smile } from 'lucide-react';
 import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL, EVENT_DATES } from '@/lib/constants';
@@ -333,7 +333,7 @@ function StandMapBlock({ venueId, currentStandCode }) {
         )}
       </CardHeader>
       <CardContent>
-        <VenueMap
+        <SmartVenueMap
           stands={stands}
           venue={selectedVenue}
           highlightStandCode={isOwnVenue ? currentStandCode : null}

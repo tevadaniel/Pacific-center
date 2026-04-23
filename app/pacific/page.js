@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Sparkles, LayoutGrid, FileText, Activity } from 'lucide-react';
-import VenueMap from '@/components/venue-map';
+import SmartVenueMap from '@/components/smart-venue-map';
 
 export default function PacificCentersPage() {
   return (
@@ -134,7 +134,7 @@ function SitesView() {
           <p className="text-xs text-slate-500 mt-1">{stands.length} stands • {occupied} attribués • {stands.length - occupied} libres</p>
         </CardHeader>
         <CardContent>
-          <VenueMap stands={stands} venue={selectedVenue} />
+          <SmartVenueMap stands={stands} venue={selectedVenue} />
         </CardContent>
       </Card>
       <Card>

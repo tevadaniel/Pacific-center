@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar } from 'lucide-react';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
-import VenueMap from '@/components/venue-map';
+import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
 
 const TABS = [
@@ -585,7 +585,7 @@ function SitesView() {
       </div>
 
       {selected && (
-        <VenueMap
+        <SmartVenueMap
           stands={stands}
           venue={venues.find(v => v.id === selected)}
           onStandClick={(s) => setEditStand(s)}
