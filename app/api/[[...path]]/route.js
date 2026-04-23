@@ -909,18 +909,31 @@ export async function POST(request, { params }) {
         const anomalies = await db.collection('registration_anomalies').find({ registration_id }).toArray();
         const comments = await db.collection('field_comments').find({ registration_id }).toArray();
         const dep = await db.collection('deposit_transactions').findOne({ registration_id });
-        // Compute recommended deposit
+        const docs = await db.collection('documents').find({ registration_id }).toArray();
+        const satisfaction = await db.collection('satisfaction_surveys').findOne({ registration_id, edition_id: EDITION_ID });
         let recommended = 'restitution';
         if (anomalies.some(a => ['absent_sans_prevenir','degradation','probleme_securite'].includes(a.anomaly_type))) recommended = 'retenue_totale';
         else if (anomalies.some(a => a.severity_level === 'haute' || a.severity_level === 'critique')) recommended = 'retenue_partielle';
         else if (anomalies.length) recommended = 'verification_manuelle';
         const data = {
           exposant: org?.name, discipline: org?.discipline,
-          site: venue?.name, stand: reg?.stand_code,
+          contact_name: org?.contact_name, contact_email: org?.main_email, contact_phone: org?.main_phone,
+          site: venue?.name, stand: reg?.stand_code, status: reg?.status, completion_percent: reg?.completion_percent,
+          documents: { uploaded: docs.length, validated: docs.filter(d => d.validation_status === 'valide').length, pending: docs.filter(d => d.validation_status === 'en_attente').length, refused: docs.filter(d => d.validation_status === 'refuse').length },
+          caution: { status: dep?.status, amount_xpf: dep?.amount_xpf || 20000, received_at: dep?.received_at, post_event_review_status: dep?.post_event_review_status },
           sessions: sessions.map(s => ({ date: s.event_date, expected_arrival: s.expected_arrival_time, actual_arrival: s.actual_arrival_time, expected_departure: s.expected_departure_time, actual_departure: s.actual_departure_time, presence: s.presence_status, animation_completed: s.is_animation_completed })),
           anomalies_count: anomalies.length,
           anomalies: anomalies.map(a => ({ type: a.anomaly_type, severity: a.severity_level, title: a.title, description: a.description })),
           comments: comments.map(c => ({ type: c.comment_type, text: c.comment_text })),
+          satisfaction: satisfaction ? {
+            submitted_at: satisfaction.submitted_at,
+            overall_rating: satisfaction.overall_rating, organization_rating: satisfaction.organization_rating,
+            stand_rating: satisfaction.stand_rating, visitors_rating: satisfaction.visitors_rating,
+            communication_rating: satisfaction.communication_rating, nps_score: satisfaction.nps_score,
+            will_participate_next: satisfaction.will_participate_next,
+            positive_points: satisfaction.positive_points, improvement_points: satisfaction.improvement_points,
+            free_comment: satisfaction.free_comment,
+          } : null,
           deposit_amount_xpf: dep?.amount_xpf, recommended_deposit_action: recommended,
         };
         const report = {
@@ -932,7 +945,6 @@ export async function POST(request, { params }) {
           created_at: now, updated_at: now,
         };
         await db.collection('post_event_reports').insertOne(report);
-        // Update deposit recommendation
         if (dep) await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: { post_event_review_status: recommended === 'restitution' ? 'a_restituer' : (recommended === 'retenue_totale' ? 'retenue_totale' : (recommended === 'retenue_partielle' ? 'retenue_partielle' : 'verification_manuelle')), post_event_review_comment: `Bilan auto: ${anomalies.length} anomalie(s)`, updated_at: now } });
         delete report._id;
         return json(report, 201);
@@ -945,17 +957,28 @@ export async function POST(request, { params }) {
         const sessionsQ = { venue_id }; if (event_date) sessionsQ.event_date = event_date;
         const sessions = await db.collection('attendance_sessions').find(sessionsQ).toArray();
         const anomalies = await db.collection('registration_anomalies').find({ venue_id, ...(event_date ? { event_date } : {}) }).toArray();
+        const deposits = await db.collection('deposit_transactions').find({ registration_id: { $in: regs.map(r => r.id) } }).toArray();
+        const surveys = await db.collection('satisfaction_surveys').find({ registration_id: { $in: regs.map(r => r.id) } }).toArray();
         const present = sessions.filter(s => ['arrive','parti','depart_anticipe'].includes(s.presence_status)).length;
         const absent = sessions.filter(s => s.presence_status === 'absent').length;
         const late = sessions.filter(s => s.actual_arrival_time && s.expected_arrival_time && s.actual_arrival_time > s.expected_arrival_time).length;
         const early_leave = sessions.filter(s => s.presence_status === 'depart_anticipe').length;
+        const cautionsRecues = deposits.filter(d => d.status === 'recue').length;
+        const avg = (arr, k) => { const v = arr.map(x => x[k]).filter(n => typeof n === 'number'); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; };
+        const npsValues = surveys.map(s => s.nps_score).filter(v => typeof v === 'number');
+        let nps = null;
+        if (npsValues.length) { const pr = npsValues.filter(v => v>=9).length; const dt = npsValues.filter(v => v<=6).length; nps = Math.round(((pr-dt)/npsValues.length)*100); }
         const data = {
-          site: venue?.name, event_date: event_date || 'tous les jours',
+          site: venue?.name, event_date: event_date || 'les deux journées',
+          exposants_total: regs.length, exposants_confirmes: regs.filter(r => r.status === 'confirme').length,
           expected: sessions.length, present, absent, late, early_leave,
           taux_presence: sessions.length > 0 ? Math.round((present / sessions.length) * 100) : 0,
+          cautions_recues: cautionsRecues, cautions_total_attendu: regs.length, cautions_xpf_encaisse: cautionsRecues * 20000,
           anomalies_count: anomalies.length,
+          anomalies_by_severity: anomalies.reduce((acc, a) => { acc[a.severity_level || 'non_critique'] = (acc[a.severity_level || 'non_critique'] || 0) + 1; return acc; }, {}),
           incidents_majeurs: anomalies.filter(a => a.severity_level === 'haute' || a.severity_level === 'critique').map(a => ({ exposant: orgById[regs.find(r => r.id === a.registration_id)?.organization_id]?.name, type: a.anomaly_type, title: a.title })),
-          exposants: regs.map(r => ({ name: orgById[r.organization_id]?.name, stand: r.stand_code, status: r.status })),
+          satisfaction: { total_responses: surveys.length, response_rate: regs.length ? Math.round((surveys.length/regs.length)*100) : 0, avg_overall: avg(surveys,'overall_rating'), avg_organization: avg(surveys,'organization_rating'), avg_stand: avg(surveys,'stand_rating'), avg_visitors: avg(surveys,'visitors_rating'), avg_communication: avg(surveys,'communication_rating'), nps, will_participate_yes: surveys.filter(s => s.will_participate_next === 'oui').length },
+          exposants: regs.map(r => ({ name: orgById[r.organization_id]?.name, discipline: orgById[r.organization_id]?.discipline, stand: r.stand_code, status: r.status })),
         };
         const report = {
           id: uuid(), edition_id: EDITION_ID, venue_id, registration_id: null,
@@ -972,11 +995,23 @@ export async function POST(request, { params }) {
       if (scope === 'bilan_global') {
         const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
         const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+        const orgs = await db.collection('organizations').find({}).toArray();
+        const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
         const sessions = await db.collection('attendance_sessions').find({}).toArray();
         const anomalies = await db.collection('registration_anomalies').find({}).toArray();
+        const deposits = await db.collection('deposit_transactions').find({}).toArray();
+        const surveys = await db.collection('satisfaction_surveys').find({ edition_id: EDITION_ID }).toArray();
+        const docs = await db.collection('documents').find({}).toArray();
+        const cautionsRecues = deposits.filter(d => d.status === 'recue').length;
+        const avg = (arr, k) => { const v = arr.map(x => x[k]).filter(n => typeof n === 'number'); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; };
+        const npsValues = surveys.map(s => s.nps_score).filter(v => typeof v === 'number');
+        let nps = null;
+        if (npsValues.length) { const pr = npsValues.filter(v => v>=9).length; const dt = npsValues.filter(v => v<=6).length; nps = Math.round(((pr-dt)/npsValues.length)*100); }
         const data = {
-          edition: 'Forum de la Rentrée 2026', venues_count: venues.length,
+          edition: 'Forum de la Rentrée 2026', dates: '14 & 15 août 2026',
+          venues_count: venues.length,
           total_exposants: regs.length,
+          by_status: regs.reduce((acc, r) => { acc[r.status || 'prospect'] = (acc[r.status || 'prospect'] || 0) + 1; return acc; }, {}),
           total_confirmed: regs.filter(r => r.status === 'confirme').length,
           total_sessions: sessions.length,
           total_present: sessions.filter(s => ['arrive','parti','depart_anticipe'].includes(s.presence_status)).length,
@@ -984,7 +1019,14 @@ export async function POST(request, { params }) {
           total_anomalies: anomalies.length,
           anomalies_by_type: anomalies.reduce((acc, a) => { acc[a.anomaly_type] = (acc[a.anomaly_type] || 0) + 1; return acc; }, {}),
           anomalies_by_severity: anomalies.reduce((acc, a) => { acc[a.severity_level] = (acc[a.severity_level] || 0) + 1; return acc; }, {}),
-          by_site: venues.map(v => ({ site: v.name, exposants: regs.filter(r => r.venue_id === v.id).length, anomalies: anomalies.filter(a => a.venue_id === v.id).length })),
+          cautions: { recues: cautionsRecues, attendues: regs.length, xpf_encaisse: cautionsRecues * 20000, xpf_attendu: regs.length * 20000, taux_recuperation: regs.length ? Math.round((cautionsRecues/regs.length)*100) : 0 },
+          documents: { total: docs.length, valides: docs.filter(d => d.validation_status === 'valide').length, en_attente: docs.filter(d => d.validation_status === 'en_attente').length, refuses: docs.filter(d => d.validation_status === 'refuse').length },
+          satisfaction: { total_responses: surveys.length, response_rate: regs.length ? Math.round((surveys.length/regs.length)*100) : 0, avg_overall: avg(surveys,'overall_rating'), avg_organization: avg(surveys,'organization_rating'), avg_stand: avg(surveys,'stand_rating'), avg_visitors: avg(surveys,'visitors_rating'), avg_communication: avg(surveys,'communication_rating'), nps, will_participate_yes: surveys.filter(s => s.will_participate_next === 'oui').length, will_participate_maybe: surveys.filter(s => s.will_participate_next === 'peut_etre').length, will_participate_no: surveys.filter(s => s.will_participate_next === 'non').length, top_positives: surveys.map(s => s.positive_points).filter(Boolean).slice(0, 5), top_improvements: surveys.map(s => s.improvement_points).filter(Boolean).slice(0, 5) },
+          by_site: venues.map(v => {
+            const vregs = regs.filter(r => r.venue_id === v.id);
+            const vsurveys = surveys.filter(s => vregs.some(r => r.id === s.registration_id));
+            return { site: v.name, exposants: vregs.length, confirmes: vregs.filter(r => r.status === 'confirme').length, anomalies: anomalies.filter(a => a.venue_id === v.id).length, satisfaction_responses: vsurveys.length, satisfaction_avg: avg(vsurveys, 'overall_rating') };
+          }),
         };
         const report = {
           id: uuid(), edition_id: EDITION_ID, venue_id: null, registration_id: null,

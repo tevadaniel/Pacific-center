@@ -689,6 +689,8 @@ function SitesView() {
         />
       )}
 
+      {selected && <ConfirmedExposantsPanel stands={stands} venue={venues.find(v => v.id === selected)} />}
+
       <Sheet open={!!editStand} onOpenChange={(o) => !o && setEditStand(null)}>
         <SheetContent className="w-full sm:max-w-md">
           {editStand && (
@@ -731,12 +733,30 @@ function SitesView() {
 function CautionsView() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [venueFilter, setVenueFilter] = useState('all');
   useEffect(() => { api('/api/registrations').then(r => { setRows(r); setLoading(false); }); }, []);
   const updateStatus = async (depId, status) => {
     await api(`/api/deposits/${depId}`, { method: 'PUT', body: JSON.stringify({ status }) });
     const r = await api('/api/registrations'); setRows(r);
     toast.success('Caution mise à jour');
   };
+
+  const venues = [...new Set(rows.map(r => r.venue?.name).filter(Boolean))].sort();
+  const filtered = rows.filter(r => {
+    if (statusFilter !== 'all' && r.deposit?.status !== statusFilter) return false;
+    if (venueFilter !== 'all' && r.venue?.name !== venueFilter) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const hit = (r.organization?.name || '').toLowerCase().includes(q) ||
+        (r.organization?.discipline || '').toLowerCase().includes(q) ||
+        (r.stand_code || '').toLowerCase().includes(q) ||
+        (r.organization?.main_email || '').toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  });
   const totalExpected = rows.length * 20000;
   const totalReceived = rows.filter(r => r.deposit?.status === 'recue').length * 20000;
   return (
@@ -747,16 +767,42 @@ function CautionsView() {
         <KpiCard label="Reçues" value={rows.filter(r => r.deposit?.status === 'recue').length} accent="emerald" />
         <KpiCard label="Non demandées" value={rows.filter(r => !r.deposit || r.deposit.status === 'non_demandee').length} accent="slate" />
       </div>
-      <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => exportCautionsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button></div>
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Input placeholder="Rechercher un exposant, stand, email, discipline…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <Select value={venueFilter} onValueChange={setVenueFilter}>
+              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Site" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les sites</SelectItem>
+                {venues.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Statut" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous statuts</SelectItem>
+                {DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" onClick={() => exportCautionsCSV(filtered)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
+            <div className="text-xs text-slate-500 font-medium whitespace-nowrap">{filtered.length} / {rows.length}</div>
+          </div>
+        </CardContent>
+      </Card>
       <Card><CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Statut</th><th>Actions</th></tr></thead>
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Email</th><th>Statut</th><th>Actions</th></tr></thead>
           <tbody className="divide-y">
-            {loading ? <tr><td colSpan="5" className="py-6 text-center text-slate-400">…</td></tr> : rows.map(r => (
-              <tr key={r.id}>
-                <td className="py-2 px-4 font-medium">{r.organization?.name}</td>
+            {loading ? <tr><td colSpan="6" className="py-6 text-center text-slate-400">…</td></tr> : filtered.length === 0 ? <tr><td colSpan="6" className="py-6 text-center text-slate-400">Aucun résultat</td></tr> : filtered.map(r => (
+              <tr key={r.id} className="hover:bg-slate-50/50">
+                <td className="py-2 px-4"><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
                 <td>{r.venue?.name}</td>
                 <td className="font-mono text-xs">{r.stand_code}</td>
+                <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
                 <td><Badge variant={r.deposit?.status === 'recue' ? 'default' : 'secondary'} className={r.deposit?.status === 'recue' ? 'bg-emerald-600' : ''}>{DEPOSIT_STATUS_LABEL[r.deposit?.status] || '—'}</Badge></td>
                 <td className="py-1 pr-4">
                   <Select value={r.deposit?.status} onValueChange={v => updateStatus(r.deposit.id || r.deposit._id, v)}>
@@ -909,8 +955,212 @@ function openReport(r) {
   const w = window.open('', '_blank');
   if (!w) return;
   const data = r.report_data_json || {};
-  const rows = Object.entries(data).map(([k, v]) => `<tr><th>${k}</th><td>${typeof v === 'object' ? `<pre>${JSON.stringify(v, null, 2)}</pre>` : v}</td></tr>`).join('');
-  w.document.write(`<!doctype html><html><head><title>Bilan ${r.report_type}</title><style>body{font-family:system-ui,sans-serif;padding:32px;max-width:900px;margin:auto;color:#0f172a}h1{font-size:22px;margin:0 0 4px}h2{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin:0 0 24px}table{border-collapse:collapse;width:100%;margin-top:12px}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top}th{background:#f8fafc;width:260px;font-weight:600;color:#334155}pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow:auto;font-size:12px}.meta{color:#64748b;font-size:12px;margin-bottom:24px}button{position:fixed;top:16px;right:16px;padding:8px 16px;border-radius:6px;background:#2563eb;color:#fff;border:0;cursor:pointer}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimer / PDF</button><h1>Bilan — ${r.report_type}</h1><h2>Forum de la Rentrée 2026</h2><div class="meta">Généré le ${new Date(r.generated_at).toLocaleString('fr-FR')} • Statut : ${r.report_status}</div><table>${rows}</table></body></html>`);
+  const type = r.report_type;
+  const generatedAt = new Date(r.generated_at).toLocaleString('fr-FR');
+
+  // Helpers for PDF-ready HTML
+  const num = (n) => (typeof n === 'number' ? n.toLocaleString('fr-FR') : (n ?? '—'));
+  const pct = (n) => (n == null ? '—' : n + '%');
+  const rating = (n) => {
+    if (n == null) return '—';
+    const stars = '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+    return `<span style="color:#f59e0b">${stars}</span> <span style="color:#64748b">${n}/5</span>`;
+  };
+  const kpi = (label, val, hint) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${val}</div>${hint ? `<div class="kpi-hint">${hint}</div>` : ''}</div>`;
+  const section = (title, body) => `<section><h3>${title}</h3>${body}</section>`;
+  const table = (headers, rows) => `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}}</td>`).join('')}</tr>`).join('')}</tbody></table>`.replace(/\}\}/g,'}');
+
+  let titleLabel = 'Bilan', subtitle = '', kpis = '', body = '';
+
+  if (type === 'bilan_global') {
+    titleLabel = 'Bilan Global — Forum de la Rentrée 2026';
+    subtitle = data.dates || '14 & 15 août 2026';
+    kpis = [
+      kpi('Sites', num(data.venues_count), 'sites actifs'),
+      kpi('Exposants', num(data.total_exposants), `${num(data.total_confirmed)} confirmés`),
+      kpi('Taux présence', data.total_sessions ? Math.round((data.total_present/data.total_sessions)*100)+'%' : '—', `${num(data.total_present)}/${num(data.total_sessions)}`),
+      kpi('Cautions', (data.cautions?.xpf_encaisse || 0).toLocaleString('fr-FR')+' XPF', `${num(data.cautions?.recues)}/${num(data.cautions?.attendues)}`),
+      kpi('Anomalies', num(data.total_anomalies), 'signalées'),
+      kpi('NPS Satisfaction', data.satisfaction?.nps ?? '—', `${num(data.satisfaction?.total_responses)} réponses`),
+    ].join('');
+    const byStatus = Object.entries(data.by_status || {}).map(([k,v])=>`<tr><td>${k}</td><td style="text-align:right"><b>${v}</b></td></tr>`).join('');
+    const bySiteRows = (data.by_site || []).map(s => `<tr><td>${s.site}</td><td style="text-align:center">${s.exposants}</td><td style="text-align:center">${s.confirmes}</td><td style="text-align:center">${s.anomalies}</td><td style="text-align:center">${s.satisfaction_responses || 0}</td><td style="text-align:center">${s.satisfaction_avg ? s.satisfaction_avg.toFixed(1)+'★' : '—'}</td></tr>`).join('');
+    const anoSev = Object.entries(data.anomalies_by_severity || {}).map(([k,v])=>`<tr><td>${k}</td><td style="text-align:right"><b>${v}</b></td></tr>`).join('');
+    const sat = data.satisfaction || {};
+    const satBody = sat.total_responses > 0 ? `
+      <div class="grid2">
+        <div><b>Répartition participation prochaine édition</b>
+          <ul>
+            <li>✅ Oui : ${sat.will_participate_yes || 0}</li>
+            <li>🤔 Peut-être : ${sat.will_participate_maybe || 0}</li>
+            <li>❌ Non : ${sat.will_participate_no || 0}</li>
+          </ul>
+        </div>
+        <div><b>Notes moyennes</b>
+          <ul>
+            <li>Note globale : ${rating(sat.avg_overall)}</li>
+            <li>Organisation : ${rating(sat.avg_organization)}</li>
+            <li>Stand : ${rating(sat.avg_stand)}</li>
+            <li>Visiteurs : ${rating(sat.avg_visitors)}</li>
+            <li>Communication : ${rating(sat.avg_communication)}</li>
+          </ul>
+        </div>
+      </div>
+      ${sat.top_positives?.length ? `<div style="margin-top:12px"><b>Points positifs remontés</b><ul>${sat.top_positives.map(p=>`<li>« ${p} »</li>`).join('')}</ul></div>` : ''}
+      ${sat.top_improvements?.length ? `<div style="margin-top:12px"><b>Points d'amélioration</b><ul>${sat.top_improvements.map(p=>`<li>« ${p} »</li>`).join('')}</ul></div>` : ''}
+    ` : '<p style="color:#94a3b8;font-style:italic">Aucun retour exposant reçu.</p>';
+    body = `
+      ${section('Vue par site', `<table><thead><tr><th>Site</th><th>Exposants</th><th>Confirmés</th><th>Anomalies</th><th>Sat.</th><th>Note moy.</th></tr></thead><tbody>${bySiteRows}</tbody></table>`)}
+      ${section('Statuts des dossiers', `<table><tbody>${byStatus}</tbody></table>`)}
+      ${section('Situation cautions', `
+        <div class="grid3">
+          ${kpi('Reçues', num(data.cautions?.recues), `/${num(data.cautions?.attendues)}`)}
+          ${kpi('XPF encaissés', (data.cautions?.xpf_encaisse||0).toLocaleString('fr-FR'), 'sur '+(data.cautions?.xpf_attendu||0).toLocaleString('fr-FR'))}
+          ${kpi('Taux récupération', pct(data.cautions?.taux_recuperation), '')}
+        </div>
+      `)}
+      ${section('Documents', `
+        <div class="grid3">
+          ${kpi('Validés', num(data.documents?.valides), `/${num(data.documents?.total)}`)}
+          ${kpi('En attente', num(data.documents?.en_attente), '')}
+          ${kpi('Refusés', num(data.documents?.refuses), '')}
+        </div>
+      `)}
+      ${anoSev ? section('Anomalies par gravité', `<table><tbody>${anoSev}</tbody></table>`) : ''}
+      ${section('Satisfaction exposants', satBody)}
+    `;
+  } else if (type === 'bilan_site') {
+    titleLabel = `Bilan Site — ${data.site || ''}`;
+    subtitle = `Journée : ${data.event_date || 'Tout l\'évènement'}`;
+    kpis = [
+      kpi('Exposants', num(data.exposants_total), `${num(data.exposants_confirmes)} confirmés`),
+      kpi('Taux présence', pct(data.taux_presence), `${num(data.present)}/${num(data.expected)}`),
+      kpi('Absences', num(data.absent), 'non excusées incluses'),
+      kpi('Cautions', num(data.cautions_recues), `${(data.cautions_xpf_encaisse||0).toLocaleString('fr-FR')} XPF`),
+      kpi('Anomalies', num(data.anomalies_count), 'signalées'),
+      kpi('Satisfaction', data.satisfaction?.avg_overall ? data.satisfaction.avg_overall.toFixed(1)+' ★' : '—', `${num(data.satisfaction?.total_responses)} réponses`),
+    ].join('');
+    const exposantsRows = (data.exposants || []).map(e => `<tr><td>${e.name || '—'}</td><td>${e.discipline || ''}</td><td style="font-family:monospace">${e.stand || ''}</td><td><span class="badge badge-${e.status}">${e.status}</span></td></tr>`).join('');
+    const incidentsRows = (data.incidents_majeurs || []).map(i => `<tr><td>${i.exposant || '—'}</td><td>${i.type}</td><td>${i.title}</td></tr>`).join('');
+    const sat = data.satisfaction || {};
+    body = `
+      ${section('Liste des exposants', `<table><thead><tr><th>Exposant</th><th>Discipline</th><th>Stand</th><th>Statut</th></tr></thead><tbody>${exposantsRows}</tbody></table>`)}
+      ${incidentsRows ? section('Incidents majeurs', `<table><thead><tr><th>Exposant</th><th>Type</th><th>Titre</th></tr></thead><tbody>${incidentsRows}</tbody></table>`) : ''}
+      ${section('Présence terrain', `
+        <div class="grid4">
+          ${kpi('Présents', num(data.present))}
+          ${kpi('Retardataires', num(data.late))}
+          ${kpi('Absents', num(data.absent))}
+          ${kpi('Départs anticipés', num(data.early_leave))}
+        </div>
+      `)}
+      ${sat.total_responses ? section('Satisfaction exposants', `
+        <div class="grid3">
+          ${kpi('Taux réponse', pct(sat.response_rate), `${sat.total_responses} sur ${data.exposants_total}`)}
+          ${kpi('Note globale', rating(sat.avg_overall))}
+          ${kpi('NPS', sat.nps ?? '—')}
+        </div>
+        <div class="grid2" style="margin-top:8px">
+          ${kpi('Organisation', rating(sat.avg_organization))}
+          ${kpi('Stand', rating(sat.avg_stand))}
+          ${kpi('Visiteurs', rating(sat.avg_visitors))}
+          ${kpi('Communication', rating(sat.avg_communication))}
+        </div>
+      `) : ''}
+    `;
+  } else if (type === 'bilan_exposant') {
+    titleLabel = `Bilan Exposant — ${data.exposant || ''}`;
+    subtitle = `${data.discipline || ''} • ${data.site || ''} • Stand ${data.stand || ''}`;
+    kpis = [
+      kpi('Statut dossier', data.status || '—', `${data.completion_percent || 0}% complété`),
+      kpi('Documents', `${num(data.documents?.validated)}/${num(data.documents?.uploaded)}`, 'validés'),
+      kpi('Caution', data.caution?.status || '—', `${num(data.caution?.amount_xpf)} XPF`),
+      kpi('Anomalies', num(data.anomalies_count), data.recommended_deposit_action),
+    ].join('');
+    const sessionsRows = (data.sessions || []).map(s => `<tr><td>${s.date || '—'}</td><td>${s.expected_arrival || '—'}</td><td>${s.actual_arrival || '—'}</td><td><b>${s.presence || '—'}</b></td><td>${s.animation_completed ? '✅' : '—'}</td></tr>`).join('');
+    const anoRows = (data.anomalies || []).map(a => `<tr><td>${a.type}</td><td><span class="badge badge-${a.severity}">${a.severity}</span></td><td>${a.title || ''}</td><td>${a.description || ''}</td></tr>`).join('');
+    const sat = data.satisfaction;
+    body = `
+      ${section('Contact', `<table><tbody>
+        <tr><th>Nom du contact</th><td>${data.contact_name || '—'}</td></tr>
+        <tr><th>Email</th><td>${data.contact_email || '—'}</td></tr>
+        <tr><th>Téléphone</th><td>${data.contact_phone || '—'}</td></tr>
+      </tbody></table>`)}
+      ${sessionsRows ? section('Présence terrain', `<table><thead><tr><th>Date</th><th>Prévu</th><th>Réel</th><th>Statut</th><th>Animation</th></tr></thead><tbody>${sessionsRows}</tbody></table>`) : ''}
+      ${anoRows ? section('Anomalies rencontrées', `<table><thead><tr><th>Type</th><th>Gravité</th><th>Titre</th><th>Détail</th></tr></thead><tbody>${anoRows}</tbody></table>`) : ''}
+      ${sat ? section('Satisfaction — retour exposant', `
+        <div class="grid3">
+          ${kpi('Note globale', rating(sat.overall_rating))}
+          ${kpi('NPS', sat.nps_score ?? '—')}
+          ${kpi('Participation prochaine', sat.will_participate_next === 'oui' ? '✅ Oui' : sat.will_participate_next === 'peut_etre' ? '🤔 Peut-être' : sat.will_participate_next === 'non' ? '❌ Non' : '—')}
+        </div>
+        <div class="grid4" style="margin-top:8px">
+          ${kpi('Organisation', rating(sat.organization_rating))}
+          ${kpi('Stand', rating(sat.stand_rating))}
+          ${kpi('Visiteurs', rating(sat.visitors_rating))}
+          ${kpi('Communication', rating(sat.communication_rating))}
+        </div>
+        ${sat.positive_points ? `<p style="margin-top:12px"><b>Points positifs :</b> ${sat.positive_points}</p>` : ''}
+        ${sat.improvement_points ? `<p><b>Points à améliorer :</b> ${sat.improvement_points}</p>` : ''}
+        ${sat.free_comment ? `<p><b>Commentaire :</b> ${sat.free_comment}</p>` : ''}
+      `) : '<section><h3>Satisfaction</h3><p style="color:#94a3b8;font-style:italic">Pas encore de retour de l\'exposant.</p></section>'}
+      ${section('Recommandation caution', `
+        <div style="padding:16px;background:${data.recommended_deposit_action === 'restitution' ? '#d1fae5' : data.recommended_deposit_action === 'retenue_totale' ? '#fee2e2' : '#fef3c7'};border-radius:8px;border-left:4px solid ${data.recommended_deposit_action === 'restitution' ? '#10b981' : data.recommended_deposit_action === 'retenue_totale' ? '#ef4444' : '#f59e0b'};">
+          <b>Action recommandée : </b>${data.recommended_deposit_action}
+        </div>
+      `)}
+    `;
+  } else {
+    body = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+  }
+
+  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${titleLabel}</title><style>
+    @page { margin: 20mm; }
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px;max-width:900px;margin:auto;color:#0f172a;background:#fff;line-height:1.5}
+    .header{border-bottom:3px solid #2563eb;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:start}
+    .header-left h1{font-size:24px;margin:0 0 4px;color:#0f172a;font-weight:700}
+    .header-left .subtitle{color:#64748b;font-size:14px}
+    .header-right{text-align:right;font-size:12px;color:#64748b}
+    .header-right .logo{background:#2563eb;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;margin-bottom:8px;font-size:13px;letter-spacing:.05em}
+    .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px}
+    .kpis.grid3{grid-template-columns:repeat(3,1fr)}.kpis.grid4{grid-template-columns:repeat(4,1fr)}
+    .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px}
+    .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;font-weight:600}
+    .kpi-value{font-size:18px;font-weight:700;color:#0f172a;margin-top:4px;word-break:break-word}
+    .kpi-hint{font-size:11px;color:#94a3b8;margin-top:2px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    section{margin-bottom:24px;page-break-inside:avoid}
+    section h3{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;font-weight:700}
+    table{border-collapse:collapse;width:100%;font-size:12px}
+    th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+    th{background:#f1f5f9;font-weight:600;color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+    .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+    .badge-confirme{background:#d1fae5;color:#065f46}.badge-a_confirmer{background:#fef3c7;color:#92400e}.badge-a_relancer{background:#fed7aa;color:#9a3412}.badge-prospect{background:#e2e8f0;color:#475569}.badge-haute,.badge-critique{background:#fee2e2;color:#991b1b}.badge-moyenne{background:#fef3c7;color:#92400e}.badge-basse{background:#e0e7ff;color:#3730a3}
+    ul{margin:4px 0;padding-left:20px}li{margin:2px 0}
+    .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px;text-align:center}
+    pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow:auto;font-size:11px}
+    .print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:600;box-shadow:0 4px 10px rgba(37,99,235,.3)}
+    @media print{.print-btn{display:none}body{padding:0}}
+  </style></head><body>
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button>
+    <div class="header">
+      <div class="header-left">
+        <h1>${titleLabel}</h1>
+        <div class="subtitle">${subtitle}</div>
+      </div>
+      <div class="header-right">
+        <div class="logo">ARACOM</div>
+        <div>Généré le ${generatedAt}</div>
+        <div>Statut : <b>${r.report_status}</b></div>
+      </div>
+    </div>
+    <div class="kpis ${type === 'bilan_exposant' ? 'grid4' : ''}">${kpis}</div>
+    ${body}
+    <div class="footer">Forum de la Rentrée 2026 — Document confidentiel généré automatiquement par la plateforme ARACOM.</div>
+  </body></html>`;
+
+  w.document.write(html);
   w.document.close();
 }
 
@@ -1373,3 +1623,112 @@ function RatingInline({ n }) {
     </span>
   );
 }
+
+// ---------- ConfirmedExposantsPanel: liste des exposants confirmés + caution à jour pour un site ----------
+function ConfirmedExposantsPanel({ stands, venue }) {
+  if (!venue) return null;
+
+  const exposants = (stands || [])
+    .filter(s => s.organization && s.assignment)
+    .map(s => ({
+      stand_code: s.stand_code,
+      organization: s.organization,
+      registration_id: s.assignment?.registration_id,
+      registration_status: s.registration_status,
+    }));
+
+  const [regDetails, setRegDetails] = useState({});
+  useEffect(() => {
+    (async () => {
+      const all = await api('/api/registrations');
+      const map = {};
+      all.forEach(r => { map[r.id] = r; });
+      setRegDetails(map);
+    })();
+  }, [stands]);
+
+  const rows = exposants.map(e => {
+    const d = regDetails[e.registration_id];
+    return {
+      ...e,
+      caution_status: d?.deposit?.status || 'non_demandee',
+      caution_received_at: d?.deposit?.received_at,
+      is_insurance_uploaded: d?.is_insurance_uploaded,
+      is_convention_signed: d?.is_convention_signed,
+      completion_percent: d?.completion_percent,
+      main_email: d?.organization?.main_email,
+    };
+  });
+
+  const confirmed = rows.filter(r => r.registration_status === 'confirme');
+  const cautionOk = rows.filter(r => r.caution_status === 'recue');
+  const fullyReady = rows.filter(r => r.registration_status === 'confirme' && r.caution_status === 'recue');
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Exposants confirmés & à jour de leur caution — {venue?.name}</CardTitle>
+            <p className="text-xs text-slate-500 mt-1">Liste connectée du plan ci-dessus</p>
+          </div>
+          <div className="flex gap-2">
+            <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">{fullyReady.length} 100% prêts</Badge>
+            <Badge variant="secondary" className="bg-blue-100 text-blue-700">{confirmed.length} confirmés</Badge>
+            <Badge variant="secondary" className="bg-violet-100 text-violet-700">{cautionOk.length} cautions OK</Badge>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-y text-left text-xs uppercase text-slate-500">
+            <tr>
+              <th className="py-2 px-4">Stand</th>
+              <th>Exposant</th>
+              <th>Discipline</th>
+              <th>Email</th>
+              <th className="text-center">Inscription</th>
+              <th className="text-center">Caution</th>
+              <th className="text-center">Assurance</th>
+              <th className="text-center">Convention</th>
+              <th className="text-center">Complétion</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.length === 0 ? (
+              <tr><td colSpan={9} className="py-6 text-center text-slate-400 italic">Aucun exposant attribué sur ce site.</td></tr>
+            ) : rows.sort((a,b)=> (a.stand_code||'').localeCompare(b.stand_code||'')).map(r => (
+              <tr key={r.stand_code} className="hover:bg-slate-50/50">
+                <td className="py-2 px-4 font-mono text-xs font-bold">{r.stand_code}</td>
+                <td className="font-medium">{r.organization.name}</td>
+                <td className="text-xs text-slate-600">{r.organization.discipline}</td>
+                <td className="text-xs text-slate-600">{r.main_email || '—'}</td>
+                <td className="text-center">
+                  <Badge variant="secondary" className={r.registration_status === 'confirme' ? 'bg-emerald-100 text-emerald-700' : r.registration_status === 'a_confirmer' ? 'bg-amber-100 text-amber-700' : r.registration_status === 'a_relancer' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}>
+                    {r.registration_status === 'confirme' ? '✓ Confirmé' : r.registration_status === 'a_confirmer' ? 'À confirmer' : r.registration_status === 'a_relancer' ? 'À relancer' : r.registration_status}
+                  </Badge>
+                </td>
+                <td className="text-center">
+                  {r.caution_status === 'recue' ? <Badge className="bg-emerald-600">✓ Reçue</Badge> :
+                   r.caution_status === 'demandee' ? <Badge variant="secondary" className="bg-amber-100 text-amber-700">Demandée</Badge> :
+                   <Badge variant="secondary" className="bg-slate-100 text-slate-500">—</Badge>}
+                </td>
+                <td className="text-center">{r.is_insurance_uploaded ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <XCircle className="w-4 h-4 text-slate-300 inline" />}</td>
+                <td className="text-center">{r.is_convention_signed ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <XCircle className="w-4 h-4 text-slate-300 inline" />}</td>
+                <td className="text-center">
+                  <div className="inline-flex items-center gap-1">
+                    <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className={`h-full ${(r.completion_percent || 0) >= 80 ? 'bg-emerald-500' : (r.completion_percent || 0) >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${r.completion_percent || 0}%` }} />
+                    </div>
+                    <span className="text-xs font-semibold">{r.completion_percent || 0}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
