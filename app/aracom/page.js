@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
 import { api } from '@/lib/auth-client';
@@ -15,11 +15,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar } from 'lucide-react';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import VenueMap from '@/components/venue-map';
-import { exportExposantsCSV, exportCautionsCSV } from '@/lib/csv-export';
+import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -30,6 +30,7 @@ const TABS = [
   { key: 'relances', label: 'Relances', href: '/aracom?tab=relances' },
   { key: 'anomalies', label: 'Anomalies', href: '/aracom?tab=anomalies' },
   { key: 'bilans', label: 'Bilans', href: '/aracom?tab=bilans' },
+  { key: 'satisfaction', label: 'Satisfaction', href: '/aracom?tab=satisfaction' },
 ];
 
 export default function AracomPage() {
@@ -66,6 +67,7 @@ export default function AracomPage() {
       {activeTab === 'relances' && <RelancesView />}
       {activeTab === 'anomalies' && <AnomaliesView />}
       {activeTab === 'bilans' && <BilansView />}
+      {activeTab === 'satisfaction' && <SatisfactionAdminView />}
     </Shell>
   );
 }
@@ -1059,5 +1061,218 @@ function NewSlotForm({ registrationId, venueId, onDone }) {
         <Button size="sm" variant="ghost" onClick={() => setShow(false)}>Annuler</Button>
       </div>
     </div>
+  );
+}
+
+
+// ---------- SatisfactionAdminView ----------
+function SatisfactionAdminView() {
+  const [stats, setStats] = useState(null);
+  const [surveys, setSurveys] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, list] = await Promise.all([
+        api('/api/satisfaction/stats'),
+        api('/api/satisfaction'),
+      ]);
+      setStats(s);
+      setSurveys(list);
+    } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
+  if (!stats) return null;
+
+  const npsColor = stats.nps === null ? 'slate' : stats.nps >= 50 ? 'emerald' : stats.nps >= 0 ? 'amber' : 'rose';
+  const npsColorCls = { slate: 'text-slate-400', emerald: 'text-emerald-600', amber: 'text-amber-600', rose: 'text-rose-600' };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><ThumbsUp className="w-5 h-5 text-emerald-600" /> Satisfaction des exposants</h2>
+          <p className="text-sm text-slate-500">Retours post-événement — {stats.total_responses}/{stats.total_eligible} réponses ({stats.response_rate}% de participation)</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportSatisfactionCSV(surveys)} disabled={surveys.length === 0} className="gap-2"><Download className="w-4 h-4" /> Export CSV</Button>
+          <Button variant="outline" size="sm" onClick={load} className="gap-2"><RefreshCw className="w-4 h-4" /> Actualiser</Button>
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <StatKpi label="Réponses" value={stats.total_responses} hint={`${stats.response_rate}% de participation`} icon={ThumbsUp} color="emerald" />
+        <StatKpi label="Note globale" value={stats.avg_overall ? stats.avg_overall.toFixed(1) : '—'} hint="sur 5" icon={Star} color="amber" />
+        <StatKpi label="Organisation" value={stats.avg_organization ? stats.avg_organization.toFixed(1) : '—'} hint="sur 5" color="blue" />
+        <StatKpi label="Stand" value={stats.avg_stand ? stats.avg_stand.toFixed(1) : '—'} hint="sur 5" color="violet" />
+        <StatKpi label="Visiteurs" value={stats.avg_visitors ? stats.avg_visitors.toFixed(1) : '—'} hint="sur 5" color="pink" />
+        <StatKpi label="NPS" value={stats.nps !== null ? stats.nps : '—'} hint="score de recommandation" icon={Smile} colorCls={npsColorCls[npsColor]} />
+      </div>
+
+      {/* Will participate breakdown + by site */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-violet-600" /> Prochaine édition</CardTitle></CardHeader>
+          <CardContent>
+            {stats.total_responses === 0 ? (
+              <p className="text-sm text-slate-400 italic">Aucune réponse pour le moment.</p>
+            ) : (
+              <div className="space-y-2">
+                {[
+                  { k: 'oui', label: 'Oui, avec plaisir', cls: 'bg-emerald-500' },
+                  { k: 'peut_etre', label: 'Peut-être', cls: 'bg-amber-500' },
+                  { k: 'non', label: 'Non', cls: 'bg-rose-500' },
+                  { k: 'nsp', label: 'Sans réponse', cls: 'bg-slate-400' },
+                ].map(opt => {
+                  const n = stats.will_participate[opt.k] || 0;
+                  const pct = stats.total_responses ? Math.round((n / stats.total_responses) * 100) : 0;
+                  return (
+                    <div key={opt.k} className="flex items-center gap-3">
+                      <div className="w-24 text-xs text-slate-600">{opt.label}</div>
+                      <div className="flex-1 h-6 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={`h-full ${opt.cls} transition-all flex items-center justify-end pr-2`} style={{ width: `${Math.max(pct, 3)}%` }}>
+                          {pct > 15 && <span className="text-[10px] font-bold text-white">{pct}%</span>}
+                        </div>
+                      </div>
+                      <div className="w-10 text-right text-xs font-semibold">{n}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Satisfaction par site</CardTitle></CardHeader>
+          <CardContent>
+            {stats.by_site.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">Aucune réponse pour le moment.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 uppercase border-b"><tr><th className="text-left py-2">Site</th><th className="text-center">Réponses</th><th className="text-center">Note</th><th className="text-center">NPS</th></tr></thead>
+                <tbody className="divide-y">
+                  {stats.by_site.map((s, i) => (
+                    <tr key={i}>
+                      <td className="py-2 font-medium">{s.venue_name}</td>
+                      <td className="text-center">{s.count}</td>
+                      <td className="text-center"><span className="inline-flex items-center gap-1"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{s.avg_overall?.toFixed(1) ?? '—'}</span></td>
+                      <td className={`text-center font-semibold ${s.avg_nps === null ? 'text-slate-400' : s.avg_nps >= 7 ? 'text-emerald-600' : s.avg_nps >= 5 ? 'text-amber-600' : 'text-rose-600'}`}>{s.avg_nps ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Liste des retours */}
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><MessageCircle className="w-4 h-4 text-slate-600" /> Retours individuels ({surveys.length})</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {surveys.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 italic">Aucun retour soumis pour le moment.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-y text-xs uppercase text-slate-500 text-left"><tr>
+                <th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th className="text-center">Globale</th><th className="text-center">NPS</th><th>Prochaine</th><th>Soumis le</th><th></th>
+              </tr></thead>
+              <tbody className="divide-y">
+                {surveys.map(s => {
+                  const isOpen = expanded === s.id;
+                  return (
+                    <React.Fragment key={s.id}>
+                      <tr className="hover:bg-slate-50/50 cursor-pointer" onClick={() => setExpanded(isOpen ? null : s.id)}>
+                        <td className="py-2 px-4 font-medium">{s.organization_name || '—'}</td>
+                        <td className="text-slate-600">{s.venue_name || '—'}</td>
+                        <td className="font-mono text-xs">{s.stand_code || '—'}</td>
+                        <td className="text-center"><span className="inline-flex items-center gap-1"><Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />{s.overall_rating ?? '—'}</span></td>
+                        <td className={`text-center font-bold ${s.nps_score === null ? 'text-slate-400' : s.nps_score >= 9 ? 'text-emerald-600' : s.nps_score >= 7 ? 'text-amber-600' : 'text-rose-600'}`}>{s.nps_score ?? '—'}</td>
+                        <td>{s.will_participate_next ? <Badge variant="secondary" className={s.will_participate_next === 'oui' ? 'bg-emerald-100 text-emerald-700' : s.will_participate_next === 'non' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}>{s.will_participate_next === 'peut_etre' ? 'Peut-être' : s.will_participate_next === 'oui' ? 'Oui' : 'Non'}</Badge> : '—'}</td>
+                        <td className="text-xs text-slate-500">{s.submitted_at ? new Date(s.submitted_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                        <td className="text-xs text-blue-600 pr-4">{isOpen ? 'Fermer ↑' : 'Détails ↓'}</td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-slate-50/60">
+                          <td colSpan={8} className="p-4">
+                            <div className="grid md:grid-cols-3 gap-4 text-xs">
+                              <div>
+                                <div className="font-semibold text-slate-700 mb-1">Notes détaillées</div>
+                                <div className="space-y-1 text-slate-600">
+                                  <div>Organisation : <RatingInline n={s.organization_rating} /></div>
+                                  <div>Stand : <RatingInline n={s.stand_rating} /></div>
+                                  <div>Visiteurs : <RatingInline n={s.visitors_rating} /></div>
+                                  <div>Communication : <RatingInline n={s.communication_rating} /></div>
+                                </div>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-slate-700 mb-1">Points positifs</div>
+                                <p className="text-slate-600 italic whitespace-pre-wrap">{s.positive_points || <span className="text-slate-400">—</span>}</p>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-slate-700 mb-1">Points à améliorer</div>
+                                <p className="text-slate-600 italic whitespace-pre-wrap">{s.improvement_points || <span className="text-slate-400">—</span>}</p>
+                              </div>
+                              {s.free_comment && (
+                                <div className="md:col-span-3">
+                                  <div className="font-semibold text-slate-700 mb-1">Commentaire libre</div>
+                                  <p className="text-slate-600 italic whitespace-pre-wrap bg-white border rounded p-3">{s.free_comment}</p>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function StatKpi({ label, value, hint, icon: Icon, color, colorCls }) {
+  const colorMap = {
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
+    blue: 'bg-blue-50 text-blue-700 border-blue-200',
+    violet: 'bg-violet-50 text-violet-700 border-violet-200',
+    pink: 'bg-pink-50 text-pink-700 border-pink-200',
+  };
+  const cls = colorMap[color] || 'bg-slate-50 text-slate-700 border-slate-200';
+  return (
+    <Card className={`border ${cls}`}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-wider opacity-75">{label}</div>
+            <div className={`text-2xl font-bold mt-0.5 ${colorCls || ''}`}>{value}</div>
+            {hint && <div className="text-[10px] opacity-60 mt-0.5">{hint}</div>}
+          </div>
+          {Icon && <Icon className="w-5 h-5 opacity-40" />}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RatingInline({ n }) {
+  if (!n) return <span className="text-slate-400">—</span>;
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map(k => <Star key={k} className={`w-3 h-3 ${k <= n ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />)}
+      <span className="ml-1 text-slate-600">{n}/5</span>
+    </span>
   );
 }

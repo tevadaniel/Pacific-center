@@ -315,6 +315,21 @@ backend:
         agent: "testing"
         comment: "✅ TESTÉ - Activity logs généraux OK. Timeline reg-arue-A-C01 agrège tous types d'événements avec structure type/at/label/detail."
 
+  - task: "Questionnaires de satisfaction (3 endpoints)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/satisfaction (upsert par registration_id), GET /api/satisfaction?registration_id (liste enrichie org/venue/stand), GET /api/satisfaction/stats (agrégats: moyennes, NPS calculé, répartition participation, stats par site). Collection satisfaction_surveys avec validation registration_id."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - POST satisfaction: upsert fonctionne (200 update, 201 create), validation 400 sans registration_id, 404 registration_id inexistant. GET satisfaction: liste enrichie avec organization_name/venue_name/stand_code, filtre registration_id OK. GET satisfaction/stats: total_responses=2, avg_overall=4.0, NPS=0 calculé correctement (promoters≥9, detractors≤6), will_participate répartition OK, by_site avec moyennes par venue. Tous les 9 scénarios de test passés."
+
 frontend:
   - task: "Page de connexion + seed démo"
     implemented: true
@@ -418,3 +433,7 @@ agent_communication:
     message: "TESTS FRONTEND E2E PARTIELS COMPLÉTÉS ✅. Page de connexion : 3 boutons d'accès rapide fonctionnels, formulaire manuel, lien inscription, bouton seed - CORRECTION APPLIQUÉE (import Link manquant). Portail ARACOM : login admin réussi, dashboard avec 6 sites, KPIs corrects, badge alertes visible, 8 onglets présents. Page inscription : formulaire complet avec dropdown disciplines, validation mots de passe. LIMITATION : Tests interrompus par timeouts Playwright et problèmes de session. Recommandation : tests manuels complémentaires pour validation complète des workflows utilisateur."
   - agent: "main"
     message: "AMÉLIORATIONS DESIGN & FONCTIONNALITÉS (session 3) :\n1. Correction login exposant bloqué : mot de passe modifié par un test précédent sur swimua.tahiti@gmail.com → re-seed appliqué, tous les comptes 'demo' fonctionnent.\n2. Nouveau endpoint public GET /api/stats/public (sites/stands/associations dynamiques).\n3. Homepage désormais dynamique (plus de '57' hardcodé).\n4. CARTE INTERACTIVE DES STANDS : nouveau composant /app/components/venue-map.jsx. Plan schématique type événement (ENTRÉE en haut, allée centrale, SCÈNE en bas), cartes de stands cliquables, badges priorité A/B, filtres par statut (Tous/Confirmés/À confirmer/À relancer/Prospects/Libres), recherche par nom/discipline/code stand, highlight du stand de l'exposant.\n5. Intégration de VenueMap dans 3 endroits : ARACOM > Sites & stands (admin cliquable), Pacific Centers > Sites & plan (lecture seule), Exposant > Sites & plan (avec highlight de son propre stand A-C01).\n6. Vérifié visuellement via screenshot tool : toutes les vues fonctionnent, highlight exposant OK.\nAucun changement backend fonctionnel sauf ajout endpoint /api/stats/public (non bloquant). Pas besoin de re-tester le backend."
+  - agent: "main"
+    message: "NOUVELLE FEATURE — QUESTIONNAIRE DE SATISFACTION (session 4) :\n1. Backend : nouvelle collection MongoDB 'satisfaction_surveys' + 3 endpoints :\n   - GET /api/satisfaction?registration_id=X → liste enrichie (org/venue/stand)\n   - GET /api/satisfaction/stats → agrégats (moyennes, NPS calculé, répartition participation, stats par site)\n   - POST /api/satisfaction → submit/update (upsert par registration_id)\n2. Frontend exposant : nouvel onglet 'Satisfaction' dans /app/exposant/page.js avec :\n   - 5 critères notés par étoiles 1-5 (note globale, organisation, stand, visiteurs, communication)\n   - NPS 0-10 avec barres colorées (rose/ambre/vert)\n   - Choix participation prochaine édition (Oui/Peut-être/Non)\n   - 3 champs texte (points positifs, à améliorer, commentaire libre)\n   - Pré-remplissage si survey existant + bouton 'Mettre à jour'\n3. Frontend ARACOM : nouvel onglet 'Satisfaction' dans /app/aracom/page.js avec :\n   - 6 KPI cards (Réponses/% participation, notes moyennes, NPS)\n   - Barres de progression pour participation prochaine édition\n   - Tableau 'Satisfaction par site' (note + NPS par venue)\n   - Liste des retours avec expand (notes détaillées, commentaires)\n   - Export CSV (nouvelle fonction exportSatisfactionCSV dans lib/csv-export.js)\n4. Testé via curl et visuellement : NPS calculé correctement, moyennes OK, affichage parfait.\nBESOIN DE TEST BACKEND sur les 3 endpoints /api/satisfaction* pour validation formelle."
+  - agent: "testing"
+    message: "TESTS ENDPOINTS SATISFACTION COMPLÉTÉS ✅. Testé les 3 nouveaux endpoints selon les 9 scénarios requis : POST /api/satisfaction (upsert par registration_id avec validation 400/404), GET /api/satisfaction (liste enrichie + filtre registration_id), GET /api/satisfaction/stats (agrégats complets). Vérifications : upsert fonctionne (200 update, 201 create), enrichissement avec organization_name/venue_name/stand_code, NPS calculé correctement (promoters≥9, detractors≤6), moyennes exactes, répartition will_participate, stats par site. Tous les tests passés, API satisfaction prête pour production."

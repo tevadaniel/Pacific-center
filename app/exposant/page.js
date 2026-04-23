@@ -16,7 +16,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { FileUploadButton } from '@/components/file-upload';
 import VenueMap from '@/components/venue-map';
 import { toast } from 'sonner';
-import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft, ListChecks, MessageCircle } from 'lucide-react';
+import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft, ListChecks, MessageCircle, ThumbsUp, Send, Smile } from 'lucide-react';
 import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL, EVENT_DATES } from '@/lib/constants';
 
 const DOC_TYPES = [
@@ -102,12 +102,13 @@ export default function ExposantPortal() {
         {r.status !== 'confirme' && <ConfirmParticipation registration={r} onRefresh={load} />}
 
         <Tabs defaultValue="profil">
-          <TabsList className="w-full grid grid-cols-3 md:grid-cols-6">
+          <TabsList className="w-full grid grid-cols-3 md:grid-cols-7">
             <TabsTrigger value="profil">Profil</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>
             <TabsTrigger value="animation">Animations</TabsTrigger>
             <TabsTrigger value="docs">Documents</TabsTrigger>
             <TabsTrigger value="logistique">Logistique</TabsTrigger>
+            <TabsTrigger value="satisfaction">Satisfaction</TabsTrigger>
             <TabsTrigger value="guide">Guide</TabsTrigger>
           </TabsList>
 
@@ -160,6 +161,10 @@ export default function ExposantPortal() {
 
           <TabsContent value="logistique" className="space-y-4">
             <LogistiqueBlock registration={r} onRefresh={load} />
+          </TabsContent>
+
+          <TabsContent value="satisfaction" className="space-y-4">
+            <SatisfactionBlock registration={r} />
           </TabsContent>
 
           <TabsContent value="guide" className="space-y-4">
@@ -602,6 +607,214 @@ function PasswordButton({ user, onChanged }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ---------- SatisfactionBlock (questionnaire de fin d'événement) ----------
+function SatisfactionBlock({ registration }) {
+  const [survey, setSurvey] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [form, setForm] = useState({
+    overall_rating: 0, organization_rating: 0, stand_rating: 0,
+    visitors_rating: 0, communication_rating: 0, nps_score: null,
+    will_participate_next: '', positive_points: '', improvement_points: '', free_comment: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!registration?.id) return;
+    api(`/api/satisfaction?registration_id=${registration.id}`).then(list => {
+      const s = list?.[0];
+      if (s) {
+        setSurvey(s);
+        setForm({
+          overall_rating: s.overall_rating || 0,
+          organization_rating: s.organization_rating || 0,
+          stand_rating: s.stand_rating || 0,
+          visitors_rating: s.visitors_rating || 0,
+          communication_rating: s.communication_rating || 0,
+          nps_score: typeof s.nps_score === 'number' ? s.nps_score : null,
+          will_participate_next: s.will_participate_next || '',
+          positive_points: s.positive_points || '',
+          improvement_points: s.improvement_points || '',
+          free_comment: s.free_comment || '',
+        });
+      }
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [registration?.id]);
+
+  const submit = async () => {
+    if (!form.overall_rating) { toast.error('Merci de donner une note globale'); return; }
+    setSaving(true);
+    try {
+      const res = await api('/api/satisfaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registration.id,
+          overall_rating: form.overall_rating || null,
+          organization_rating: form.organization_rating || null,
+          stand_rating: form.stand_rating || null,
+          visitors_rating: form.visitors_rating || null,
+          communication_rating: form.communication_rating || null,
+          nps_score: form.nps_score,
+          will_participate_next: form.will_participate_next || null,
+          positive_points: form.positive_points || null,
+          improvement_points: form.improvement_points || null,
+          free_comment: form.free_comment || null,
+        }),
+      });
+      setSurvey(res);
+      toast.success(survey ? 'Votre retour a été mis à jour. Merci !' : 'Merci pour votre retour ! 🙏');
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (!loaded) return <div className="text-center py-8 text-slate-500">Chargement…</div>;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/60 to-white">
+        <CardContent className="p-5 flex items-start gap-4">
+          <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+            <ThumbsUp className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Votre retour sur le Forum de la Rentrée 2026</h3>
+            <p className="text-sm text-slate-600 mt-1">
+              {survey
+                ? `Vous avez partagé votre retour le ${new Date(survey.submitted_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}. Vous pouvez le modifier à tout moment.`
+                : "Votre avis compte ! Il nous aidera à améliorer les prochaines éditions. Ce questionnaire vous prend environ 2 minutes."}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Star className="w-4 h-4 text-amber-500" /> Notez cette édition</CardTitle></CardHeader>
+        <CardContent className="space-y-5">
+          <StarRating label="Note globale de l'événement" value={form.overall_rating} onChange={v => setForm({ ...form, overall_rating: v })} required />
+          <StarRating label="Organisation générale (logistique, signalétique)" value={form.organization_rating} onChange={v => setForm({ ...form, organization_rating: v })} />
+          <StarRating label="Qualité de votre stand et emplacement" value={form.stand_rating} onChange={v => setForm({ ...form, stand_rating: v })} />
+          <StarRating label="Affluence et engagement des visiteurs" value={form.visitors_rating} onChange={v => setForm({ ...form, visitors_rating: v })} />
+          <StarRating label="Communication et support ARACOM" value={form.communication_rating} onChange={v => setForm({ ...form, communication_rating: v })} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Smile className="w-4 h-4 text-blue-600" /> Recommanderiez-vous ce forum à d'autres associations ?</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Sur une échelle de 0 (pas du tout) à 10 (absolument)</p>
+        </CardHeader>
+        <CardContent>
+          <NpsRating value={form.nps_score} onChange={v => setForm({ ...form, nps_score: v })} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-violet-600" /> Souhaitez-vous participer à la prochaine édition ?</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { v: 'oui', label: 'Oui, avec plaisir', cls: 'border-emerald-500 bg-emerald-50', emoji: '✅' },
+              { v: 'peut_etre', label: 'Peut-être', cls: 'border-amber-500 bg-amber-50', emoji: '🤔' },
+              { v: 'non', label: 'Non', cls: 'border-rose-500 bg-rose-50', emoji: '❌' },
+            ].map(opt => (
+              <button
+                key={opt.v}
+                onClick={() => setForm({ ...form, will_participate_next: opt.v })}
+                className={`p-4 rounded-lg border-2 transition-all text-center ${form.will_participate_next === opt.v ? opt.cls : 'border-slate-200 hover:border-slate-300'}`}
+              >
+                <div className="text-2xl mb-1">{opt.emoji}</div>
+                <div className="text-sm font-medium">{opt.label}</div>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><MessageCircle className="w-4 h-4 text-slate-600" /> Vos commentaires</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-sm font-medium">Ce qui vous a plu <span className="text-slate-400 font-normal">(facultatif)</span></Label>
+            <Textarea value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ex : accueil chaleureux, bonne affluence, stand bien placé…" rows={3} className="mt-1.5" />
+          </div>
+          <div>
+            <Label className="text-sm font-medium">Points à améliorer <span className="text-slate-400 font-normal">(facultatif)</span></Label>
+            <Textarea value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Ex : signalétique, parking, horaires…" rows={3} className="mt-1.5" />
+          </div>
+          <div>
+            <Label className="text-sm font-medium">Commentaire libre <span className="text-slate-400 font-normal">(facultatif)</span></Label>
+            <Textarea value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Autre chose à partager avec nous ?" rows={3} className="mt-1.5" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end gap-3 pt-2 pb-8">
+        <Button onClick={submit} disabled={saving} size="lg" className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+          <Send className="w-4 h-4" />
+          {saving ? 'Envoi…' : survey ? 'Mettre à jour mon retour' : 'Envoyer mon retour'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function StarRating({ label, value, onChange, required }) {
+  const [hover, setHover] = useState(0);
+  const disp = hover || value;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <Label className="text-sm font-medium">{label} {required && <span className="text-red-500">*</span>}</Label>
+        {disp > 0 && <span className="text-xs text-slate-500">{['', 'Très insatisfait', 'Insatisfait', 'Correct', 'Satisfait', 'Excellent'][disp]}</span>}
+      </div>
+      <div className="flex gap-1">
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            type="button"
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            onClick={() => onChange(n)}
+            className="p-1 hover:scale-110 transition-transform"
+          >
+            <Star className={`w-8 h-8 ${n <= disp ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NpsRating({ value, onChange }) {
+  const getCls = (n, selected) => {
+    if (!selected) return 'bg-white border-slate-200 text-slate-700 hover:border-slate-300';
+    if (n <= 6) return 'bg-rose-500 text-white border-rose-600 scale-105 shadow-md';
+    if (n <= 8) return 'bg-amber-500 text-white border-amber-600 scale-105 shadow-md';
+    return 'bg-emerald-500 text-white border-emerald-600 scale-105 shadow-md';
+  };
+  return (
+    <div className="flex items-center justify-between gap-1 flex-wrap">
+      {Array.from({ length: 11 }).map((_, n) => {
+        const selected = value === n;
+        return (
+          <button
+            key={n}
+            onClick={() => onChange(n)}
+            className={`flex-1 min-w-[40px] h-12 rounded-lg border-2 font-bold text-sm transition-all ${getCls(n, selected)}`}
+          >
+            {n}
+          </button>
+        );
+      })}
+      <div className="w-full flex justify-between text-[10px] text-slate-400 mt-1 px-1">
+        <span>😕 Pas du tout</span>
+        <span>🤩 Absolument</span>
+      </div>
     </div>
   );
 }

@@ -610,6 +610,71 @@ export async function GET(request, { params }) {
       return json(prefs.map(p => { delete p._id; return { ...p, venue: vById[p.venue_id] }; }));
     }
 
+    // ---- Questionnaires de satisfaction ----
+    if (route === 'satisfaction') {
+      // Admin : liste complète. Exposant : uniquement sa réponse (filtrage via registration_id)
+      const registration_id = url.searchParams.get('registration_id');
+      const q = { edition_id: EDITION_ID };
+      if (registration_id) q.registration_id = registration_id;
+      const surveys = await db.collection('satisfaction_surveys').find(q).sort({ submitted_at: -1 }).toArray();
+      const regIds = [...new Set(surveys.map(s => s.registration_id))];
+      const regs = await db.collection('registrations').find({ id: { $in: regIds } }).toArray();
+      const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const regById = Object.fromEntries(regs.map(r => [r.id, r]));
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+      return json(surveys.map(s => {
+        delete s._id;
+        const r = regById[s.registration_id];
+        const o = r ? orgById[r.organization_id] : null;
+        const v = r ? venueById[r.venue_id] : null;
+        return { ...s, organization_name: o?.name, organization_discipline: o?.discipline, venue_name: v?.name, stand_code: r?.stand_code };
+      }));
+    }
+
+    if (route === 'satisfaction/stats') {
+      const surveys = await db.collection('satisfaction_surveys').find({ edition_id: EDITION_ID }).toArray();
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID, status: { $in: ['confirme', 'a_confirmer', 'a_relancer'] } }).toArray();
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+      const regById = Object.fromEntries(regs.map(r => [r.id, r]));
+      const total_eligible = regs.length;
+      const total_responses = surveys.length;
+      const response_rate = total_eligible ? Math.round((total_responses / total_eligible) * 100) : 0;
+      const avg = (arr, key) => { const vals = arr.map(x => x[key]).filter(v => typeof v === 'number'); return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null; };
+      const overallAvg = avg(surveys, 'overall_rating');
+      const orgAvg = avg(surveys, 'organization_rating');
+      const standAvg = avg(surveys, 'stand_rating');
+      const visitorsAvg = avg(surveys, 'visitors_rating');
+      const commAvg = avg(surveys, 'communication_rating');
+      const npsValues = surveys.map(s => s.nps_score).filter(v => typeof v === 'number');
+      let nps = null;
+      if (npsValues.length) {
+        const promoters = npsValues.filter(v => v >= 9).length;
+        const detractors = npsValues.filter(v => v <= 6).length;
+        nps = Math.round(((promoters - detractors) / npsValues.length) * 100);
+      }
+      const willParticipate = { oui: 0, peut_etre: 0, non: 0, nsp: 0 };
+      surveys.forEach(s => { const k = s.will_participate_next || 'nsp'; if (willParticipate[k] !== undefined) willParticipate[k]++; });
+      // Stats par site
+      const bySite = {};
+      surveys.forEach(s => {
+        const r = regById[s.registration_id];
+        const vName = r && venueById[r.venue_id]?.name || 'Sans site';
+        if (!bySite[vName]) bySite[vName] = { name: vName, count: 0, overallSum: 0, npsSum: 0, npsCount: 0 };
+        bySite[vName].count++;
+        if (typeof s.overall_rating === 'number') bySite[vName].overallSum += s.overall_rating;
+        if (typeof s.nps_score === 'number') { bySite[vName].npsSum += s.nps_score; bySite[vName].npsCount++; }
+      });
+      const by_site = Object.values(bySite).map(x => ({ venue_name: x.name, count: x.count, avg_overall: x.count ? +(x.overallSum / x.count).toFixed(2) : null, avg_nps: x.npsCount ? +(x.npsSum / x.npsCount).toFixed(1) : null }));
+      return json({
+        total_eligible, total_responses, response_rate,
+        avg_overall: overallAvg, avg_organization: orgAvg, avg_stand: standAvg, avg_visitors: visitorsAvg, avg_communication: commAvg,
+        nps, will_participate: willParticipate, by_site,
+      });
+    }
+
     return err(`Route inconnue: ${route}`, 404);
   } catch (e) {
     console.error(e);
@@ -1051,6 +1116,43 @@ export async function POST(request, { params }) {
       await db.collection('organization_preferences').insertOne(pref);
       delete pref._id;
       return json(pref, 201);
+    }
+
+    if (route === 'satisfaction') {
+      // Exposant submit/update satisfaction survey (upsert par registration_id)
+      const { registration_id, nps_score, overall_rating, organization_rating, stand_rating, visitors_rating, communication_rating, will_participate_next, positive_points, improvement_points, free_comment } = body;
+      if (!registration_id) return err('registration_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      const existing = await db.collection('satisfaction_surveys').findOne({ registration_id, edition_id: EDITION_ID });
+      const doc = {
+        registration_id, organization_id: reg.organization_id, edition_id: EDITION_ID,
+        nps_score: typeof nps_score === 'number' ? nps_score : null,
+        overall_rating: typeof overall_rating === 'number' ? overall_rating : null,
+        organization_rating: typeof organization_rating === 'number' ? organization_rating : null,
+        stand_rating: typeof stand_rating === 'number' ? stand_rating : null,
+        visitors_rating: typeof visitors_rating === 'number' ? visitors_rating : null,
+        communication_rating: typeof communication_rating === 'number' ? communication_rating : null,
+        will_participate_next: will_participate_next || null,
+        positive_points: positive_points || null,
+        improvement_points: improvement_points || null,
+        free_comment: free_comment || null,
+        submitted_at: new Date(), updated_at: new Date(),
+      };
+      if (existing) {
+        await db.collection('satisfaction_surveys').updateOne({ id: existing.id }, { $set: doc });
+        await logActivity(db, ctx.userId, 'satisfaction_survey', existing.id, 'update', null, null);
+        const r = await db.collection('satisfaction_surveys').findOne({ id: existing.id });
+        delete r._id;
+        return json(r);
+      } else {
+        const id = uuid();
+        const created = { id, ...doc, created_at: new Date() };
+        await db.collection('satisfaction_surveys').insertOne(created);
+        await logActivity(db, ctx.userId, 'satisfaction_survey', id, 'create', null, null);
+        delete created._id;
+        return json(created, 201);
+      }
     }
 
     if (route.match(/^registrations\/[^/]+\/confirm$/)) {
