@@ -22,6 +22,7 @@ import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
 import { exportFullXLSX } from '@/lib/xlsx-export';
+import PushToggle from '@/components/push-toggle';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -60,7 +61,7 @@ export default function AracomPage() {
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
-      right={<div className="flex items-center gap-2"><AlertsBadge /><Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link></div>}
+      right={<div className="flex items-center gap-2"><PushToggle /><AlertsBadge /><Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link></div>}
     >
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
       {activeTab === 'exposants' && <ExposantsView />}
@@ -137,6 +138,9 @@ function DashboardView({ onGoto }) {
           ))}
         </div>
       )}
+
+      {/* Validation requests pending */}
+      <PendingValidationsCard onGoto={onGoto} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <KpiCard label="Exposants" value={kpis.total} hint={`${kpis.by_status?.confirme || 0} confirmés`} accent="blue" icon={Users} />
@@ -2101,6 +2105,48 @@ function NewExposantDialog({ venues, onClose, onCreated }) {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function PendingValidationsCard({ onGoto }) {
+  const [items, setItems] = useState(null);
+  const load = async () => {
+    try {
+      const list = await api('/api/validation-requests');
+      const pending = list.filter(r => r.status === 'en_attente' || r.status === 'rdv_fixe');
+      setItems(pending);
+    } catch {/* ignore */}
+  };
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  if (!items || items.length === 0) return null;
+  const enAttente = items.filter(r => r.status === 'en_attente');
+  const rdvFixe = items.filter(r => r.status === 'rdv_fixe');
+  return (
+    <Card className="border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="text-3xl">🔔</div>
+          <div className="flex-1">
+            <h3 className="font-bold text-violet-900 text-lg">Demandes de validation à traiter</h3>
+            <p className="text-sm text-violet-800">{enAttente.length} en attente · {rdvFixe.length} avec RDV fixé. Action requise pour verrouiller les inscriptions.</p>
+          </div>
+          <Button size="sm" onClick={() => onGoto?.('validations')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Lock className="w-4 h-4" /> Ouvrir l&apos;onglet Validations</Button>
+        </div>
+        <div className="grid md:grid-cols-2 gap-2">
+          {items.slice(0, 4).map(r => (
+            <div key={r.id} className="bg-white rounded-md border border-violet-200 p-2 flex items-center gap-2">
+              <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate">{r.organization?.name || '—'}</div>
+                <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
+                {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
+              </div>
+            </div>
+          ))}
+          {items.length > 4 && <div className="text-xs text-slate-500 text-center md:col-span-2">+ {items.length - 4} autre(s) demande(s)…</div>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

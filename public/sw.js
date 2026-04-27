@@ -3,7 +3,7 @@
  * Stratégie : network-first pour les pages, cache-first pour les assets statiques.
  * Permet une utilisation hors-ligne basique le jour J sur le terrain.
  */
-const CACHE_NAME = 'forum2026-v1';
+const CACHE_NAME = 'forum2026-v2';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -55,5 +55,45 @@ self.addEventListener('fetch', (event) => {
       }
       return res;
     }).catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+  );
+});
+
+// =====================
+// Web Push notifications
+// =====================
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (e) {
+    payload = { title: 'Forum 2026', body: event.data ? event.data.text() : '' };
+  }
+  const title = payload.title || 'Forum de la Rentrée 2026';
+  const options = {
+    body: payload.body || '',
+    icon: payload.icon || '/icon-192.png',
+    badge: payload.badge || '/icon-192.png',
+    tag: payload.tag || 'forum2026',
+    data: { url: payload.url || '/aracom?tab=validations' },
+    requireInteraction: false,
+    vibrate: [200, 100, 200],
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification && event.notification.data && event.notification.data.url) || '/aracom';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+      // Focus an existing tab if any
+      for (const client of clientsArr) {
+        if ('focus' in client) {
+          client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    })
   );
 });

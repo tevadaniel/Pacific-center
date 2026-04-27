@@ -4,6 +4,7 @@ import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
 import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
+import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
 
 // ===== Tracking helpers =====
@@ -783,6 +784,18 @@ export async function GET(request, { params }) {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
       const vById = Object.fromEntries(venues.map(v => [v.id, v]));
       return json(prefs.map(p => { delete p._id; return { ...p, venue: vById[p.venue_id] }; }));
+    }
+
+    // ---- Push notifications : VAPID public key ----
+    if (route === 'push/vapid-key') {
+      return json({ public_key: getVapidPublicKey(), configured: isPushConfigured() });
+    }
+    // ---- Push notifications : check current user subscription ----
+    if (route === 'push/me') {
+      const userId = request.headers.get('x-user-id');
+      if (!userId) return json({ subscribed: false });
+      const count = await db.collection('push_subscriptions').countDocuments({ user_id: userId });
+      return json({ subscribed: count > 0, count });
     }
 
     // ---- Questionnaires de satisfaction ----
@@ -1704,6 +1717,38 @@ export async function POST(request, { params }) {
       return json({ ok: true, total_in_excel: history.length, created, skipped_existing: skipped });
     }
 
+    // ============ PUSH NOTIFICATIONS ============
+    if (route === 'push/subscribe') {
+      const userId = request.headers.get('x-user-id');
+      const role = request.headers.get('x-user-role');
+      if (!userId) return err('Authentification requise', 401);
+      const { subscription, user_agent } = body;
+      if (!subscription?.endpoint) return err('subscription.endpoint requis', 400);
+      try {
+        await savePushSubscription({ userId, role, subscription, userAgent: user_agent || request.headers.get('user-agent') || '' });
+        return json({ ok: true });
+      } catch (e) {
+        return err(e.message || 'Erreur sauvegarde subscription', 500);
+      }
+    }
+    if (route === 'push/unsubscribe') {
+      const userId = request.headers.get('x-user-id');
+      const { endpoint } = body;
+      if (!userId || !endpoint) return err('userId et endpoint requis', 400);
+      await deletePushSubscription({ userId, endpoint });
+      return json({ ok: true });
+    }
+    if (route === 'push/test') {
+      // Send a test push to all aracom_admin subs
+      const r = await pushToRole({
+        title: '🔔 Test ARACOM',
+        body: 'Si vous voyez cette notification, le push web fonctionne !',
+        url: process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/aracom?tab=validations` : '/aracom?tab=validations',
+        tag: 'aracom-test',
+      }, { role: 'aracom_admin' });
+      return json(r);
+    }
+
     // ============ VALIDATION REQUESTS (workflow lock) ============
     // Helper : retrouver l'org/exposant pour les emails
     const buildExposantContext = async (registrationId) => {
@@ -1806,6 +1851,13 @@ export async function POST(request, { params }) {
 </div>
 <p><a href="${baseUrl}/aracom?tab=validations" style="display:inline-block;padding:10px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">Traiter la demande</a></p>`,
           }).catch(e => console.error('[mail aracom request-validation]', e?.message));
+          // 3) Push ARACOM : notification temps réel
+          pushToRole({
+            title: `🔔 Nouvelle demande de validation`,
+            body: `${exposantName} (${venueName} · ${stand}) — Mode ${paymentLabel}`,
+            url: `${baseUrl}/aracom?tab=validations`,
+            tag: `validation-${reqId}`,
+          }, { role: 'aracom_admin' }).catch(e => console.error('[push request-validation]', e?.message));
         }
       } catch (e) { console.error('[validation-request emails]', e?.message); }
 
