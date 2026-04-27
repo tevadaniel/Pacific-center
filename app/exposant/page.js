@@ -254,6 +254,168 @@ export default function ExposantPortal() {
 }
 
 // =====================================================================
+// CONFIRM PRESENCE — bouton + modale (envoi demande de validation)
+// =====================================================================
+function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ preferred_payment: 'cheque', rdv_proposal: '', notes: '' });
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registrationId}/request-validation`, {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      toast.success('✅ Demande envoyée à ARACOM. Vous serez recontacté pour fixer le rendez-vous.');
+      setOpen(false);
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <>
+      <Button
+        size="lg"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        className="bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 gap-2 shadow-lg disabled:opacity-50"
+      >
+        <Lock className="w-5 h-5" /> Confirmer ma présence
+      </Button>
+      {open && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && setOpen(false)}>
+          <Card className="max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Lock className="w-5 h-5 text-violet-600" /> Confirmer ma présence</CardTitle>
+              <p className="text-sm text-slate-600">Votre site, votre stand et vos créneaux d&apos;animation seront <b>verrouillés définitivement</b> par ARACOM dès que la caution sera réceptionnée.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label className="text-sm font-semibold">Mode de caution préféré (20 000 XPF)</Label>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {[
+                    { v: 'cheque', label: '💳 Chèque', desc: "À l'ordre d'ARACOM" },
+                    { v: 'especes', label: '💵 Espèces', desc: 'Remise en main propre' },
+                  ].map(o => (
+                    <button key={o.v} type="button" onClick={() => setForm({ ...form, preferred_payment: o.v })}
+                      className={`border-2 rounded-md p-3 text-left transition ${form.preferred_payment === o.v ? 'border-violet-500 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <div className="font-semibold text-sm">{o.label}</div>
+                      <div className="text-xs text-slate-500">{o.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm font-semibold">Vos disponibilités pour le RDV (facultatif)</Label>
+                <Input
+                  value={form.rdv_proposal}
+                  onChange={(e) => setForm({ ...form, rdv_proposal: e.target.value })}
+                  placeholder="Ex : matin, en semaine, après 17h…"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-semibold">Notes pour ARACOM (facultatif)</Label>
+                <Textarea
+                  rows={2}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Information utile pour la prise de RDV…"
+                />
+              </div>
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+                <b>📌 Modes acceptés :</b> chèque ou espèces uniquement (pas de virement pour la caution).
+              </div>
+            </CardContent>
+            <div className="flex gap-2 justify-end p-4 border-t">
+              <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>Annuler</Button>
+              <Button onClick={submit} disabled={busy} className="bg-violet-600 hover:bg-violet-700 gap-2">
+                {busy ? 'Envoi…' : <><Send className="w-4 h-4" /> Envoyer la demande</>}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </>
+  );
+}
+
+// =====================================================================
+// VALIDATION STATUS CARD — affichée quand la demande est en cours
+// =====================================================================
+function ValidationStatusCard({ registrationId, validationRequestId, onRefresh }) {
+  const [vreq, setVreq] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const list = await api('/api/validation-requests');
+      const found = list.find(x => x.id === validationRequestId);
+      setVreq(found || null);
+    } catch {/* ignore */}
+  };
+  useEffect(() => { load(); }, [validationRequestId]);
+  const cancel = async () => {
+    if (!confirm("Annuler votre demande de validation ? Vous pourrez en soumettre une nouvelle après modification.")) return;
+    setBusy(true);
+    try {
+      await api(`/api/validation-requests/${validationRequestId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Annulée par l\'exposant' }),
+      });
+      toast.success('Demande annulée');
+      if (onRefresh) onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+  if (!vreq) {
+    return (
+      <Card className="border-blue-200 bg-blue-50/50">
+        <CardContent className="p-4 text-sm text-blue-900 flex items-center gap-3">
+          <Clock className="w-5 h-5 text-blue-600 animate-pulse" />
+          Demande envoyée à ARACOM — chargement du statut…
+        </CardContent>
+      </Card>
+    );
+  }
+  const status = vreq.status;
+  const paymentLabel = vreq.preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
+
+  if (status === 'en_attente') {
+    return (
+      <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50">
+        <CardContent className="p-5 flex items-start gap-4">
+          <div className="text-3xl">⏳</div>
+          <div className="flex-1">
+            <div className="font-bold text-amber-900 text-lg">Demande en attente de traitement</div>
+            <p className="text-sm text-amber-800 mt-1">ARACOM a bien reçu votre demande de confirmation et vous recontactera très vite pour fixer le RDV de remise de caution ({paymentLabel}, 20 000 XPF).</p>
+            <div className="text-xs text-slate-600 mt-2">Soumise le {new Date(vreq.created_at).toLocaleString('fr-FR')}</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={cancel} disabled={busy}>Annuler la demande</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (status === 'rdv_fixe') {
+    const rdv = new Date(vreq.rdv_date);
+    return (
+      <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+        <CardContent className="p-5 flex items-start gap-4">
+          <div className="text-3xl">📅</div>
+          <div className="flex-1">
+            <div className="font-bold text-emerald-900 text-lg">Rendez-vous fixé — {rdv.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {rdv.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+            {vreq.rdv_location && <div className="text-sm text-emerald-800 mt-1"><b>📍 Lieu :</b> {vreq.rdv_location}</div>}
+            {vreq.rdv_notes && <div className="text-sm text-emerald-800 mt-1">{vreq.rdv_notes}</div>}
+            <div className="text-sm text-emerald-800 mt-2"><b>À prévoir :</b> votre caution de 20 000 XPF en {paymentLabel}{vreq.preferred_payment === 'cheque' ? ' (à l\'ordre d\'ARACOM)' : ''} + pièce d\'identité du responsable.</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={cancel} disabled={busy}>Annuler</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+  return null;
+}
+
+// =====================================================================
 // PROFIL — éditable, heures figées
 // =====================================================================
 function ProfilBlock({ organization, registration, onRefresh }) {

@@ -1,467 +1,551 @@
 #!/usr/bin/env python3
-"""
-Backend Test Suite - Re-testing corrected workflow endpoints
-Testing the corrected endpoints after bug fixes applied.
-"""
 
 import requests
 import json
 import sys
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
 
 # Configuration
 BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com"
 HEADERS = {
     "Content-Type": "application/json",
-    "x-user-role": "admin"
+    "x-user-role": "aracom_admin"
 }
 
-class BackendTester:
-    def __init__(self):
-        self.base_url = BASE_URL
-        self.headers = HEADERS
-        self.test_results = []
-        
-    def log_test(self, test_name: str, success: bool, details: str = ""):
-        """Log test result"""
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} - {test_name}")
-        if details:
-            print(f"    Details: {details}")
-        self.test_results.append({
-            "test": test_name,
-            "success": success,
-            "details": details
-        })
-        
-    def make_request(self, method: str, endpoint: str, data: Dict = None) -> tuple:
-        """Make HTTP request and return (success, response_data, status_code)"""
-        url = f"{self.base_url}{endpoint}"
-        try:
-            if method == "GET":
-                response = requests.get(url, headers=self.headers, timeout=30)
-            elif method == "POST":
-                response = requests.post(url, headers=self.headers, json=data, timeout=30)
-            elif method == "PUT":
-                response = requests.put(url, headers=self.headers, json=data, timeout=30)
-            elif method == "DELETE":
-                response = requests.delete(url, headers=self.headers, timeout=30)
-            else:
-                return False, {"error": f"Unsupported method: {method}"}, 0
-                
-            try:
-                response_data = response.json()
-            except:
-                response_data = {"raw_response": response.text}
-                
-            return response.status_code < 400, response_data, response.status_code
-        except Exception as e:
-            return False, {"error": str(e)}, 0
+def log_test(test_name, success, details=""):
+    status = "✅ PASS" if success else "❌ FAIL"
+    print(f"{status} - {test_name}")
+    if details:
+        print(f"    {details}")
+    return success
 
-    def test_seed_setup(self) -> bool:
-        """Setup: POST /api/seed with force=true"""
-        print("\n=== SETUP: Seeding database ===")
-        success, data, status = self.make_request("POST", "/api/seed", {"force": True})
-        
-        if success and data.get("seeded"):
-            self.log_test("Seed setup", True, f"Seeded {data.get('associations', 0)} associations, {data.get('stands_planned', 0)} stands")
-            return True
+def test_validation_requests_workflow():
+    """Test the complete validation requests workflow"""
+    print("=" * 80)
+    print("TESTING VALIDATION REQUESTS WORKFLOW")
+    print("=" * 80)
+    
+    passed_tests = 0
+    total_tests = 0
+    
+    # Step 1: Seed the database
+    print("\n1. SEEDING DATABASE")
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/seed", 
+                               json={"force": True}, 
+                               headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = data.get("seeded") == True
+            passed_tests += log_test("POST /api/seed force=true", success, 
+                                   f"Seeded: {data.get('seeded')}, Associations: {data.get('associations')}, Stands: {data.get('stands_planned')}")
         else:
-            self.log_test("Seed setup", False, f"Status: {status}, Data: {data}")
-            return False
-
-    def get_test_registration(self) -> Optional[str]:
-        """Get a test registration ID"""
-        success, data, status = self.make_request("GET", "/api/registrations")
-        if success and isinstance(data, list) and len(data) > 0:
-            reg_id = data[0]["id"]
-            print(f"Using test registration ID: {reg_id}")
-            return reg_id
-        return None
-
-    def get_free_stand(self) -> Optional[Dict]:
-        """Get a free stand for testing"""
-        # Try different venues to find a free stand
-        venues = ["venue-pun", "venue-faaa", "venue-aru", "venue-tar", "venue-mah", "venue-moo"]
+            log_test("POST /api/seed force=true", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("POST /api/seed force=true", False, f"Exception: {str(e)}")
+    
+    # Step 2: Find a suitable registration (with stand, not confirmed, no validation_request_id)
+    print("\n2. FINDING SUITABLE REGISTRATION")
+    total_tests += 1
+    reg_id = None
+    venue_id = None
+    try:
+        response = requests.get(f"{BASE_URL}/api/registrations", headers=HEADERS)
+        if response.status_code == 200:
+            registrations = response.json()
+            # Find one with stand_code but no validation_request_id and not confirmed
+            for reg in registrations:
+                if (reg.get('stand_code') and 
+                    not reg.get('validation_request_id') and 
+                    reg.get('status') in ['prospect', 'a_relancer', 'a_confirmer']):
+                    reg_id = reg['id']
+                    venue_id = reg.get('venue_id')
+                    org_name = reg.get('organization_name', 'Unknown')
+                    stand_code = reg.get('stand_code')
+                    status = reg.get('status')
+                    break
+                
+            if reg_id:
+                passed_tests += log_test("Find suitable registration", True, 
+                                       f"Found reg_id: {reg_id}, org: {org_name}, stand: {stand_code}, status: {status}")
+            else:
+                log_test("Find suitable registration", False, "No suitable registration found")
+        else:
+            log_test("Find suitable registration", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Find suitable registration", False, f"Exception: {str(e)}")
+    
+    if not reg_id:
+        print("❌ Cannot continue without a valid registration ID")
+        return passed_tests, total_tests
+    
+    # Step 3: Create an animation slot (required for validation)
+    print("\n3. CREATING ANIMATION SLOT")
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/animation-slots",
+                               json={
+                                   "registration_id": reg_id,
+                                   "venue_id": venue_id,
+                                   "day_label": "vendredi",
+                                   "start_time": "10:00",
+                                   "end_time": "11:00",
+                                   "title": "Animation test validation",
+                                   "type": "stand"
+                               },
+                               headers=HEADERS)
+        if response.status_code in [200, 201]:
+            data = response.json()
+            success = data.get("id") is not None  # Animation slot created successfully
+            if success:
+                passed_tests += 1
+            log_test("POST animation-slot", success, f"Response: {data}")
+        else:
+            log_test("POST animation-slot", False, f"Status: {response.status_code}, Response: {response.text}")
+    except Exception as e:
+        log_test("POST animation-slot", False, f"Exception: {str(e)}")
+    
+    # Step 4: Test negative cases first - request validation without venue_id
+    print("\n4. NEGATIVE TEST - REQUEST VALIDATION WITHOUT VENUE")
+    total_tests += 1
+    try:
+        # Temporarily remove venue_id to test the error
+        requests.put(f"{BASE_URL}/api/registrations/{reg_id}", 
+                    json={"venue_id": None}, headers=HEADERS)
         
-        for venue_id in venues:
-            success, data, status = self.make_request("GET", f"/api/venues/{venue_id}/stands")
-            if success and isinstance(data, list):
-                for stand in data:
-                    if not stand.get("organization"):  # Stand is free
-                        print(f"Found free stand: {stand.get('code')} (ID: {stand.get('id')}) in {venue_id}")
-                        return stand
+        response = requests.post(f"{BASE_URL}/api/registrations/{reg_id}/request-validation",
+                               json={"preferred_payment": "cheque", "rdv_proposal": "matin"},
+                               headers=HEADERS)
+        if response.status_code == 400:
+            error_msg = response.json().get('error', '')
+            success = 'site' in error_msg.lower() or 'venue' in error_msg.lower()
+            passed_tests += log_test("Request validation without venue → 400", success, f"Error: {error_msg}")
+        else:
+            log_test("Request validation without venue → 400", False, f"Expected 400, got {response.status_code}")
         
-        print("No free stands found in any venue")
-        return None
-
-    def test_generate_caution_receipt(self):
-        """Test 1: POST /api/registrations/:id/generate-caution-receipt (corrected)"""
-        print("\n=== TEST 1: Generate Caution Receipt (corrected) ===")
-        
-        # Get a registration
-        reg_id = self.get_test_registration()
-        if not reg_id:
-            self.log_test("Generate caution receipt - get registration", False, "No registration found")
-            return
+        # Restore venue_id
+        requests.put(f"{BASE_URL}/api/registrations/{reg_id}", 
+                    json={"venue_id": venue_id}, headers=HEADERS)
+    except Exception as e:
+        log_test("Request validation without venue → 400", False, f"Exception: {str(e)}")
+    
+    # Step 5: Test request-validation (positive test)
+    print("\n5. REQUEST VALIDATION (POSITIVE)")
+    total_tests += 1
+    validation_request_id = None
+    try:
+        response = requests.post(f"{BASE_URL}/api/registrations/{reg_id}/request-validation",
+                               json={
+                                   "preferred_payment": "cheque",
+                                   "rdv_proposal": "matin",
+                                   "notes": "Test validation request"
+                               },
+                               headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = data.get("ok") == True and data.get("validation_request_id")
+            if success:
+                validation_request_id = data.get("validation_request_id")
+            passed_tests += log_test("POST request-validation", success, f"Response: {data}")
+        else:
+            log_test("POST request-validation", False, f"Status: {response.status_code}, Response: {response.text}")
+    except Exception as e:
+        log_test("POST request-validation", False, f"Exception: {str(e)}")
+    
+    if not validation_request_id:
+        print("❌ Cannot continue without validation_request_id")
+        return passed_tests, total_tests
+    
+    # Step 6: Verify registration has validation_request_id
+    print("\n6. VERIFY REGISTRATION UPDATED")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/registrations/{reg_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = data.get("validation_request_id") == validation_request_id
+            passed_tests += log_test("Registration has validation_request_id", success, 
+                                   f"Expected: {validation_request_id}, Got: {data.get('validation_request_id')}")
+        else:
+            log_test("Registration has validation_request_id", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Registration has validation_request_id", False, f"Exception: {str(e)}")
+    
+    # Step 7: Test GET validation-requests
+    print("\n7. GET VALIDATION REQUESTS")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/validation-requests", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            found_request = None
+            for req in data:
+                if req.get('id') == validation_request_id:
+                    found_request = req
+                    break
             
-        # Test generate receipt
-        success, data, status = self.make_request("POST", f"/api/registrations/{reg_id}/generate-caution-receipt", {})
+            success = found_request is not None
+            if success:
+                # Check enrichment
+                has_org = found_request.get('organization') is not None
+                has_venue = found_request.get('venue') is not None
+                status_correct = found_request.get('status') == 'en_attente'
+                no_mongodb_id = found_request.get('_id') is None
+                success = has_org and has_venue and status_correct and no_mongodb_id
+                
+            passed_tests += log_test("GET validation-requests", success, 
+                                   f"Found request with enriched data: org={has_org}, venue={has_venue}, status={found_request.get('status') if found_request else 'N/A'}, no _id={no_mongodb_id}")
+        else:
+            log_test("GET validation-requests", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET validation-requests", False, f"Exception: {str(e)}")
+    
+    # Step 8: Test GET validation-requests with status filter
+    print("\n8. GET VALIDATION REQUESTS WITH STATUS FILTER")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/validation-requests?status=en_attente", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            found_request = any(req.get('id') == validation_request_id for req in data)
+            all_en_attente = all(req.get('status') == 'en_attente' for req in data)
+            success = found_request and all_en_attente
+            passed_tests += log_test("GET validation-requests?status=en_attente", success, 
+                                   f"Found our request: {found_request}, All en_attente: {all_en_attente}")
+        else:
+            log_test("GET validation-requests?status=en_attente", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET validation-requests?status=en_attente", False, f"Exception: {str(e)}")
+    
+    # Step 9: Test GET alerts (should include validation_pending)
+    print("\n9. GET ALERTS (VALIDATION COUNTS)")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/alerts", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            has_validation_pending = 'validation_pending' in data
+            has_validation_rdv = 'validation_rdv' in data
+            validation_pending_count = data.get('validation_pending', 0)
+            success = has_validation_pending and has_validation_rdv and validation_pending_count >= 1
+            passed_tests += log_test("GET alerts includes validation counts", success, 
+                                   f"validation_pending: {validation_pending_count}, validation_rdv: {data.get('validation_rdv', 0)}")
+        else:
+            log_test("GET alerts includes validation counts", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET alerts includes validation counts", False, f"Exception: {str(e)}")
+    
+    # Step 10: Test set-rdv negative case
+    print("\n10. NEGATIVE TEST - SET RDV WITHOUT DATE")
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/validation-requests/{validation_request_id}/set-rdv",
+                               json={"rdv_location": "Test without date"},
+                               headers=HEADERS)
+        if response.status_code == 400:
+            error_msg = response.json().get('error', '')
+            success = 'rdv_date' in error_msg
+            passed_tests += log_test("Set RDV without rdv_date → 400", success, f"Error: {error_msg}")
+        else:
+            log_test("Set RDV without rdv_date → 400", False, f"Expected 400, got {response.status_code}")
+    except Exception as e:
+        log_test("Set RDV without rdv_date → 400", False, f"Exception: {str(e)}")
+    
+    # Step 11: Test set-rdv (positive)
+    print("\n11. SET RDV")
+    total_tests += 1
+    rdv_date = "2026-08-01T10:00:00.000Z"
+    try:
+        response = requests.post(f"{BASE_URL}/api/validation-requests/{validation_request_id}/set-rdv",
+                               json={
+                                   "rdv_date": rdv_date,
+                                   "rdv_location": "Bureau ARACOM",
+                                   "rdv_notes": "Parking au sous-sol"
+                               },
+                               headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = data.get("ok") == True
+            passed_tests += log_test("POST set-rdv", success, f"Response: {data}")
+        else:
+            log_test("POST set-rdv", False, f"Status: {response.status_code}, Response: {response.text}")
+    except Exception as e:
+        log_test("POST set-rdv", False, f"Exception: {str(e)}")
+    
+    # Step 12: Verify status changed to rdv_fixe
+    print("\n12. VERIFY RDV STATUS")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/validation-requests?status=rdv_fixe", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            found_request = any(req.get('id') == validation_request_id for req in data)
+            success = found_request
+            passed_tests += log_test("Validation request status = rdv_fixe", success, 
+                                   f"Found in rdv_fixe list: {found_request}")
+        else:
+            log_test("Validation request status = rdv_fixe", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Validation request status = rdv_fixe", False, f"Exception: {str(e)}")
+    
+    # Step 13: Test alerts validation_rdv count
+    print("\n13. VERIFY ALERTS RDV COUNT")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/alerts", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            validation_rdv_count = data.get('validation_rdv', 0)
+            success = validation_rdv_count >= 1
+            passed_tests += log_test("Alerts validation_rdv >= 1", success, 
+                                   f"validation_rdv count: {validation_rdv_count}")
+        else:
+            log_test("Alerts validation_rdv >= 1", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Alerts validation_rdv >= 1", False, f"Exception: {str(e)}")
+    
+    # Step 14: Test lock (verrouillage)
+    print("\n14. LOCK VALIDATION REQUEST")
+    total_tests += 1
+    receipt_number = None
+    receipt_document_id = None
+    try:
+        response = requests.post(f"{BASE_URL}/api/validation-requests/{validation_request_id}/lock",
+                               json={
+                                   "payment_mode": "cheque",
+                                   "amount_xpf": 20000
+                               },
+                               headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = (data.get("ok") == True and 
+                      data.get("receipt_number", "").startswith("CAUT-2026-") and
+                      data.get("receipt_document_id"))
+            if success:
+                receipt_number = data.get("receipt_number")
+                receipt_document_id = data.get("receipt_document_id")
+            if success:
+                passed_tests += 1
+            log_test("POST lock", success, f"Response: {data}")
+        else:
+            log_test("POST lock", False, f"Status: {response.status_code}, Response: {response.text}")
+    except Exception as e:
+        log_test("POST lock", False, f"Exception: {str(e)}")
+    
+    # Step 15: Verify registration status changed to confirme
+    print("\n15. VERIFY REGISTRATION CONFIRMED")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/registrations/{reg_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            status_confirme = data.get("status") == "confirme"
+            is_locked = data.get("is_locked") == True
+            is_deposit_received = data.get("is_deposit_received") == True
+            has_confirmed_at = data.get("confirmed_at") is not None
+            
+            success = status_confirme and is_locked and is_deposit_received and has_confirmed_at
+            passed_tests += log_test("Registration confirmed and locked", success, 
+                                   f"status={data.get('status')}, is_locked={is_locked}, is_deposit_received={is_deposit_received}")
+        else:
+            log_test("Registration confirmed and locked", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Registration confirmed and locked", False, f"Exception: {str(e)}")
+    
+    # Step 16: Verify deposit transaction status
+    print("\n16. VERIFY DEPOSIT TRANSACTION")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/registrations/{reg_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            deposit = data.get("deposit", {})
+            deposit_status = deposit.get("status")
+            success = deposit_status == "recue"
+            passed_tests += log_test("Deposit status = recue", success, 
+                                   f"deposit.status: {deposit_status}")
+        else:
+            log_test("Deposit status = recue", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Deposit status = recue", False, f"Exception: {str(e)}")
+    
+    # Step 17: Verify animation slots are locked
+    print("\n17. VERIFY ANIMATION SLOTS LOCKED")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/animation-slots?venue_id={venue_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            reg_slots = [slot for slot in data if slot.get('registration_id') == reg_id]
+            all_locked = all(slot.get('is_locked') == True for slot in reg_slots)
+            success = len(reg_slots) > 0 and all_locked
+            passed_tests += log_test("Animation slots locked", success, 
+                                   f"Found {len(reg_slots)} slots, all locked: {all_locked}")
+        else:
+            log_test("Animation slots locked", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Animation slots locked", False, f"Exception: {str(e)}")
+    
+    # Step 18: Verify receipt document created
+    print("\n18. VERIFY RECEIPT DOCUMENT")
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/documents?registration_id={reg_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            receipt_docs = [doc for doc in data if doc.get('document_type') == 'recu_caution']
+            found_receipt = any(doc.get('receipt_number') == receipt_number for doc in receipt_docs)
+            has_valid_status = any(doc.get('status') == 'valide' for doc in receipt_docs)
+            success = len(receipt_docs) > 0 and found_receipt and has_valid_status
+            passed_tests += log_test("Receipt document created", success, 
+                                   f"Found {len(receipt_docs)} receipt docs, matching receipt_number: {found_receipt}, valid status: {has_valid_status}")
+        else:
+            log_test("Receipt document created", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("Receipt document created", False, f"Exception: {str(e)}")
+    
+    # Step 19: Test cancel on locked request (should fail)
+    print("\n19. TEST CANCEL LOCKED REQUEST (NEGATIVE)")
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/validation-requests/{validation_request_id}/cancel",
+                               json={"reason": "Test cancel locked"},
+                               headers=HEADERS)
+        if response.status_code == 400:
+            error_msg = response.json().get('error', '')
+            success = 'verrouillée' in error_msg or 'locked' in error_msg.lower()
+            passed_tests += log_test("Cancel locked request → 400", success, f"Error: {error_msg}")
+        else:
+            log_test("Cancel locked request → 400", False, f"Expected 400, got {response.status_code}")
+    except Exception as e:
+        log_test("Cancel locked request → 400", False, f"Exception: {str(e)}")
+    
+    # Step 20: Test request validation on already confirmed registration (should fail)
+    print("\n20. TEST REQUEST VALIDATION ON CONFIRMED REG (NEGATIVE)")
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/registrations/{reg_id}/request-validation",
+                               json={"preferred_payment": "especes", "rdv_proposal": "apres-midi"},
+                               headers=HEADERS)
+        if response.status_code == 400:
+            error_msg = response.json().get('error', '')
+            success = 'confirmée' in error_msg or 'confirmed' in error_msg.lower()
+            passed_tests += log_test("Request validation on confirmed reg → 400", success, f"Error: {error_msg}")
+        else:
+            log_test("Request validation on confirmed reg → 400", False, f"Expected 400, got {response.status_code}")
+    except Exception as e:
+        log_test("Request validation on confirmed reg → 400", False, f"Exception: {str(e)}")
+    
+    # Summary
+    print("\n" + "=" * 80)
+    print(f"VALIDATION REQUESTS WORKFLOW TEST SUMMARY")
+    print("=" * 80)
+    print(f"PASSED: {passed_tests}/{total_tests} tests")
+    print(f"SUCCESS RATE: {(passed_tests/total_tests)*100:.1f}%")
+    
+    if passed_tests == total_tests:
+        print("🎉 ALL TESTS PASSED - Validation Requests Workflow is working correctly!")
+    else:
+        print(f"⚠️  {total_tests - passed_tests} tests failed - See details above")
+    
+    return passed_tests, total_tests
+
+def test_non_regression():
+    """Test that existing critical endpoints still work"""
+    print("\n" + "=" * 80)
+    print("NON-REGRESSION TESTS")
+    print("=" * 80)
+    
+    passed_tests = 0
+    total_tests = 0
+    
+    # Test dashboard KPIs
+    total_tests += 1
+    try:
+        response = requests.get(f"{BASE_URL}/api/dashboard/kpis", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = 'total' in data
+            passed_tests += log_test("GET /api/dashboard/kpis", success, f"Total: {data.get('total')}")
+        else:
+            log_test("GET /api/dashboard/kpis", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET /api/dashboard/kpis", False, f"Exception: {str(e)}")
+    
+    # Test SMTP test
+    total_tests += 1
+    try:
+        response = requests.post(f"{BASE_URL}/api/mailing/test-smtp", json={}, headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            success = 'ok' in data and 'configured' in data
+            passed_tests += log_test("POST /api/mailing/test-smtp", success, f"OK: {data.get('ok')}, Configured: {data.get('configured')}")
+        else:
+            log_test("POST /api/mailing/test-smtp", False, f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("POST /api/mailing/test-smtp", False, f"Exception: {str(e)}")
+    
+    # Test release-stand (existing workflow)
+    total_tests += 1
+    try:
+        # Get a registration with a stand that's not confirmed
+        regs_response = requests.get(f"{BASE_URL}/api/registrations?status=a_relancer", headers=HEADERS)
         
-        if success and data.get("ok") and data.get("receipt_number", "").startswith("CAUT-2026-"):
-            self.log_test("Generate caution receipt - creation", True, 
-                         f"Receipt: {data.get('receipt_number')}, Document ID: {data.get('document_id')}")
+        if regs_response.status_code == 200:
+            registrations = regs_response.json()
             
-            # Verify document was created via GET /api/documents?registration_id=<id>
-            success2, data2, status2 = self.make_request("GET", f"/api/documents?registration_id={reg_id}")
+            test_reg = None
+            # Find a registration with stand but not confirmed
+            for reg in registrations:
+                if reg.get('stand_code') and reg.get('status') != 'confirme':
+                    test_reg = reg
+                    break
             
-            if success2 and isinstance(data2, list):
-                # Look for recu_caution document
-                caution_docs = [doc for doc in data2 if doc.get("document_type") == "recu_caution"]
-                if caution_docs:
-                    doc = caution_docs[0]
-                    if (doc.get("status") == "valide" and 
-                        data.get("receipt_number") in doc.get("file_name", "")):
-                        self.log_test("Generate caution receipt - document verification", True,
-                                     f"Document found: {doc.get('file_name')}, status: {doc.get('status')}")
-                    else:
-                        self.log_test("Generate caution receipt - document verification", False,
-                                     f"Document status: {doc.get('status')}, filename: {doc.get('file_name')}")
+            if test_reg:
+                response = requests.post(f"{BASE_URL}/api/registrations/{test_reg['id']}/release-stand",
+                                       headers=HEADERS)
+                if response.status_code == 200:
+                    data = response.json()
+                    success = data.get("ok") == True
+                    passed_tests += log_test("POST release-stand (non-regression)", success, f"Response: {data}")
                 else:
-                    self.log_test("Generate caution receipt - document verification", False,
-                                 "No recu_caution document found in documents list")
+                    log_test("POST release-stand (non-regression)", False, f"Status: {response.status_code}")
             else:
-                self.log_test("Generate caution receipt - document verification", False,
-                             f"GET /api/documents failed: {status2}, {data2}")
-                
-            # Verify document appears in registration
-            success3, data3, status3 = self.make_request("GET", f"/api/registrations/{reg_id}")
-            if success3 and data3.get("registration", {}).get("documents"):
-                caution_docs = [doc for doc in data3["registration"]["documents"] 
-                               if doc.get("document_type") == "recu_caution"]
-                if caution_docs:
-                    self.log_test("Generate caution receipt - registration documents", True,
-                                 "Document appears in registration.documents array")
-                else:
-                    self.log_test("Generate caution receipt - registration documents", False,
-                                 "Document not found in registration.documents array")
-            else:
-                self.log_test("Generate caution receipt - registration documents", False,
-                             "Failed to get registration or no documents array")
+                log_test("POST release-stand (non-regression)", False, "No suitable registration found")
         else:
-            self.log_test("Generate caution receipt - creation", False,
-                         f"Status: {status}, Response: {data}")
-
-    def test_pre_reserve_stand(self):
-        """Test 2: POST /api/registrations/:id/pre-reserve-stand (corrected)"""
-        print("\n=== TEST 2: Pre-reserve Stand (corrected) ===")
-        
-        # Get two registrations
-        success, data, status = self.make_request("GET", "/api/registrations")
-        if not success or not isinstance(data, list) or len(data) == 0:
-            self.log_test("Pre-reserve stand - get registrations", False, "No registrations found")
-            return
-            
-        # Filter registrations with status != 'confirme'
-        available_regs = [reg for reg in data if reg.get("status") != "confirme"]
-        if len(available_regs) < 2:
-            self.log_test("Pre-reserve stand - get registrations", False, "Need at least 2 non-confirmed registrations")
-            return
-            
-        reg_a_id = available_regs[0]["id"]
-        reg_b_id = available_regs[1]["id"]
-        print(f"Using registrations: {reg_a_id} and {reg_b_id}")
-        
-        # Get a free stand
-        free_stand = self.get_free_stand()
-        if not free_stand:
-            self.log_test("Pre-reserve stand - get free stand", False, "No free stand found")
-            return
-            
-        stand_id = free_stand["id"]
-        stand_code = free_stand["code"]
-        venue_id = free_stand["venue_id"]
-        
-        # Test 1: Pre-reserve stand for regA
-        success, data, status = self.make_request("POST", f"/api/registrations/{reg_a_id}/pre-reserve-stand", 
-                                                 {"stand_id": stand_id})
-        
-        if success and data.get("ok") and data.get("stand_code"):
-            self.log_test("Pre-reserve stand - regA reservation", True,
-                         f"Stand reserved: {data.get('stand_code')}")
-            
-            # Verify registration was updated
-            success2, data2, status2 = self.make_request("GET", f"/api/registrations/{reg_a_id}")
-            if success2 and data2.get("registration"):
-                reg = data2["registration"]
-                checks = []
-                checks.append(("stand_code", reg.get("stand_code") == stand_code))
-                checks.append(("venue_id", reg.get("venue_id") == venue_id))
-                checks.append(("is_pre_reserved", reg.get("is_pre_reserved") == True))
-                checks.append(("status", reg.get("status") == "a_confirmer" or reg.get("status") == "confirme"))
-                
-                all_good = all(check[1] for check in checks)
-                details = ", ".join([f"{check[0]}={'✓' if check[1] else '✗'}" for check in checks])
-                self.log_test("Pre-reserve stand - regA verification", all_good, details)
-            else:
-                self.log_test("Pre-reserve stand - regA verification", False, "Failed to get registration")
-                
-            # Verify stand is marked as assigned in venues endpoint
-            success3, data3, status3 = self.make_request("GET", f"/api/venues/{venue_id}/stands")
-            if success3 and isinstance(data3, list):
-                target_stand = next((s for s in data3 if s.get("id") == stand_id), None)
-                if target_stand:
-                    is_assigned = (target_stand.get("organization") is not None or 
-                                 target_stand.get("assignment", {}).get("status") == "pre_reserve")
-                    self.log_test("Pre-reserve stand - stand assignment check", is_assigned,
-                                 f"Stand organization: {target_stand.get('organization')}, assignment: {target_stand.get('assignment')}")
-                else:
-                    self.log_test("Pre-reserve stand - stand assignment check", False, "Stand not found in venue")
-            else:
-                self.log_test("Pre-reserve stand - stand assignment check", False, "Failed to get venue stands")
-                
-            # Test 2: Try to reserve same stand with regB (should fail)
-            success4, data4, status4 = self.make_request("POST", f"/api/registrations/{reg_b_id}/pre-reserve-stand",
-                                                        {"stand_id": stand_id})
-            
-            expected_conflict = status4 == 409 and ("déjà attribué" in str(data4) or "déjà pré-réservé" in str(data4))
-            self.log_test("Pre-reserve stand - regB conflict", expected_conflict,
-                         f"Status: {status4}, Response: {data4}")
-        else:
-            self.log_test("Pre-reserve stand - regA reservation", False,
-                         f"Status: {status}, Response: {data}")
-            
-        # Test 3: Invalid stand ID
-        success5, data5, status5 = self.make_request("POST", f"/api/registrations/{reg_a_id}/pre-reserve-stand",
-                                                     {"stand_id": "fake-uuid-12345"})
-        self.log_test("Pre-reserve stand - invalid stand", status5 == 404,
-                     f"Status: {status5}, Response: {data5}")
-        
-        # Test 4: Missing stand_id
-        success6, data6, status6 = self.make_request("POST", f"/api/registrations/{reg_a_id}/pre-reserve-stand", {})
-        self.log_test("Pre-reserve stand - missing stand_id", status6 == 400,
-                     f"Status: {status6}, Response: {data6}")
-
-    def test_release_stand(self):
-        """Test 3: POST /api/registrations/:id/release-stand (corrected)"""
-        print("\n=== TEST 3: Release Stand (corrected) ===")
-        
-        # First, we need a registration with a pre-reserved stand
-        # Let's find one from the previous test or create one
-        success, data, status = self.make_request("GET", "/api/registrations")
-        if not success or not isinstance(data, list) or len(data) == 0:
-            self.log_test("Release stand - get registrations", False, "No registrations found")
-            return
-            
-        # Find a registration with a pre-reserved stand
-        pre_reserved_reg = None
-        for reg in data:
-            if reg.get("is_pre_reserved") and reg.get("stand_code") and reg.get("status") != "confirme":
-                pre_reserved_reg = reg
-                break
-                
-        if not pre_reserved_reg:
-            self.log_test("Release stand - find pre-reserved", False, "No pre-reserved registration found")
-            return
-            
-        reg_id = pre_reserved_reg["id"]
-        original_stand_code = pre_reserved_reg["stand_code"]
-        venue_id = pre_reserved_reg["venue_id"]
-        
-        print(f"Using pre-reserved registration: {reg_id}, stand: {original_stand_code}")
-        
-        # Test 1: Release the stand
-        success, data, status = self.make_request("POST", f"/api/registrations/{reg_id}/release-stand", {})
-        
-        if success and data.get("ok"):
-            self.log_test("Release stand - release action", True, "Stand released successfully")
-            
-            # Verify registration was updated
-            success2, data2, status2 = self.make_request("GET", f"/api/registrations/{reg_id}")
-            if success2 and data2.get("registration"):
-                reg = data2["registration"]
-                stand_cleared = reg.get("stand_code") is None or reg.get("stand_code") == ""
-                pre_reserved_cleared = reg.get("is_pre_reserved") == False
-                
-                self.log_test("Release stand - registration verification", 
-                             stand_cleared and pre_reserved_cleared,
-                             f"stand_code: {reg.get('stand_code')}, is_pre_reserved: {reg.get('is_pre_reserved')}")
-            else:
-                self.log_test("Release stand - registration verification", False, "Failed to get registration")
-                
-            # Verify stand is free in venues endpoint
-            if venue_id:
-                success3, data3, status3 = self.make_request("GET", f"/api/venues/{venue_id}/stands")
-                if success3 and isinstance(data3, list):
-                    # Find the stand that was released
-                    released_stand = next((s for s in data3 if s.get("code") == original_stand_code), None)
-                    if released_stand:
-                        is_free = (released_stand.get("organization") is None and 
-                                 (not released_stand.get("assignment") or 
-                                  released_stand.get("assignment", {}).get("status") != "pre_reserve"))
-                        self.log_test("Release stand - stand freedom check", is_free,
-                                     f"Stand organization: {released_stand.get('organization')}, assignment: {released_stand.get('assignment')}")
-                    else:
-                        self.log_test("Release stand - stand freedom check", False, "Released stand not found in venue")
-                else:
-                    self.log_test("Release stand - stand freedom check", False, "Failed to get venue stands")
-        else:
-            self.log_test("Release stand - release action", False,
-                         f"Status: {status}, Response: {data}")
-            
-        # Test 2: Try to release a confirmed registration's stand
-        confirmed_reg = None
-        for reg in data if isinstance(data, list) else []:
-            if reg.get("status") == "confirme" and reg.get("stand_code"):
-                confirmed_reg = reg
-                break
-                
-        if confirmed_reg:
-            success4, data4, status4 = self.make_request("POST", f"/api/registrations/{confirmed_reg['id']}/release-stand", {})
-            self.log_test("Release stand - confirmed registration", status4 == 400,
-                         f"Status: {status4}, Response: {data4}")
-        else:
-            self.log_test("Release stand - confirmed registration", True, "No confirmed registration to test (acceptable)")
-
-    def test_confirm_stand(self):
-        """Test 4: POST /api/registrations/:id/confirm-stand (corrected)"""
-        print("\n=== TEST 4: Confirm Stand (corrected) ===")
-        
-        # Get a registration with status != 'confirme'
-        success, data, status = self.make_request("GET", "/api/registrations")
-        if not success or not isinstance(data, list) or len(data) == 0:
-            self.log_test("Confirm stand - get registrations", False, "No registrations found")
-            return
-            
-        # Find a non-confirmed registration
-        target_reg = None
-        for reg in data:
-            if reg.get("status") != "confirme":
-                target_reg = reg
-                break
-                
-        if not target_reg:
-            self.log_test("Confirm stand - find non-confirmed", False, "No non-confirmed registration found")
-            return
-            
-        reg_id = target_reg["id"]
-        print(f"Using registration for confirmation: {reg_id}")
-        
-        # Optionally pre-reserve a stand first if not already done
-        if not target_reg.get("stand_code"):
-            free_stand = self.get_free_stand()
-            if free_stand:
-                self.make_request("POST", f"/api/registrations/{reg_id}/pre-reserve-stand", 
-                                {"stand_id": free_stand["id"]})
-                print(f"Pre-reserved stand {free_stand['code']} for testing")
-        
-        # Test 1: Confirm the stand
-        success, data, status = self.make_request("POST", f"/api/registrations/{reg_id}/confirm-stand", {})
-        
-        if success and data.get("ok"):
-            self.log_test("Confirm stand - confirmation action", True, "Stand confirmed successfully")
-            
-            # Verify registration was updated
-            success2, data2, status2 = self.make_request("GET", f"/api/registrations/{reg_id}")
-            if success2 and data2.get("registration"):
-                reg = data2["registration"]
-                checks = []
-                checks.append(("status", reg.get("status") == "confirme"))
-                checks.append(("is_pre_reserved", reg.get("is_pre_reserved") == False))
-                checks.append(("is_deposit_received", reg.get("is_deposit_received") == True))
-                checks.append(("confirmed_at", reg.get("confirmed_at") is not None))
-                
-                # Check deposit status (should be in deposit_transactions or enriched field)
-                deposit_status_ok = False
-                if reg.get("deposit", {}).get("status") == "recue":
-                    deposit_status_ok = True
-                elif "deposit" in reg and reg["deposit"].get("status") == "recue":
-                    deposit_status_ok = True
-                    
-                checks.append(("deposit_status", deposit_status_ok))
-                
-                all_good = all(check[1] for check in checks)
-                details = ", ".join([f"{check[0]}={'✓' if check[1] else '✗'}" for check in checks])
-                self.log_test("Confirm stand - registration verification", all_good, details)
-                
-                if not deposit_status_ok:
-                    print(f"    Deposit info: {reg.get('deposit', 'No deposit field')}")
-            else:
-                self.log_test("Confirm stand - registration verification", False, "Failed to get registration")
-        else:
-            self.log_test("Confirm stand - confirmation action", False,
-                         f"Status: {status}, Response: {data}")
-            
-        # Test 2: Invalid registration ID
-        success3, data3, status3 = self.make_request("POST", "/api/registrations/fake-id-12345/confirm-stand", {})
-        self.log_test("Confirm stand - invalid ID", status3 == 404,
-                     f"Status: {status3}, Response: {data3}")
-
-    def test_non_regression(self):
-        """Test 5: Non-regression tests"""
-        print("\n=== TEST 5: Non-regression ===")
-        
-        # Test profile endpoint
-        reg_id = self.get_test_registration()
-        if reg_id:
-            success, data, status = self.make_request("POST", f"/api/registrations/{reg_id}/profile", {
-                "name": "Test Organization Updated",
-                "discipline": "Sport",
-                "contact_name": "Test Contact",
-                "main_phone": "40123456",
-                "description": "Test description"
-            })
-            self.log_test("Non-regression - profile endpoint", success and data.get("ok"),
-                         f"Status: {status}, Response: {data}")
-        else:
-            self.log_test("Non-regression - profile endpoint", False, "No registration ID available")
-            
-        # Test dashboard KPIs
-        success, data, status = self.make_request("GET", "/api/dashboard/kpis")
-        self.log_test("Non-regression - dashboard KPIs", success and "total" in data,
-                     f"Status: {status}, Total: {data.get('total', 'N/A')}")
-
-    def run_all_tests(self):
-        """Run all tests in sequence"""
-        print("🧪 Starting Backend Re-testing of Corrected Workflow Endpoints")
-        print("=" * 70)
-        
-        # Setup
-        if not self.test_seed_setup():
-            print("❌ Setup failed, aborting tests")
-            return
-            
-        # Run tests
-        self.test_generate_caution_receipt()
-        self.test_pre_reserve_stand()
-        self.test_release_stand()
-        self.test_confirm_stand()
-        self.test_non_regression()
-        
-        # Summary
-        print("\n" + "=" * 70)
-        print("📊 TEST SUMMARY")
-        print("=" * 70)
-        
-        passed = sum(1 for result in self.test_results if result["success"])
-        total = len(self.test_results)
-        
-        print(f"Total Tests: {total}")
-        print(f"Passed: {passed}")
-        print(f"Failed: {total - passed}")
-        print(f"Success Rate: {(passed/total*100):.1f}%")
-        
-        if total - passed > 0:
-            print("\n❌ FAILED TESTS:")
-            for result in self.test_results:
-                if not result["success"]:
-                    print(f"  - {result['test']}: {result['details']}")
-        
-        return passed, total
+            log_test("POST release-stand (non-regression)", False, "Failed to get registrations")
+    except Exception as e:
+        log_test("POST release-stand (non-regression)", False, f"Exception: {str(e)}")
+    
+    print(f"\nNON-REGRESSION SUMMARY: {passed_tests}/{total_tests} tests passed")
+    return passed_tests, total_tests
 
 if __name__ == "__main__":
-    tester = BackendTester()
-    passed, total = tester.run_all_tests()
+    print("🧪 BACKEND TESTING - VALIDATION REQUESTS WORKFLOW")
+    print(f"Base URL: {BASE_URL}")
+    print(f"Headers: {HEADERS}")
     
-    # Exit with appropriate code
-    sys.exit(0 if passed == total else 1)
+    # Run validation requests workflow tests
+    workflow_passed, workflow_total = test_validation_requests_workflow()
+    
+    # Run non-regression tests
+    regression_passed, regression_total = test_non_regression()
+    
+    # Final summary
+    total_passed = workflow_passed + regression_passed
+    total_tests = workflow_total + regression_total
+    
+    print("\n" + "=" * 80)
+    print("FINAL TEST SUMMARY")
+    print("=" * 80)
+    print(f"Validation Workflow: {workflow_passed}/{workflow_total} passed")
+    print(f"Non-Regression: {regression_passed}/{regression_total} passed")
+    print(f"OVERALL: {total_passed}/{total_tests} tests passed ({(total_passed/total_tests)*100:.1f}%)")
+    
+    if total_passed == total_tests:
+        print("🎉 ALL TESTS PASSED!")
+        sys.exit(0)
+    else:
+        print(f"❌ {total_tests - total_passed} tests failed")
+        sys.exit(1)

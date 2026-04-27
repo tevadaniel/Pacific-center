@@ -764,11 +764,15 @@ export async function GET(request, { params }) {
       const docs = await db.collection('registration_documents').find({}, { projection: { file_data: 0 } }).toArray();
       const docsByReg = {}; docs.forEach(d => { if (!docsByReg[d.registration_id]) docsByReg[d.registration_id] = []; docsByReg[d.registration_id].push(d); });
       const missing_insurance = regs.filter(r => !(docsByReg[r.id] || []).some(d => d.document_type === 'assurance' && d.status !== 'refuse')).length;
+      const validation_pending = await db.collection('validation_requests').countDocuments({ status: 'en_attente' });
+      const validation_rdv = await db.collection('validation_requests').countDocuments({ status: 'rdv_fixe' });
       return json({
         anomalies_open: anomalies.length,
         critical_anomalies: anomalies.filter(a => a.severity_level === 'critique').length,
         tasks_open: tasks.length,
         missing_insurance,
+        validation_pending,
+        validation_rdv,
       });
     }
 
@@ -1701,6 +1705,22 @@ export async function POST(request, { params }) {
     }
 
     // ============ VALIDATION REQUESTS (workflow lock) ============
+    // Helper : retrouver l'org/exposant pour les emails
+    const buildExposantContext = async (registrationId) => {
+      const reg = await db.collection('registrations').findOne({ id: registrationId });
+      if (!reg) return null;
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      return { reg, org, venue };
+    };
+    const aracomEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'agence@aracom-conseil.fr';
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+    const formatDateFr = (d) => {
+      const dt = new Date(d);
+      return dt.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
+        ' à ' + dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    };
+
     // Exposant : demande la validation après avoir choisi site + créneau
     if (route.match(/^registrations\/[^/]+\/request-validation$/)) {
       const regId = p[1];
@@ -1742,6 +1762,53 @@ export async function POST(request, { params }) {
         validation_requested_at: new Date(),
         updated_at: new Date(),
       } });
+
+      // ===== EMAILS automatiques =====
+      try {
+        const ctx = await buildExposantContext(regId);
+        if (ctx?.org) {
+          const exposantName = ctx.org.name;
+          const venueName = ctx.venue?.name || '—';
+          const stand = ctx.reg.stand_code;
+          const paymentLabel = preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
+          // 1) Mail à l'exposant : confirmation de prise en compte
+          if (ctx.org.main_email) {
+            sendMail({
+              to: ctx.org.main_email,
+              subject: `Demande de validation reçue — ${exposantName}`,
+              html: `<p>Bonjour ${ctx.org.contact_name || exposantName},</p>
+<p>Nous avons bien reçu votre <b>demande de confirmation de présence</b> au Forum de la Rentrée 2026.</p>
+<div style="background:#f1f5f9;border-left:4px solid #2563eb;padding:12px 16px;border-radius:6px;margin:16px 0">
+  <div><b>Site :</b> ${venueName}</div>
+  <div><b>Stand :</b> ${stand}</div>
+  <div><b>Mode de caution préféré :</b> ${paymentLabel} (20 000 XPF)</div>
+  ${rdv_proposal ? `<div><b>Vos disponibilités :</b> ${rdv_proposal}</div>` : ''}
+</div>
+<p>L'équipe ARACOM va vous recontacter sous peu pour <b>fixer un rendez-vous</b> de remise de la caution. Une fois la caution réceptionnée, votre stand et vos créneaux d'animation seront <b>verrouillés définitivement</b>.</p>
+<p>📌 <b>Modes acceptés :</b> chèque ou espèces uniquement.</p>
+<p>À très vite,<br/>L'équipe ARACOM</p>`,
+            }).catch(e => console.error('[mail exposant request-validation]', e?.message));
+          }
+          // 2) Mail à ARACOM : notification nouvelle demande
+          sendMail({
+            to: aracomEmail,
+            subject: `🔔 Nouvelle demande de validation — ${exposantName}`,
+            html: `<p>Une nouvelle demande de validation vient d'être soumise.</p>
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:16px 0">
+  <div><b>Exposant :</b> ${exposantName}</div>
+  <div><b>Discipline :</b> ${ctx.org.discipline || '—'}</div>
+  <div><b>Contact :</b> ${ctx.org.contact_name || '—'} — ${ctx.org.main_email || '—'} — ${ctx.org.main_phone || '—'}</div>
+  <div><b>Site :</b> ${venueName}</div>
+  <div><b>Stand :</b> ${stand}</div>
+  <div><b>Mode souhaité :</b> ${paymentLabel}</div>
+  ${rdv_proposal ? `<div><b>Disponibilités :</b> ${rdv_proposal}</div>` : ''}
+  ${notes ? `<div><b>Notes :</b> ${notes}</div>` : ''}
+</div>
+<p><a href="${baseUrl}/aracom?tab=validations" style="display:inline-block;padding:10px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">Traiter la demande</a></p>`,
+          }).catch(e => console.error('[mail aracom request-validation]', e?.message));
+        }
+      } catch (e) { console.error('[validation-request emails]', e?.message); }
+
       return json({ ok: true, validation_request_id: reqId });
     }
 
@@ -1759,6 +1826,34 @@ export async function POST(request, { params }) {
         rdv_notes,
         updated_at: new Date(),
       } });
+
+      // ===== Email à l'exposant : RDV fixé =====
+      try {
+        const ctx = await buildExposantContext(r.registration_id);
+        if (ctx?.org?.main_email) {
+          sendMail({
+            to: ctx.org.main_email,
+            subject: `📅 Rendez-vous fixé pour la caution — ${ctx.org.name}`,
+            html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
+<p>Nous avons le plaisir de vous confirmer le <b>rendez-vous</b> pour la remise de votre caution.</p>
+<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px 16px;border-radius:6px;margin:16px 0">
+  <div style="font-size:18px;font-weight:700;color:#166534">${formatDateFr(rdv_date)}</div>
+  ${rdv_location ? `<div style="margin-top:6px"><b>📍 Lieu :</b> ${rdv_location}</div>` : ''}
+  ${rdv_notes ? `<div style="margin-top:6px"><b>Notes :</b> ${rdv_notes}</div>` : ''}
+</div>
+<p>📌 <b>Merci de prévoir :</b></p>
+<ul>
+  <li>Votre <b>caution de 20 000 XPF</b> en <b>chèque</b> (à l'ordre d'ARACOM) ou <b>espèces</b> uniquement</li>
+  <li>Votre <b>attestation d'assurance</b> et la <b>convention signée</b> si pas encore déposées</li>
+  <li>Une pièce d'identité du responsable légal de l'association</li>
+</ul>
+<p>Site : <b>${ctx.venue?.name || '—'}</b> · Stand : <b>${ctx.reg.stand_code}</b></p>
+<p>Une fois la caution réceptionnée, votre inscription sera <b>verrouillée définitivement</b> et vous recevrez votre reçu officiel.</p>
+<p>À très vite,<br/>L'équipe ARACOM</p>`,
+          }).catch(e => console.error('[mail set-rdv]', e?.message));
+        }
+      } catch (e) { console.error('[set-rdv emails]', e?.message); }
+
       return json({ ok: true });
     }
 
@@ -1812,7 +1907,68 @@ export async function POST(request, { params }) {
         { registration_id: vreq.registration_id, status: 'pre_reserve' },
         { $set: { status: 'confirme', updated_at: new Date() } }
       );
-      return json({ ok: true });
+
+      // ===== Auto-génération du reçu de caution si pas déjà émis =====
+      let receiptDocId = null;
+      let receiptNumber = null;
+      try {
+        const existing = await db.collection('registration_documents').findOne({ registration_id: vreq.registration_id, document_type: 'recu_caution' });
+        if (existing) {
+          receiptDocId = existing.id;
+          receiptNumber = existing.receipt_number;
+        } else {
+          const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+          const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+          receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
+          const paymentLabel = payment_mode === 'especes' ? 'Espèces' : 'Chèque';
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937;padding:0 16px}h1{color:#1d4ed8;margin:0 0 4px}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#1d4ed8;color:#fff;border:0;cursor:pointer;font-weight:600}@media print{.print-btn{display:none}}</style></head><body><button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button><div style="display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #1d4ed8;padding-bottom:10px"><div><h1>REÇU DE CAUTION</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div style="background:#1d4ed8;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;letter-spacing:.05em">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émis le ${new Date().toLocaleDateString('fr-FR')}</div></div></div><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date d'émission</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Contact</span><span>${org?.contact_name || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode de paiement</span><b>${paymentLabel}</b></div></div><div style="text-align:center;padding:18px 0;background:#eff6ff;border-radius:8px"><div class="label">Montant reçu en garantie</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Caution restituée intégralement sous 2 semaines après l'événement<br/>sous réserve de présence et tenue conforme du stand</div></div><p style="font-size:12px;color:#64748b;margin-top:24px">Cette caution sera restituée sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées (présence sur les jours confirmés, montage et démontage du stand dans les horaires, aucune dégradation constatée).</p><div style="margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between"><div><i>Pour ARACOM,</i><br/><b>L'équipe organisation</b></div><div style="text-align:right;font-size:11px;color:#94a3b8">Document officiel — Forum de la Rentrée 2026<br/>${receiptNumber}</div></div></body></html>`;
+          receiptDocId = uuid();
+          await db.collection('registration_documents').insertOne({
+            id: receiptDocId,
+            registration_id: vreq.registration_id,
+            document_type: 'recu_caution',
+            file_name: `Recu_caution_${(org?.name || 'exposant').replace(/\s+/g,'_')}_${receiptNumber}.html`,
+            mime_type: 'text/html',
+            file_size: html.length,
+            file_data: Buffer.from(html, 'utf-8').toString('base64'),
+            status: 'valide',
+            uploaded_by: 'aracom',
+            uploaded_at: new Date(),
+            validated_at: new Date(),
+            receipt_number: receiptNumber,
+            created_at: new Date(), updated_at: new Date(),
+          });
+        }
+      } catch (e) { console.error('[auto-receipt on lock]', e?.message); }
+
+      // ===== Email à l'exposant : verrouillage + reçu =====
+      try {
+        const ctx = await buildExposantContext(vreq.registration_id);
+        if (ctx?.org?.main_email) {
+          const receiptUrl = receiptDocId ? `${baseUrl}/api/documents/${receiptDocId}/download` : '';
+          const paymentLabel = payment_mode === 'especes' ? 'Espèces' : 'Chèque';
+          sendMail({
+            to: ctx.org.main_email,
+            subject: `🔒 Inscription verrouillée — ${ctx.org.name}`,
+            html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
+<p>Excellente nouvelle ! Nous avons bien <b>réceptionné votre caution</b> de 20 000 XPF (${paymentLabel}).</p>
+<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px 16px;border-radius:6px;margin:16px 0">
+  <div style="font-size:16px;font-weight:700;color:#166534">🎉 Votre inscription au Forum de la Rentrée 2026 est maintenant <u>verrouillée</u> !</div>
+  <ul style="margin:10px 0 0 0;padding-left:20px;color:#166534">
+    <li><b>Site :</b> ${ctx.venue?.name || '—'}</li>
+    <li><b>Stand :</b> ${ctx.reg.stand_code}</li>
+    <li><b>Statut :</b> Confirmé</li>
+  </ul>
+</div>
+<p>Vos créneaux d'animation sont également figés. Pour toute modification, contactez ARACOM directement.</p>
+${receiptNumber ? `<p>📄 <b>Votre reçu officiel</b> (n° ${receiptNumber}) est disponible dans votre espace exposant. ${receiptUrl ? `<br/><a href="${receiptUrl}" style="display:inline-block;margin-top:8px;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">📥 Télécharger mon reçu de caution</a>` : ''}</p>` : ''}
+<p>Rendez-vous le <b>vendredi 14 et samedi 15 août 2026</b> pour faire de cette édition un succès !</p>
+<p>L'équipe ARACOM</p>`,
+          }).catch(e => console.error('[mail lock]', e?.message));
+        }
+      } catch (e) { console.error('[lock emails]', e?.message); }
+
+      return json({ ok: true, receipt_number: receiptNumber, receipt_document_id: receiptDocId });
     }
 
     // ARACOM : annuler une demande
@@ -1826,6 +1982,23 @@ export async function POST(request, { params }) {
         status: 'annulee', cancellation_reason: reason, updated_at: new Date(),
       } });
       await db.collection('registrations').updateOne({ id: vreq.registration_id }, { $unset: { validation_request_id: '' }, $set: { updated_at: new Date() } });
+
+      // Email à l'exposant : annulation
+      try {
+        const ctx = await buildExposantContext(vreq.registration_id);
+        if (ctx?.org?.main_email) {
+          sendMail({
+            to: ctx.org.main_email,
+            subject: `Demande de validation annulée — ${ctx.org.name}`,
+            html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
+<p>Votre demande de validation a été annulée par ARACOM.</p>
+${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:16px 0"><b>Motif :</b> ${reason}</div>` : ''}
+<p>Vous pouvez à nouveau ajuster votre site, votre stand ou vos créneaux d'animation puis soumettre une nouvelle demande depuis votre espace exposant.</p>
+<p>L'équipe ARACOM</p>`,
+          }).catch(e => console.error('[mail cancel]', e?.message));
+        }
+      } catch (e) { console.error('[cancel emails]', e?.message); }
+
       return json({ ok: true });
     }
 
