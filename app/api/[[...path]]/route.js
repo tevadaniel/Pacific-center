@@ -524,6 +524,23 @@ export async function GET(request, { params }) {
       return json(docs.map(d => { delete d._id; return d; }));
     }
 
+    // ---- Mail templates (réutilisables) ----
+    if (route === 'mail-templates') {
+      const list = await db.collection('mail_templates').find({}).sort({ created_at: -1 }).toArray();
+      return json(list.map(({ _id, ...rest }) => rest));
+    }
+    if (route.match(/^mail-templates\/[^/]+$/)) {
+      const tpl = await db.collection('mail_templates').findOne({ id: p[1] });
+      if (!tpl) return err('Template introuvable', 404);
+      delete tpl._id;
+      return json(tpl);
+    }
+    // ---- Mail recipient lists (sélections sauvegardées) ----
+    if (route === 'mail-recipient-lists') {
+      const list = await db.collection('mail_recipient_lists').find({}).sort({ created_at: -1 }).toArray();
+      return json(list.map(({ _id, ...rest }) => rest));
+    }
+
     if (route.startsWith('documents/') && route.endsWith('/download')) {
       const id = p[1];
       const doc = await db.collection('registration_documents').findOne({ id });
@@ -1284,6 +1301,41 @@ export async function POST(request, { params }) {
       return json(stand, 201);
     }
 
+    // ---- Mail templates : CREATE ----
+    if (route === 'mail-templates') {
+      const { name, mail_type, subject, body_html, tone, custom_instruction } = body;
+      if (!name?.trim()) return err('Nom du template requis', 400);
+      if (!subject || !body_html) return err('subject et body_html requis', 400);
+      const id = uuid();
+      const tpl = {
+        id, name: name.trim(),
+        mail_type: mail_type || 'annonce',
+        subject, body_html,
+        tone: tone || 'professionnel chaleureux',
+        custom_instruction: custom_instruction || '',
+        created_at: new Date(), updated_at: new Date(),
+      };
+      await db.collection('mail_templates').insertOne(tpl);
+      delete tpl._id;
+      return json({ ok: true, template: tpl });
+    }
+    // ---- Mail recipient lists : CREATE ----
+    if (route === 'mail-recipient-lists') {
+      const { name, registration_ids } = body;
+      if (!name?.trim()) return err('Nom de la liste requis', 400);
+      if (!Array.isArray(registration_ids) || registration_ids.length === 0) return err('Au moins 1 destinataire requis', 400);
+      const id = uuid();
+      const lst = {
+        id, name: name.trim(),
+        registration_ids,
+        count: registration_ids.length,
+        created_at: new Date(), updated_at: new Date(),
+      };
+      await db.collection('mail_recipient_lists').insertOne(lst);
+      delete lst._id;
+      return json({ ok: true, list: lst });
+    }
+
     if (route === 'venue-stands/positions') {
       const { updates } = body;
       if (!Array.isArray(updates)) return err('updates requis', 400);
@@ -1983,6 +2035,14 @@ export async function DELETE(request, { params }) {
     }
     if (route.startsWith('animation-slots/')) {
       await db.collection('animation_slots').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('mail-templates/')) {
+      await db.collection('mail_templates').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('mail-recipient-lists/')) {
+      await db.collection('mail_recipient_lists').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
     if (route.startsWith('venue-stands/')) {

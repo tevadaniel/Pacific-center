@@ -906,8 +906,12 @@ function MailingView() {
   const [testingSmtp, setTestingSmtp] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testRecipient, setTestRecipient] = useState('');
+  const [templates, setTemplates] = useState([]);
+  const [recipientLists, setRecipientLists] = useState([]);
 
   const load = () => Promise.all([api('/api/emails').then(setEmails), api('/api/registrations').then(setRegs)]);
+  const loadTemplates = () => api('/api/mail-templates').then(setTemplates).catch(() => {});
+  const loadLists = () => api('/api/mail-recipient-lists').then(setRecipientLists).catch(() => {});
   const loadSmtp = async () => {
     try {
       const r = await api('/api/mailing/test-smtp', { method: 'POST', body: JSON.stringify({}) });
@@ -916,7 +920,71 @@ function MailingView() {
       setSmtp({ ok: false, configured: false, error: e.message });
     }
   };
-  useEffect(() => { load(); loadSmtp(); }, []);
+  useEffect(() => { load(); loadSmtp(); loadTemplates(); loadLists(); }, []);
+
+  // Save / load templates
+  const saveTemplate = async () => {
+    if (!subject || !body) { toast.error('Générez ou écrivez un mail d\'abord'); return; }
+    const name = window.prompt('Nom du template ?', `${MAIL_TYPES.find(t => t.value === type)?.label || type} — ${new Date().toLocaleDateString('fr-FR')}`);
+    if (!name?.trim()) return;
+    try {
+      await api('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ name, mail_type: type, subject, body_html: body, tone, custom_instruction: customInstruction }),
+      });
+      toast.success(`💾 Template "${name}" sauvegardé`);
+      loadTemplates();
+    } catch (e) { toast.error(e.message); }
+  };
+  const loadTemplate = async (templateId) => {
+    if (!templateId) return;
+    try {
+      const tpl = await api(`/api/mail-templates/${templateId}`);
+      setSubject(tpl.subject);
+      setBody(tpl.body_html);
+      setType(tpl.mail_type);
+      setTone(tpl.tone);
+      setCustomInstruction(tpl.custom_instruction || '');
+      toast.success(`📩 Template "${tpl.name}" chargé`);
+    } catch (e) { toast.error(e.message); }
+  };
+  const deleteTemplate = async (templateId, name) => {
+    if (!confirm(`Supprimer le template "${name}" ?`)) return;
+    await api(`/api/mail-templates/${templateId}`, { method: 'DELETE' });
+    toast.success('Template supprimé');
+    loadTemplates();
+  };
+
+  // Save / load recipient lists
+  const saveRecipientList = async () => {
+    if (selectedIds.size === 0) { toast.error('Sélectionnez au moins 1 destinataire'); return; }
+    const name = window.prompt('Nom de cette liste de destinataires ?', `Liste ${selectedIds.size} dest. — ${new Date().toLocaleDateString('fr-FR')}`);
+    if (!name?.trim()) return;
+    try {
+      await api('/api/mail-recipient-lists', {
+        method: 'POST',
+        body: JSON.stringify({ name, registration_ids: Array.from(selectedIds) }),
+      });
+      toast.success(`💾 Liste "${name}" (${selectedIds.size} dest.) sauvegardée`);
+      loadLists();
+    } catch (e) { toast.error(e.message); }
+  };
+  const loadRecipientList = (listId) => {
+    if (!listId) return;
+    const lst = recipientLists.find(l => l.id === listId);
+    if (!lst) return;
+    setSelectedIds(new Set(lst.registration_ids));
+    setFilter('all'); // show all so the loaded ids are visible
+    setSiteFilter('all');
+    setRecipientSearch('');
+    toast.success(`📋 Liste "${lst.name}" chargée (${lst.count} dest.)`);
+  };
+  const deleteRecipientList = async (listId, name) => {
+    if (!confirm(`Supprimer la liste "${name}" ?`)) return;
+    await api(`/api/mail-recipient-lists/${listId}`, { method: 'DELETE' });
+    toast.success('Liste supprimée');
+    loadLists();
+  };
 
   // Liste filtrée par les filtres (statut + site + recherche)
   const filteredRegs = regs.filter(r => {
@@ -1110,6 +1178,24 @@ function MailingView() {
               {generating ? 'Claude rédige le mail…' : targetRegs.length > 0 ? `Générer un mail pour ${targetRegs.length} destinataire(s)` : 'Sélectionnez des destinataires'}
             </Button>
             {lastUsage && <p className="text-[11px] text-slate-400">Claude Sonnet 4.5 (via Emergent) • {lastUsage.prompt_tokens || lastUsage.input_tokens || 0} tokens in / {lastUsage.completion_tokens || lastUsage.output_tokens || 0} out</p>}
+
+            {/* Templates row */}
+            <div className="pt-3 border-t flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 uppercase">Templates :</span>
+              {templates.length > 0 ? (
+                <Select onValueChange={loadTemplate}>
+                  <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="📩 Charger un template…" /></SelectTrigger>
+                  <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}><span className="truncate">{t.name}</span></SelectItem>)}</SelectContent>
+                </Select>
+              ) : <span className="text-[11px] text-slate-400">Aucun template enregistré</span>}
+              <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={saveTemplate} disabled={!subject || !body}><FileText className="w-3 h-3" /> Sauver template</Button>
+              {templates.length > 0 && (
+                <Select onValueChange={(v) => { const tpl = templates.find(t => t.id === v); if (tpl) deleteTemplate(tpl.id, tpl.name); }}>
+                  <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue placeholder="🗑️ Supprimer…" /></SelectTrigger>
+                  <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}><span className="text-rose-600 truncate">Supp : {t.name}</span></SelectItem>)}</SelectContent>
+                </Select>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -1183,6 +1269,28 @@ function MailingView() {
                 <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={selectAll} disabled={filteredRegs.length === 0}>Tout cocher</Button>
                 <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={selectNone} disabled={selectedIds.size === 0}>Tout décocher</Button>
               </div>
+            </div>
+
+            {/* Saved recipient lists */}
+            <div className="pt-2 border-t space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs uppercase text-slate-500">Listes sauvegardées</span>
+                <Button size="sm" variant="outline" className="h-7 gap-1 text-[10px]" onClick={saveRecipientList} disabled={selectedIds.size === 0}><Plus className="w-3 h-3" /> Sauver</Button>
+              </div>
+              {recipientLists.length === 0 ? (
+                <p className="text-[11px] text-slate-400">Aucune liste enregistrée. Cochez des destinataires puis cliquez sur Sauver.</p>
+              ) : (
+                <div className="space-y-1">
+                  {recipientLists.map(lst => (
+                    <div key={lst.id} className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-slate-50/50">
+                      <button type="button" onClick={() => loadRecipientList(lst.id)} className="flex-1 text-left hover:text-blue-600 transition truncate" title="Charger cette liste">
+                        📋 {lst.name} <span className="text-slate-400">({lst.count})</span>
+                      </button>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0 shrink-0" onClick={() => deleteRecipientList(lst.id, lst.name)} title="Supprimer"><Trash2 className="w-3 h-3 text-rose-500" /></Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="max-h-[360px] overflow-y-auto text-xs space-y-1 pt-2 border-t">
