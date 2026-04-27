@@ -370,7 +370,7 @@ export async function GET(request, { params }) {
         const v = vById[r.venue_id];
         const d = depByReg[r.id];
         delete r._id;
-        return { ...r, organization: o ? { id: o.id, name: o.name, discipline: o.discipline, priority_level: o.priority_level, main_email: o.main_email, main_phone: o.main_phone, contact_name: o.contact_name } : null, venue: v ? { id: v.id, name: v.name, code: v.code } : null, deposit: d ? { status: d.status, amount_xpf: d.amount_xpf } : null };
+        return { ...r, organization: o ? { id: o.id, name: o.name, discipline: o.discipline, priority_level: o.priority_level, main_email: o.main_email, main_phone: o.main_phone, contact_name: o.contact_name, participation_history: o.participation_history || null } : null, venue: v ? { id: v.id, name: v.name, code: v.code } : null, deposit: d ? { status: d.status, amount_xpf: d.amount_xpf } : null };
       });
       if (priority) rows = rows.filter(r => r.organization?.priority_level === priority);
       if (discipline) rows = rows.filter(r => r.organization?.discipline === discipline);
@@ -1594,6 +1594,93 @@ export async function POST(request, { params }) {
         totalSent += sent; totalFailed += failed; processed++;
       }
       return json({ ok: true, processed, sent: totalSent, failed: totalFailed });
+    }
+
+    if (route === 'tools/sync-exposants-history') {
+      // Synchronise l'historique de participation sur les organizations existantes
+      // (matching par nom normalisé). Source: /app/lib/exposants-history.json
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const filePath = path.default.join(process.cwd(), 'lib', 'exposants-history.json');
+      let history = [];
+      try {
+        history = JSON.parse(await fs.default.readFile(filePath, 'utf-8'));
+      } catch (e) {
+        return err('Fichier exposants-history.json introuvable', 500);
+      }
+      const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+      const orgs = await db.collection('organizations').find({}).toArray();
+      let matched = 0, unmatched = [];
+      for (const h of history) {
+        const target = norm(h.name);
+        // Try exact normalized match first, then includes match
+        const found = orgs.find(o => norm(o.name) === target) ||
+          orgs.find(o => target.length > 4 && norm(o.name).includes(target.slice(0, 12))) ||
+          orgs.find(o => target.length > 6 && target.includes(norm(o.name).slice(0, 10)));
+        if (!found) { unmatched.push(h.name); continue; }
+        await db.collection('organizations').updateOne({ id: found.id }, { $set: {
+          participation_history: {
+            y2019: h.y2019, y2020: h.y2020, y2023: h.y2023, y2024: h.y2024, y2025: h.y2025,
+            nb_editions: h.nb_editions || 0,
+            fidelity: h.fidelity || 'Inconnu',
+            site_principal: h.site_principal,
+          },
+          updated_at: new Date(),
+        } });
+        matched++;
+      }
+      return json({ ok: true, total_history_entries: history.length, matched, unmatched_count: unmatched.length, unmatched_sample: unmatched.slice(0, 10) });
+    }
+
+    if (route === 'tools/import-exposants-from-excel') {
+      // Crée de NOUVELLES organizations + registrations à partir de l'Excel pour les exposants non encore présents.
+      // Useful pour pré-charger la base réelle de 102 exposants.
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const filePath = path.default.join(process.cwd(), 'lib', 'exposants-history.json');
+      let history = [];
+      try {
+        history = JSON.parse(await fs.default.readFile(filePath, 'utf-8'));
+      } catch (e) {
+        return err('Fichier exposants-history.json introuvable', 500);
+      }
+      const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const venueByName = {}; venues.forEach(v => { venueByName[norm(v.name)] = v; });
+      const existing = await db.collection('organizations').find({}).toArray();
+      const existingNames = new Set(existing.map(o => norm(o.name)));
+      let created = 0; let skipped = 0;
+      for (const h of history) {
+        const k = norm(h.name);
+        if (existingNames.has(k)) { skipped++; continue; }
+        const venue = venueByName[norm(h.site_principal)] || null;
+        const orgId = uuid();
+        await db.collection('organizations').insertOne({
+          id: orgId, name: h.name, discipline: h.discipline || 'Autre',
+          contact_name: '', main_email: `${k.replace(/\s+/g, '.').slice(0, 30)}@aracom-import.local`,
+          main_phone: '', description: '',
+          participation_history: {
+            y2019: h.y2019, y2020: h.y2020, y2023: h.y2023, y2024: h.y2024, y2025: h.y2025,
+            nb_editions: h.nb_editions || 0,
+            fidelity: h.fidelity || 'Inconnu',
+            site_principal: h.site_principal,
+          },
+          created_at: new Date(), updated_at: new Date(),
+        });
+        await db.collection('registrations').insertOne({
+          id: uuid(), edition_id: EDITION_ID,
+          organization_id: orgId,
+          venue_id: venue?.id || null,
+          stand_code: null, status: 'prospect',
+          completion_percent: 0,
+          is_convention_signed: false, is_insurance_uploaded: false, is_deposit_received: false,
+          planned_arrival_time: '09:00', planned_departure_time: '17:00',
+          friday_slot_label: null, saturday_slot_label: null,
+          created_at: new Date(), updated_at: new Date(),
+        });
+        created++;
+      }
+      return json({ ok: true, total_in_excel: history.length, created, skipped_existing: skipped });
     }
 
     if (route === 'venue-stands/positions') {

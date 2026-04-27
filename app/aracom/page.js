@@ -1066,6 +1066,7 @@ function MailingView() {
   const [customInstruction, setCustomInstruction] = useState('');
   const [filter, setFilter] = useState('a_relancer');
   const [siteFilter, setSiteFilter] = useState('all');
+  const [yearFilter, setYearFilter] = useState('all'); // '2019', '2020', '2023', '2024', '2025', 'fidele', 'regulier', 'ponctuel', 'jamais'
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [generating, setGenerating] = useState(false);
@@ -1163,6 +1164,22 @@ function MailingView() {
     if (filter === 'no_caution' && r.deposit?.status === 'recue') return false;
     if (filter === 'no_insurance' && r.is_insurance_uploaded) return false;
     if (siteFilter !== 'all' && r.venue?.name !== siteFilter) return false;
+    if (yearFilter !== 'all') {
+      const h = r.organization?.participation_history;
+      if (yearFilter === 'no_history') {
+        if (h) return false;
+      } else if (['2019', '2020', '2023', '2024', '2025'].includes(yearFilter)) {
+        if (!h || !h[`y${yearFilter}`]) return false;
+      } else if (yearFilter === 'fidele') {
+        if (!h || !(h.fidelity || '').includes('Fidèle')) return false;
+      } else if (yearFilter === 'regulier') {
+        if (!h || h.fidelity !== 'Régulier') return false;
+      } else if (yearFilter === 'ponctuel') {
+        if (!h || h.fidelity !== 'Ponctuel') return false;
+      } else if (yearFilter === 'jamais') {
+        if (h && h.nb_editions > 0) return false;
+      }
+    }
     if (recipientSearch.trim()) {
       const q = recipientSearch.trim().toLowerCase();
       const hit = (r.organization?.name || '').toLowerCase().includes(q) ||
@@ -1179,7 +1196,7 @@ function MailingView() {
   useEffect(() => {
     setSelectedIds(new Set(filteredRegs.map(r => r.id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, siteFilter, regs.length]);
+  }, [filter, siteFilter, yearFilter, regs.length]);
 
   // Destinataires effectifs (= cochés ET visibles dans le filtre)
   const targetRegs = filteredRegs.filter(r => selectedIds.has(r.id));
@@ -1491,6 +1508,24 @@ function MailingView() {
               </Select>
             </div>
             <div>
+              <Label className="text-xs uppercase text-slate-500">Année / Fidélité</Label>
+              <Select value={yearFilter} onValueChange={setYearFilter}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes années</SelectItem>
+                  <SelectItem value="2025">📅 Présent en 2025</SelectItem>
+                  <SelectItem value="2024">📅 Présent en 2024</SelectItem>
+                  <SelectItem value="2023">📅 Présent en 2023</SelectItem>
+                  <SelectItem value="2020">📅 Présent en 2020</SelectItem>
+                  <SelectItem value="2019">📅 Présent en 2019</SelectItem>
+                  <SelectItem value="fidele">⭐ Fidèles (toutes éditions)</SelectItem>
+                  <SelectItem value="regulier">🔁 Réguliers</SelectItem>
+                  <SelectItem value="ponctuel">📌 Ponctuels</SelectItem>
+                  <SelectItem value="jamais">🆕 Jamais participé / nouveaux</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label className="text-xs uppercase text-slate-500">Recherche (nom, email, stand)</Label>
               <div className="relative mt-1">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -1535,6 +1570,7 @@ function MailingView() {
               {filteredRegs.length === 0 && <p className="text-slate-400 text-center py-3">Aucun exposant trouvé</p>}
               {filteredRegs.slice(0, 100).map(r => {
                 const checked = selectedIds.has(r.id);
+                const h = r.organization?.participation_history;
                 return (
                   <div key={r.id} className={`flex items-center gap-2 py-1.5 px-2 rounded border ${checked ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
                     <input
@@ -1544,11 +1580,18 @@ function MailingView() {
                       className="w-4 h-4 cursor-pointer accent-blue-600 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-medium truncate">{r.organization?.name}</span>
                         {r.stand_code && <span className="text-[10px] font-mono text-slate-400 shrink-0">{r.stand_code}</span>}
+                        {h?.fidelity?.includes('Fidèle') && <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-700 border border-amber-200 shrink-0" title={`${h.nb_editions} éditions`}>⭐</span>}
+                        {h?.fidelity === 'Régulier' && <span className="text-[9px] px-1 rounded bg-blue-100 text-blue-700 border border-blue-200 shrink-0" title={`${h.nb_editions} éditions`}>🔁</span>}
+                        {h?.fidelity === 'Ponctuel' && <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0" title={`${h.nb_editions} éditions`}>📌</span>}
+                        {!h && <span className="text-[9px] px-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">🆕</span>}
                       </div>
-                      <div className="text-[10px] text-slate-500 truncate">{r.organization?.main_email}</div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {r.organization?.main_email}
+                        {h && <span className="text-slate-400"> · {[h.y2025 && '25', h.y2024 && '24', h.y2023 && '23', h.y2020 && '20', h.y2019 && '19'].filter(Boolean).join('/')}</span>}
+                      </div>
                     </div>
                     <Button
                       size="sm"
