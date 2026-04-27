@@ -73,14 +73,19 @@ export default function ExposantPortal() {
   const r = data.registration, o = data.organization, v = data.venue, d = data.deposit;
   const docs = data.documents || [];
   const cautionReceiptDoc = docs.find(dd => dd.document_type === 'recu_caution');
+  const slotsArr = data.slots || [];
+  const animationsCount = slotsArr.length;
+  const validationRequestId = r.validation_request_id;
+  const isLocked = !!r.is_locked || r.status === 'confirme';
   const checks = [
     { ok: !!r.venue_id && !!r.stand_code, label: 'Site & stand pré-réservés' },
+    { ok: animationsCount > 0, label: 'Au moins un créneau d\'animation choisi' },
+    { ok: !!validationRequestId || isLocked, label: 'Demande de validation envoyée à ARACOM' },
     { ok: r.is_convention_signed || docs.some(dd => dd.document_type === 'convention'), label: 'Convention signée' },
     { ok: docs.some(dd => dd.document_type === 'assurance'), label: 'Attestation d\'assurance déposée' },
     { ok: d?.status === 'recue', label: 'Caution reçue par ARACOM' },
     { ok: !!cautionReceiptDoc, label: 'Reçu de caution disponible (fourni par ARACOM)' },
-    { ok: (data.slots || []).length > 0, label: 'Au moins un créneau d\'animation choisi' },
-    { ok: r.status === 'confirme', label: 'Inscription confirmée par ARACOM' },
+    { ok: isLocked, label: '🔒 Inscription verrouillée par ARACOM' },
   ];
   const completion = Math.round((checks.filter(c => c.ok).length / checks.length) * 100);
   const isPreReserved = !!r.is_pre_reserved && r.status !== 'confirme';
@@ -120,6 +125,46 @@ export default function ExposantPortal() {
               <div>
                 <div className="font-semibold text-amber-900">Votre stand est pré-réservé</div>
                 <p className="text-sm text-amber-800 mt-0.5">Le stand <b className="font-mono">{r.stand_code}</b> sur le site <b>{v?.name}</b> vous est réservé. <b>ARACOM le confirmera définitivement dès réception de votre caution de 20 000 XPF</b> (chèque, virement ou espèces).</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* CTA "Confirmer ma présence" — visible quand site + stand + au moins 1 anim */}
+        {!isLocked && (() => {
+          const canRequest = !!r.venue_id && !!r.stand_code && animationsCount > 0;
+          const alreadyRequested = !!validationRequestId;
+          if (alreadyRequested) {
+            return <ValidationStatusCard registrationId={r.id} validationRequestId={validationRequestId} onRefresh={load} />;
+          }
+          return (
+            <Card className={`border-2 ${canRequest ? 'border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+              <CardContent className="p-5 flex flex-col md:flex-row md:items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className={`w-5 h-5 ${canRequest ? 'text-violet-600' : 'text-slate-400'}`} />
+                    <h3 className={`text-lg font-bold ${canRequest ? 'text-violet-900' : 'text-slate-500'}`}>Confirmer ma présence avec dépôt de caution</h3>
+                  </div>
+                  <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
+                    {canRequest
+                      ? <>Tout est prêt ! Cliquez pour <b>verrouiller votre place</b>. ARACOM recevra une notification et vous contactera pour fixer un RDV de remise de la caution (<b>chèque ou espèces</b> uniquement, 20 000 XPF).</>
+                      : <>Avant de pouvoir confirmer votre présence : choisissez un site & un stand <i>(onglet Sites & plan)</i>, puis au moins 1 créneau d&apos;animation par jour <i>(onglet Animations)</i>.</>
+                    }
+                  </p>
+                </div>
+                <ConfirmPresenceButton registrationId={r.id} disabled={!canRequest} onDone={load} />
+              </CardContent>
+            </Card>
+          );
+        })()}
+
+        {isLocked && (
+          <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="text-4xl">🔒</div>
+              <div className="flex-1">
+                <div className="text-lg font-bold text-emerald-900">Inscription verrouillée par ARACOM</div>
+                <p className="text-sm text-emerald-800">Votre site, votre stand et vos créneaux d&apos;animation sont définitifs. Pour toute modification, contactez ARACOM directement.</p>
               </div>
             </CardContent>
           </Card>

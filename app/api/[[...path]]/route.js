@@ -566,6 +566,23 @@ export async function GET(request, { params }) {
       return json(list.map(({ _id, ...rest }) => rest));
     }
 
+    // ---- Validation requests (ARACOM listing) ----
+    if (route === 'validation-requests') {
+      const status = url.searchParams.get('status');
+      const q = status ? { status } : {};
+      const list = await db.collection('validation_requests').find(q).sort({ created_at: -1 }).toArray();
+      const orgIds = [...new Set(list.map(r => r.organization_id))];
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const venues = await db.collection('venues').find({ id: { $in: list.map(r => r.venue_id) } }).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const vById = Object.fromEntries(venues.map(v => [v.id, v]));
+      return json(list.map(r => ({
+        ...r, _id: undefined,
+        organization: orgById[r.organization_id] ? { id: orgById[r.organization_id].id, name: orgById[r.organization_id].name, main_email: orgById[r.organization_id].main_email, main_phone: orgById[r.organization_id].main_phone, contact_name: orgById[r.organization_id].contact_name, discipline: orgById[r.organization_id].discipline } : null,
+        venue: vById[r.venue_id] ? { id: vById[r.venue_id].id, name: vById[r.venue_id].name, code: vById[r.venue_id].code } : null,
+      })));
+    }
+
     // ---- Scheduled emails listing ----
     if (route === 'mailing/scheduled') {
       const list = await db.collection('email_campaigns').find({ status: 'programmee' }).sort({ scheduled_at: 1 }).toArray();
@@ -1683,6 +1700,135 @@ export async function POST(request, { params }) {
       return json({ ok: true, total_in_excel: history.length, created, skipped_existing: skipped });
     }
 
+    // ============ VALIDATION REQUESTS (workflow lock) ============
+    // Exposant : demande la validation après avoir choisi site + créneau
+    if (route.match(/^registrations\/[^/]+\/request-validation$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (reg.status === 'confirme') return err('Inscription déjà confirmée', 400);
+      if (!reg.venue_id) return err('Choisissez d\'abord un site dans Sites & plan', 400);
+      if (!reg.stand_code) return err('Pré-réservez un stand avant de demander la validation', 400);
+      // Vérifier qu'au moins 1 créneau animation existe pour ce reg
+      const slots = await db.collection('animation_slots').find({ registration_id: regId }).toArray();
+      if (slots.length === 0) return err('Choisissez au moins 1 créneau d\'animation avant de valider', 400);
+
+      const { rdv_proposal = '', preferred_payment = 'cheque', notes = '' } = body;
+      // Cancel any previous pending request
+      await db.collection('validation_requests').updateMany(
+        { registration_id: regId, status: { $in: ['en_attente', 'rdv_fixe'] } },
+        { $set: { status: 'annulee', updated_at: new Date() } }
+      );
+      const reqId = uuid();
+      await db.collection('validation_requests').insertOne({
+        id: reqId,
+        registration_id: regId,
+        organization_id: reg.organization_id,
+        venue_id: reg.venue_id,
+        stand_code: reg.stand_code,
+        status: 'en_attente', // en_attente -> rdv_fixe -> verrouille | annulee
+        preferred_payment, // 'cheque' ou 'especes'
+        rdv_proposal,
+        notes,
+        rdv_date: null,
+        rdv_location: null,
+        locked_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      // Update registration flag
+      await db.collection('registrations').updateOne({ id: regId }, { $set: {
+        validation_request_id: reqId,
+        validation_requested_at: new Date(),
+        updated_at: new Date(),
+      } });
+      return json({ ok: true, validation_request_id: reqId });
+    }
+
+    // ARACOM : fixer un RDV pour la collecte de caution
+    if (route.match(/^validation-requests\/[^/]+\/set-rdv$/)) {
+      const reqId = p[1];
+      const { rdv_date, rdv_location, rdv_notes = '' } = body;
+      if (!rdv_date) return err('rdv_date requis', 400);
+      const r = await db.collection('validation_requests').findOne({ id: reqId });
+      if (!r) return err('Demande introuvable', 404);
+      await db.collection('validation_requests').updateOne({ id: reqId }, { $set: {
+        status: 'rdv_fixe',
+        rdv_date: new Date(rdv_date),
+        rdv_location: rdv_location || '',
+        rdv_notes,
+        updated_at: new Date(),
+      } });
+      return json({ ok: true });
+    }
+
+    // ARACOM : verrouille DÉFINITIVEMENT (caution reçue + tout figé)
+    if (route.match(/^validation-requests\/[^/]+\/lock$/)) {
+      const reqId = p[1];
+      const { payment_mode = 'cheque', amount_xpf = 20000 } = body;
+      const vreq = await db.collection('validation_requests').findOne({ id: reqId });
+      if (!vreq) return err('Demande introuvable', 404);
+      const reg = await db.collection('registrations').findOne({ id: vreq.registration_id });
+      if (!reg) return err('Inscription liée introuvable', 404);
+      // Lock validation request
+      await db.collection('validation_requests').updateOne({ id: reqId }, { $set: {
+        status: 'verrouille',
+        locked_at: new Date(),
+        payment_mode,
+        amount_xpf,
+        updated_at: new Date(),
+      } });
+      // Confirm registration: status confirme, deposit recue, lock everything
+      await db.collection('registrations').updateOne({ id: vreq.registration_id }, { $set: {
+        status: 'confirme',
+        is_pre_reserved: false,
+        is_deposit_received: true,
+        is_locked: true,
+        confirmed_at: new Date(),
+        locked_at: new Date(),
+        updated_at: new Date(),
+      } });
+      // Mark deposit
+      const dep = await db.collection('deposit_transactions').findOne({ registration_id: vreq.registration_id });
+      if (dep) {
+        await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: {
+          status: 'recue', amount_xpf, deposit_mode: payment_mode,
+          received_at: new Date(), updated_at: new Date(),
+        } });
+      } else {
+        await db.collection('deposit_transactions').insertOne({
+          id: uuid(), registration_id: vreq.registration_id,
+          amount_xpf, status: 'recue', deposit_mode: payment_mode,
+          received_at: new Date(), created_at: new Date(), updated_at: new Date(),
+        });
+      }
+      // Lock animation slots (mark as locked so DELETE refuses)
+      await db.collection('animation_slots').updateMany(
+        { registration_id: vreq.registration_id },
+        { $set: { is_locked: true, locked_at: new Date(), updated_at: new Date() } }
+      );
+      // Confirm stand assignment
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: vreq.registration_id, status: 'pre_reserve' },
+        { $set: { status: 'confirme', updated_at: new Date() } }
+      );
+      return json({ ok: true });
+    }
+
+    // ARACOM : annuler une demande
+    if (route.match(/^validation-requests\/[^/]+\/cancel$/)) {
+      const reqId = p[1];
+      const { reason = '' } = body;
+      const vreq = await db.collection('validation_requests').findOne({ id: reqId });
+      if (!vreq) return err('Demande introuvable', 404);
+      if (vreq.status === 'verrouille') return err('Impossible d\'annuler une demande déjà verrouillée', 400);
+      await db.collection('validation_requests').updateOne({ id: reqId }, { $set: {
+        status: 'annulee', cancellation_reason: reason, updated_at: new Date(),
+      } });
+      await db.collection('registrations').updateOne({ id: vreq.registration_id }, { $unset: { validation_request_id: '' }, $set: { updated_at: new Date() } });
+      return json({ ok: true });
+    }
+
     if (route === 'venue-stands/positions') {
       const { updates } = body;
       if (!Array.isArray(updates)) return err('updates requis', 400);
@@ -2384,6 +2530,8 @@ export async function DELETE(request, { params }) {
       return json({ ok: true });
     }
     if (route.startsWith('animation-slots/')) {
+      const slot = await db.collection('animation_slots').findOne({ id: p[1] });
+      if (slot?.is_locked) return err('Ce créneau est verrouillé par ARACOM et ne peut plus être supprimé. Contactez l\'organisateur.', 403);
       await db.collection('animation_slots').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
