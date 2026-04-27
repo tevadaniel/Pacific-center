@@ -1337,7 +1337,7 @@ export async function POST(request, { params }) {
       if (!reg) return err('Inscription introuvable', 404);
       const stand = await db.collection('venue_stands').findOne({ id: stand_id });
       if (!stand) return err('Stand introuvable', 404);
-      // Check the stand is FREE (not assigned to another registration)
+      // Check the stand is FREE (not assigned to another registration via stand_code)
       const occupant = await db.collection('registrations').findOne({
         edition_id: EDITION_ID,
         venue_id: stand.venue_id,
@@ -1345,7 +1345,14 @@ export async function POST(request, { params }) {
         id: { $ne: regId },
       });
       if (occupant) return err('Ce stand est déjà pré-réservé ou attribué à un autre exposant', 409);
-      // Update registration: assign venue + stand, status pre_reserve (a_confirmer)
+      // Also check via stand_assignments
+      const existingAssignment = await db.collection('stand_assignments').findOne({
+        venue_stand_id: stand.id,
+        status: { $ne: 'annule' },
+        registration_id: { $ne: regId },
+      });
+      if (existingAssignment) return err('Ce stand est déjà attribué via une affectation', 409);
+      // Update registration: assign venue + stand
       const upd = {
         venue_id: stand.venue_id,
         stand_code: stand.stand_code,
@@ -1355,6 +1362,15 @@ export async function POST(request, { params }) {
         updated_at: new Date(),
       };
       await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
+      // Sync stand_assignments — remove any old assignment for this registration, add a new one
+      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
+      await db.collection('stand_assignments').insertOne({
+        id: uuid(),
+        registration_id: regId,
+        venue_stand_id: stand.id,
+        status: 'pre_reserve',
+        created_at: new Date(), updated_at: new Date(),
+      });
       await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id });
       return json({ ok: true, stand_code: stand.stand_code, status: upd.status });
     }
@@ -1371,6 +1387,8 @@ export async function POST(request, { params }) {
         pre_reserved_at: null,
         updated_at: new Date(),
       } });
+      // Cancel any active stand_assignments for this registration
+      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
       return json({ ok: true });
     }
 
@@ -1382,41 +1400,52 @@ export async function POST(request, { params }) {
       await db.collection('registrations').updateOne({ id: regId }, { $set: {
         status: 'confirme',
         is_pre_reserved: false,
+        is_deposit_received: true,
         confirmed_at: new Date(),
         updated_at: new Date(),
       } });
-      // Mark deposit as received if not already
-      const dep = await db.collection('deposits').findOne({ registration_id: regId });
+      // Mark deposit as received (collection is deposit_transactions)
+      const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
       if (dep && dep.status !== 'recue') {
-        await db.collection('deposits').updateOne({ id: dep.id }, { $set: {
+        await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: {
           status: 'recue', received_at: new Date(), updated_at: new Date(),
         } });
+      } else if (!dep) {
+        // Create one if missing
+        await db.collection('deposit_transactions').insertOne({
+          id: uuid(), registration_id: regId, amount_xpf: 20000, status: 'recue',
+          received_at: new Date(), created_at: new Date(), updated_at: new Date(),
+        });
       }
+      // Confirm any pre_reserve assignment
+      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: 'pre_reserve' }, { $set: { status: 'confirme', updated_at: new Date() } });
       return json({ ok: true });
     }
 
-    // ---- ARACOM : générer un reçu de caution PDF-like (texte HTML) pour un exposant ----
+    // ---- ARACOM : générer un reçu de caution (HTML) pour un exposant ----
     if (route.match(/^registrations\/[^/]+\/generate-caution-receipt$/)) {
       const regId = p[1];
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      const dep = await db.collection('deposits').findOne({ registration_id: regId });
+      const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
       const venue = await db.collection('venues').findOne({ id: reg.venue_id });
       const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937}h1{color:#1d4ed8}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}</style></head><body><h1>REÇU DE CAUTION</h1><p><b>Forum de la Rentrée 2026</b> · 14 & 15 août 2026<br>Organisé par <b>ARACOM</b></p><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode</span><span>${dep?.deposit_mode || 'Chèque / Virement / Espèces'}</span></div></div><div style="text-align:center;padding:18px 0"><div class="label">Montant</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Reçu en garantie de présence sur le Forum</div></div><p style="font-size:12px;color:#64748b">Cette caution sera restituée intégralement sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées.</p><p style="margin-top:40px"><i>L'équipe ARACOM</i></p></body></html>`;
-      // Save as document of type "recu_caution" attached to registration
+      // Save in registration_documents collection (matches the GET /api/documents endpoint)
       const docId = uuid();
-      await db.collection('documents').insertOne({
+      const fileName = `Recu_caution_${(org?.name || 'exposant').replace(/\s+/g,'_')}_${receiptNumber}.html`;
+      await db.collection('registration_documents').insertOne({
         id: docId,
         registration_id: regId,
         document_type: 'recu_caution',
-        file_name: `Recu_caution_${(org?.name || 'exposant').replace(/\s+/g,'_')}_${receiptNumber}.html`,
-        file_type: 'text/html',
+        file_name: fileName,
+        mime_type: 'text/html',
         file_size: html.length,
-        file_data_base64: Buffer.from(html, 'utf-8').toString('base64'),
+        file_data: Buffer.from(html, 'utf-8').toString('base64'),
         status: 'valide',
         uploaded_by: 'aracom',
+        uploaded_at: new Date(),
         validated_at: new Date(),
         receipt_number: receiptNumber,
         created_at: new Date(), updated_at: new Date(),
