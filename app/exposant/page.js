@@ -24,7 +24,7 @@ import {
 import {
   REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
   DOCUMENT_TYPE_LABEL, EVENT_DATES, EVENT_OPENING_TIME, EVENT_CLOSING_TIME,
-  ANIMATION_HOURLY_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS,
+  ANIMATION_HOURLY_SLOTS, DEMO_ZONE_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS, MAX_DEMO_PARALLEL, MIN_ANIMATION_SLOTS_PER_DAY,
   LOGISTIQUE_PROVISIONS, LOGISTIQUE_RULES, DISCIPLINES,
 } from '@/lib/constants';
 
@@ -184,7 +184,7 @@ export default function ExposantPortal() {
           </TabsContent>
 
           <TabsContent value="animation" className="space-y-4">
-            <AnimationsBlock registrationId={r.id} venueId={r.venue_id} slots={data.slots} onRefresh={load} />
+            <AnimationsBlock registrationId={r.id} venueId={r.venue_id} venueName={v?.name} slots={data.slots} onRefresh={load} />
           </TabsContent>
 
           <TabsContent value="docs" className="space-y-4">
@@ -437,13 +437,13 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
 }
 
 // =====================================================================
-// ANIMATIONS — créneaux horaires fixes (pas de "proposer un créneau")
+// ANIMATIONS — créneaux fixes ; site obligatoire ; stand vs zone démo
 // =====================================================================
-function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
+function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRefresh }) {
   const [allSlots, setAllSlots] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(null); // {day, start, end} for description popup
-  const [form, setForm] = useState({ title: '', description: '', location_type: 'stand' });
+  const [editing, setEditing] = useState(null); // {day, start, end, location_type}
+  const [form, setForm] = useState({ title: '', description: '' });
 
   const loadSlots = async () => {
     if (!venueId) return;
@@ -452,34 +452,42 @@ function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
   };
   useEffect(() => { loadSlots(); }, [venueId, slots.length]);
 
+  // Si aucun site choisi : message bloquant explicite
   if (!venueId) {
     return (
-      <Card><CardContent className="py-8 text-center text-slate-500">
-        <Info className="w-10 h-10 mx-auto text-slate-400 mb-2" />
-        Choisissez d&apos;abord un site dans l&apos;onglet <b>Sites & plan</b> pour voir les créneaux disponibles.
-      </CardContent></Card>
+      <Card className="border-amber-300 bg-amber-50/40">
+        <CardContent className="py-10 text-center space-y-3">
+          <AlertCircle className="w-12 h-12 mx-auto text-amber-600" />
+          <h3 className="text-lg font-semibold text-amber-900">Choisissez d&apos;abord votre site</h3>
+          <p className="text-sm text-amber-800 max-w-md mx-auto">
+            Les créneaux d&apos;animation dépendent du site sur lequel vous serez. Allez dans l&apos;onglet <b>Sites &amp; plan</b> pour pré-réserver un stand, puis revenez ici pour planifier vos animations.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
-  // For each (day, slot), figure out who's booked it
-  const isBookedBySomeoneElse = (day, slot) => {
-    const matches = allSlots.filter(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end);
-    // If MAX_PARALLEL_ANIMATIONS or more bookings AND none from me, slot is full
-    const fromOthers = matches.filter(s => s.registration_id !== registrationId);
-    return fromOthers.length >= MAX_PARALLEL_ANIMATIONS;
-  };
-  const myBooking = (day, slot) => allSlots.find(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end && s.registration_id === registrationId);
-  const otherBookings = (day, slot) => allSlots.filter(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end && s.registration_id !== registrationId);
-
+  // Stand = personnel (jamais de conflit). Démo = partagé (max 1 par créneau).
+  const standSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && s.location_type === 'stand');
+  const demoSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && s.location_type === 'zone_animation');
   const myCountForDay = (day) => allSlots.filter(s => s.day_label === day && s.registration_id === registrationId).length;
 
-  const startBooking = (day, slot) => {
-    if (myCountForDay(day) >= MAX_ANIMATION_SLOTS_PER_DAY) {
-      toast.error(`Max ${MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour`);
+  const standMine = (day, slot) => standSlotsByDay(day).find(s => s.start_time === slot.start && s.end_time === slot.end && s.registration_id === registrationId);
+  const demoBookings = (day, slot) => demoSlotsByDay(day).filter(s => s.start_time === slot.start && s.end_time === slot.end);
+  const demoMine = (day, slot) => demoBookings(day, slot).find(s => s.registration_id === registrationId);
+  const demoOccupiedBy = (day, slot) => demoBookings(day, slot).find(s => s.registration_id !== registrationId);
+
+  const startBooking = (day, slot, location_type) => {
+    if (location_type === 'zone_animation' && demoOccupiedBy(day, slot)) {
+      toast.error(`Créneau déjà réservé par ${demoOccupiedBy(day, slot).organization_name}`);
       return;
     }
-    setEditing({ day, start: slot.start, end: slot.end });
-    setForm({ title: '', description: '', location_type: 'stand' });
+    if (myCountForDay(day) >= MAX_ANIMATION_SLOTS_PER_DAY) {
+      toast.error(`Vous avez atteint la limite de ${MAX_ANIMATION_SLOTS_PER_DAY} créneaux/jour`);
+      return;
+    }
+    setEditing({ day, start: slot.start, end: slot.end, location_type });
+    setForm({ title: '', description: '' });
   };
 
   const submitBooking = async () => {
@@ -494,11 +502,11 @@ function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
           day_label: editing.day,
           start_time: editing.start,
           end_time: editing.end,
-          duration_minutes: 60,
+          duration_minutes: editing.location_type === 'zone_animation' ? 30 : 60,
           title: form.title,
           description: form.description,
-          slot_type: form.location_type,
-          location_type: form.location_type,
+          slot_type: editing.location_type,
+          location_type: editing.location_type,
         }),
       });
       toast.success(`✨ Créneau ${editing.start}–${editing.end} réservé !`);
@@ -521,84 +529,159 @@ function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
     finally { setBusy(false); }
   };
 
+  const dayCompleteness = (day) => {
+    const c = myCountForDay(day);
+    if (c >= MIN_ANIMATION_SLOTS_PER_DAY) return { ok: true, label: `${c} créneau${c > 1 ? 'x' : ''}` };
+    return { ok: false, label: 'Aucun créneau choisi' };
+  };
+
   return (
     <div className="space-y-4">
       <Card className="bg-blue-50/30 border-blue-200">
         <CardContent className="p-4 flex items-start gap-3">
           <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-          <div className="text-sm text-blue-900">
-            <p><b>Sélectionnez vos créneaux d&apos;animation</b> directement sur la grille horaire ci-dessous.</p>
-            <p className="text-xs mt-1 text-blue-800">Vous pouvez réserver jusqu&apos;à <b>{MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour</b>. Les créneaux déjà pris par d&apos;autres exposants apparaissent en gris et ne sont plus disponibles si la capacité ({MAX_PARALLEL_ANIMATIONS} en parallèle max par site) est atteinte.</p>
+          <div className="text-sm text-blue-900 space-y-1">
+            <p>📍 <b>Site sélectionné :</b> {venueName || 'Votre site'} — les créneaux affichés sont spécifiques à ce site.</p>
+            <p>👉 Pour chaque jour, choisissez <b>au moins 1 créneau</b> ({MAX_ANIMATION_SLOTS_PER_DAY} max). Deux types de créneaux possibles :</p>
+            <ul className="text-xs space-y-0.5 ml-3">
+              <li>🟦 <b>Sur mon stand</b> : 1h, illimité (votre stand vous appartient pour la journée)</li>
+              <li>🟧 <b>Zone de démonstration</b> : 30min, partagée — <b>1 seul exposant à la fois</b></li>
+            </ul>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid md:grid-cols-2 gap-4">
-        {EVENT_DATES.map(d => (
-          <Card key={d.label}>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> {d.display}</CardTitle>
-              <p className="text-xs text-slate-500">Vos créneaux : {myCountForDay(d.label)}/{MAX_ANIMATION_SLOTS_PER_DAY}</p>
-            </CardHeader>
-            <CardContent className="space-y-1.5">
-              {ANIMATION_HOURLY_SLOTS.map(slot => {
-                const mine = myBooking(d.label, slot);
-                const others = otherBookings(d.label, slot);
-                const full = isBookedBySomeoneElse(d.label, slot);
-                if (mine) {
-                  return (
-                    <div key={slot.start} className="border-2 border-blue-400 bg-blue-50 rounded-md p-3 flex items-center justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-blue-700">{slot.start} → {slot.end}</span>
-                          <Badge className="bg-blue-600 text-[10px]">VOUS</Badge>
-                        </div>
-                        <div className="text-sm font-medium truncate">{mine.title}</div>
-                        {mine.description && <div className="text-xs text-slate-600 truncate">{mine.description}</div>}
-                      </div>
-                      <Button size="sm" variant="ghost" onClick={() => removeBooking(mine.id)} disabled={busy}><Trash2 className="w-3.5 h-3.5 text-red-600" /></Button>
-                    </div>
-                  );
-                }
-                return (
-                  <button
-                    key={slot.start}
-                    type="button"
-                    disabled={full || busy || myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY}
-                    onClick={() => startBooking(d.label, slot)}
-                    className={`w-full text-left border rounded-md p-3 flex items-center justify-between gap-2 transition disabled:cursor-not-allowed ${
-                      full ? 'bg-slate-100 border-slate-200 opacity-60' :
-                      myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY ? 'bg-slate-50 border-slate-200 opacity-60' :
-                      'bg-white hover:bg-emerald-50 hover:border-emerald-300'
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold">{slot.start} → {slot.end}</span>
-                        {full ? <Badge variant="secondary" className="text-[10px]">Complet</Badge> :
-                          others.length > 0 ? <Badge variant="secondary" className="text-[10px]">{others.length} autre(s)</Badge> :
-                          <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700">Libre</Badge>}
-                      </div>
-                      {others.length > 0 && (
-                        <div className="text-[11px] text-slate-500 truncate mt-0.5">{others.map(o => o.organization_name).join(' • ')}</div>
-                      )}
-                    </div>
-                    {!full && myCountForDay(d.label) < MAX_ANIMATION_SLOTS_PER_DAY && <Plus className="w-4 h-4 text-emerald-600 shrink-0" />}
-                  </button>
-                );
-              })}
-            </CardContent>
-          </Card>
-        ))}
+      {/* Daily completeness summary */}
+      <div className="grid grid-cols-2 gap-3">
+        {EVENT_DATES.map(d => {
+          const dc = dayCompleteness(d.label);
+          return (
+            <div key={d.label} className={`rounded-md border-2 p-3 ${dc.ok ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-300'}`}>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase">{d.display}</div>
+                {dc.ok ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-amber-600" />}
+              </div>
+              <div className={`text-sm font-medium mt-0.5 ${dc.ok ? 'text-emerald-700' : 'text-amber-700'}`}>{dc.label}</div>
+            </div>
+          );
+        })}
       </div>
+
+      {EVENT_DATES.map(d => (
+        <Card key={d.label}>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" /> {d.display}
+              <Badge variant="secondary" className="text-[10px] ml-auto">{myCountForDay(d.label)}/{MAX_ANIMATION_SLOTS_PER_DAY} créneaux</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* === SUR MON STAND (1h, no conflict) === */}
+            <div>
+              <div className="font-semibold text-xs uppercase text-blue-700 mb-2 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-600" /> Sur mon stand <span className="text-slate-400 font-normal normal-case">— créneaux d&apos;1h, votre stand</span></div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {ANIMATION_HOURLY_SLOTS.map(slot => {
+                  const mine = standMine(d.label, slot);
+                  if (mine) {
+                    return (
+                      <div key={slot.start} className="border-2 border-blue-400 bg-blue-50 rounded-md p-2 text-xs">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-mono font-bold text-blue-700">{slot.start}–{slot.end}</span>
+                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => removeBooking(mine.id)} disabled={busy}><Trash2 className="w-3 h-3 text-rose-600" /></Button>
+                        </div>
+                        <div className="font-medium text-[11px] mt-0.5 truncate">{mine.title}</div>
+                      </div>
+                    );
+                  }
+                  const overLimit = myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY;
+                  return (
+                    <button
+                      key={slot.start}
+                      type="button"
+                      disabled={overLimit || busy}
+                      onClick={() => startBooking(d.label, slot, 'stand')}
+                      className={`border rounded-md p-2 text-xs text-left transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                        overLimit ? 'bg-slate-50 border-slate-200' :
+                        'bg-white border-slate-200 hover:bg-blue-50 hover:border-blue-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono font-bold">{slot.start}</span>
+                        {!overLimit && <Plus className="w-3 h-3 text-blue-600 ml-auto" />}
+                      </div>
+                      <div className="text-[10px] text-emerald-700 mt-0.5">Libre</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* === ZONE DE DÉMONSTRATION (30min, 1 max) === */}
+            <div>
+              <div className="font-semibold text-xs uppercase text-orange-700 mb-2 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500" /> Zone de démonstration <span className="text-slate-400 font-normal normal-case">— 30min, partagée (1 exposant à la fois)</span></div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5">
+                {DEMO_ZONE_SLOTS.map(slot => {
+                  const mine = demoMine(d.label, slot);
+                  if (mine) {
+                    return (
+                      <div key={slot.start} className="border-2 border-orange-400 bg-orange-50 rounded-md p-2 text-[11px]">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-mono font-bold text-orange-700">{slot.start}</span>
+                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => removeBooking(mine.id)} disabled={busy}><Trash2 className="w-3 h-3 text-rose-600" /></Button>
+                        </div>
+                        <div className="font-medium truncate">{mine.title}</div>
+                      </div>
+                    );
+                  }
+                  const occupiedBy = demoOccupiedBy(d.label, slot);
+                  if (occupiedBy) {
+                    return (
+                      <div key={slot.start} className="border-2 border-rose-200 bg-rose-50 rounded-md p-2 text-[11px] cursor-not-allowed" title={`Pris par ${occupiedBy.organization_name}`}>
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono font-bold text-rose-600">{slot.start}</span>
+                          <Lock className="w-3 h-3 text-rose-500 ml-auto" />
+                        </div>
+                        <div className="text-rose-600 truncate font-medium">Occupé</div>
+                        <div className="text-[9px] text-rose-500/80 truncate">{occupiedBy.organization_name}</div>
+                      </div>
+                    );
+                  }
+                  const overLimit = myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY;
+                  return (
+                    <button
+                      key={slot.start}
+                      type="button"
+                      disabled={overLimit || busy}
+                      onClick={() => startBooking(d.label, slot, 'zone_animation')}
+                      className={`border rounded-md p-2 text-[11px] text-left transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                        overLimit ? 'bg-slate-50 border-slate-200' :
+                        'bg-white border-slate-200 hover:bg-orange-50 hover:border-orange-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono font-bold">{slot.start}</span>
+                        {!overLimit && <Plus className="w-3 h-3 text-orange-600 ml-auto" />}
+                      </div>
+                      <div className="text-emerald-700 mt-0.5 text-[10px]">Libre</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
 
       {/* Booking dialog */}
       {editing && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && setEditing(null)}>
           <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
             <CardHeader>
-              <CardTitle className="text-base">Réserver le créneau {editing.start} → {editing.end}</CardTitle>
-              <p className="text-xs text-slate-500 mt-1">{EVENT_DATES.find(d => d.label === editing.day)?.display}</p>
+              <CardTitle className="text-base flex items-center gap-2">
+                {editing.location_type === 'stand' ? <span className="w-3 h-3 rounded-full bg-blue-500" /> : <span className="w-3 h-3 rounded-full bg-orange-500" />}
+                Réserver {editing.start} → {editing.end}
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">{EVENT_DATES.find(d => d.label === editing.day)?.display} · {editing.location_type === 'stand' ? 'Sur votre stand' : 'Zone de démonstration centrale'}</p>
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
@@ -606,19 +689,12 @@ function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
                 <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Démo judo, concert, atelier..." autoFocus />
               </div>
               <div>
-                <Label>Lieu de l&apos;animation</Label>
-                <Select value={form.location_type} onValueChange={v => setForm({ ...form, location_type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{SLOT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
                 <Label>Description (optionnelle)</Label>
-                <Textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Décrivez votre animation (besoins matériels, public ciblé, nb de personnes...)" />
+                <Textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Décrivez votre animation (besoins matériels, public ciblé...)" />
               </div>
               <div className="flex gap-2 justify-end pt-2">
                 <Button variant="ghost" onClick={() => setEditing(null)} disabled={busy}>Annuler</Button>
-                <Button onClick={submitBooking} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> {busy ? 'Réservation…' : 'Réserver'}</Button>
+                <Button onClick={submitBooking} disabled={busy} className={`gap-2 ${editing.location_type === 'stand' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700'}`}><CheckCircle2 className="w-4 h-4" /> {busy ? 'Réservation…' : 'Réserver'}</Button>
               </div>
             </CardContent>
           </Card>
