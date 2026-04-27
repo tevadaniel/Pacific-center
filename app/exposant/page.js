@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shell, KpiCard } from '@/components/app-shell';
+import { Shell } from '@/components/app-shell';
 import { api, getSession, saveSession, clearSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,19 +16,28 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { toast } from 'sonner';
-import { Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock, FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft, ListChecks, MessageCircle, ThumbsUp, Send, Smile } from 'lucide-react';
-import { REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPE_LABEL, EVENT_DATES } from '@/lib/constants';
+import {
+  Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
+  FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft,
+  ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck,
+} from 'lucide-react';
+import {
+  REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
+  DOCUMENT_TYPE_LABEL, EVENT_DATES, EVENT_OPENING_TIME, EVENT_CLOSING_TIME,
+  ANIMATION_HOURLY_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS,
+  LOGISTIQUE_PROVISIONS, LOGISTIQUE_RULES, DISCIPLINES,
+} from '@/lib/constants';
 
+// Documents que l'EXPOSANT doit déposer (le Reçu de caution est fourni par ARACOM, donc pas dans cette liste)
 const DOC_TYPES = [
-  { key: 'assurance', label: 'Attestation d’assurance', icon: FileCheck2 },
-  { key: 'recu_caution', label: 'Reçu de caution', icon: Wallet },
-  { key: 'convention', label: 'Convention signée', icon: FileText },
-  { key: 'autre', label: 'Autre document', icon: FileText },
+  { key: 'assurance', label: "Attestation d'assurance", icon: FileCheck2, mandatory: true },
+  { key: 'convention', label: 'Convention signée', icon: FileText, mandatory: true },
+  { key: 'autre', label: 'Autre document', icon: FileText, mandatory: false },
 ];
 
 const SLOT_TYPES = [
   { value: 'stand', label: 'Sur mon stand', color: 'bg-blue-50 text-blue-700' },
-  { value: 'zone_animation', label: 'Zone d’animation centrale', color: 'bg-violet-50 text-violet-700' },
+  { value: 'zone_animation', label: "Zone d'animation centrale", color: 'bg-violet-50 text-violet-700' },
   { value: 'spectacle', label: 'Spectacle / Démonstration', color: 'bg-orange-50 text-orange-700' },
 ];
 
@@ -56,21 +65,25 @@ export default function ExposantPortal() {
   if (!data?.registration) {
     return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><Card><CardContent className="py-12 text-center">
       <Info className="w-12 h-12 mx-auto text-slate-400" />
-      <p className="mt-3 font-medium">Votre dossier n’a pas encore été initialisé</p>
-      <p className="text-slate-500 text-sm">L’équipe ARACOM va bientôt vous contacter.</p>
+      <p className="mt-3 font-medium">Votre dossier n&apos;a pas encore été initialisé</p>
+      <p className="text-slate-500 text-sm">L&apos;équipe ARACOM va bientôt vous contacter.</p>
     </CardContent></Card></Shell>;
   }
 
   const r = data.registration, o = data.organization, v = data.venue, d = data.deposit;
   const docs = data.documents || [];
+  const cautionReceiptDoc = docs.find(dd => dd.document_type === 'recu_caution');
   const checks = [
-    { ok: r.is_convention_signed, label: 'Convention signée' },
-    { ok: d?.status === 'recue', label: 'Caution reçue' },
-    { ok: r.is_insurance_uploaded, label: 'Assurance déposée' },
-    { ok: docs.some(dd => dd.document_type === 'recu_caution'), label: 'Reçu de caution' },
-    { ok: data.slots?.length > 0, label: 'Créneaux d’animation choisis' },
+    { ok: !!r.venue_id && !!r.stand_code, label: 'Site & stand pré-réservés' },
+    { ok: r.is_convention_signed || docs.some(dd => dd.document_type === 'convention'), label: 'Convention signée' },
+    { ok: docs.some(dd => dd.document_type === 'assurance'), label: 'Attestation d\'assurance déposée' },
+    { ok: d?.status === 'recue', label: 'Caution reçue par ARACOM' },
+    { ok: !!cautionReceiptDoc, label: 'Reçu de caution disponible (fourni par ARACOM)' },
+    { ok: (data.slots || []).length > 0, label: 'Au moins un créneau d\'animation choisi' },
+    { ok: r.status === 'confirme', label: 'Inscription confirmée par ARACOM' },
   ];
   const completion = Math.round((checks.filter(c => c.ok).length / checks.length) * 100);
+  const isPreReserved = !!r.is_pre_reserved && r.status !== 'confirme';
 
   return (
     <Shell
@@ -89,6 +102,7 @@ export default function ExposantPortal() {
                 {v?.name && <Badge variant="secondary"><MapPin className="w-3 h-3 mr-1" /> {v.name}</Badge>}
                 {r.stand_code && <Badge variant="secondary" className="font-mono">Stand {r.stand_code}</Badge>}
                 <Badge className={REGISTRATION_STATUS_COLOR[r.status]}>{REGISTRATION_STATUS_LABEL[r.status]}</Badge>
+                {isPreReserved && <Badge className="bg-amber-100 text-amber-700 border-amber-200">⏳ Pré-réservé — en attente caution</Badge>}
               </div>
             </div>
             <div className="text-center">
@@ -99,7 +113,17 @@ export default function ExposantPortal() {
           </CardContent>
         </Card>
 
-        {r.status !== 'confirme' && <ConfirmParticipation registration={r} onRefresh={load} />}
+        {isPreReserved && (
+          <Card className="border-amber-300 bg-amber-50/40">
+            <CardContent className="p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold text-amber-900">Votre stand est pré-réservé</div>
+                <p className="text-sm text-amber-800 mt-0.5">Le stand <b className="font-mono">{r.stand_code}</b> sur le site <b>{v?.name}</b> vous est réservé. <b>ARACOM le confirmera définitivement dès réception de votre caution de 20 000 XPF</b> (chèque, virement ou espèces).</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Tabs defaultValue="profil">
           <TabsList className="w-full grid grid-cols-3 md:grid-cols-7">
@@ -116,7 +140,7 @@ export default function ExposantPortal() {
             <ProfilBlock organization={o} registration={r} onRefresh={load} />
             <div className="grid md:grid-cols-2 gap-4">
               <Card>
-                <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /> Chéminement de mon dossier</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /> Cheminement de mon dossier</CardTitle></CardHeader>
                 <CardContent className="space-y-2">
                   {checks.map((c, i) => (
                     <div key={i} className="flex items-center justify-between border rounded-md p-3">
@@ -131,24 +155,32 @@ export default function ExposantPortal() {
               </Card>
 
               <Card>
-                <CardHeader><CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4 text-blue-600" /> Caution (20 000 XPF)</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4 text-blue-600" /> Caution (20 000 XPF)</CardTitle></CardHeader>
                 <CardContent className="space-y-2">
                   <div className="rounded-md bg-blue-50 border border-blue-100 p-4">
                     <div className="text-sm text-slate-600">Statut actuel</div>
                     <div className="text-2xl font-bold text-blue-700">{DEPOSIT_STATUS_LABEL[d?.status] || '—'}</div>
                     {d?.received_at && <div className="text-xs text-slate-500 mt-1">Reçue le {new Date(d.received_at).toLocaleDateString('fr-FR')}</div>}
                   </div>
-                  <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
-                    <strong>Rappel :</strong> chèque, virement ou espèces acceptés. Restituée après l’événement si tout s’est bien passé.
-                  </div>
+                  {cautionReceiptDoc ? (
+                    <a href={`/api/documents/${cautionReceiptDoc.id}/download`} target="_blank" rel="noreferrer">
+                      <Button size="sm" variant="outline" className="w-full gap-2">
+                        <Download className="w-4 h-4" /> Télécharger mon reçu de caution
+                      </Button>
+                    </a>
+                  ) : (
+                    <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
+                      <strong>Modes acceptés :</strong> chèque, virement ou espèces. <br />
+                      Le reçu de caution sera <b>fourni par ARACOM</b> dans cet espace dès réception du paiement.
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
 
           <TabsContent value="sites" className="space-y-4">
-            <PreferencesBlock organizationId={o.id} onRefresh={load} />
-            <StandMapBlock venueId={r.venue_id} currentStandCode={r.stand_code} />
+            <SiteAndStandPicker registration={r} organization={o} onRefresh={load} />
           </TabsContent>
 
           <TabsContent value="animation" className="space-y-4">
@@ -176,60 +208,61 @@ export default function ExposantPortal() {
   );
 }
 
-function ConfirmParticipation({ registration, onRefresh }) {
-  const confirmNow = async () => {
-    try {
-      await api(`/api/registrations/${registration.id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
-      toast.success('Participation confirmée ! Un email a été envoyé.');
-      onRefresh();
-    } catch (e) { toast.error(e.message); }
-  };
-  return (
-    <Card className="border-emerald-200 bg-emerald-50/40">
-      <CardContent className="p-5 flex flex-col md:flex-row md:items-center gap-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 font-semibold text-emerald-900"><Sparkles className="w-4 h-4" /> Confirmez votre participation</div>
-          <p className="text-sm text-emerald-800 mt-1">Valider votre inscription au Forum de la Rentrée 2026 (14 & 15 août).</p>
-        </div>
-        <Button onClick={confirmNow} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> Je confirme</Button>
-      </CardContent>
-    </Card>
-  );
-}
-
+// =====================================================================
+// PROFIL — éditable, heures figées
+// =====================================================================
 function ProfilBlock({ organization, registration, onRefresh }) {
   const [form, setForm] = useState({
-    name: organization.name, discipline: organization.discipline,
-    main_email: organization.main_email, main_phone: organization.main_phone,
-    contact_name: organization.contact_name,
-    friday: !!registration.friday_slot_label, saturday: !!registration.saturday_slot_label,
-    planned_arrival_time: registration.planned_arrival_time || '10:30',
-    planned_departure_time: registration.planned_departure_time || '17:00',
+    name: organization.name || '',
+    discipline: organization.discipline || '',
+    contact_name: organization.contact_name || '',
+    main_phone: organization.main_phone || '',
+    description: organization.description || '',
+    friday: !!registration.friday_slot_label,
+    saturday: !!registration.saturday_slot_label,
   });
+  const [saving, setSaving] = useState(false);
   const save = async () => {
+    setSaving(true);
     try {
-      await api(`/api/registrations/${registration.id}`, { method: 'PUT', body: JSON.stringify({
-        friday_slot_label: form.friday ? 'Oui' : null,
-        saturday_slot_label: form.saturday ? 'Oui' : null,
-        planned_arrival_time: form.planned_arrival_time,
-        planned_departure_time: form.planned_departure_time,
-      }) });
-      toast.success('Profil mis à jour');
+      await api(`/api/registrations/${registration.id}/profile`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.name,
+          discipline: form.discipline,
+          contact_name: form.contact_name,
+          main_phone: form.main_phone,
+          description: form.description,
+          friday_slot_label: form.friday ? 'Oui' : null,
+          saturday_slot_label: form.saturday ? 'Oui' : null,
+        }),
+      });
+      toast.success('Profil mis à jour ✅');
       onRefresh();
     } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
   };
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Building2 className="w-4 h-4 text-blue-600" /> Mon profil & ma participation</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><Building2 className="w-4 h-4 text-blue-600" /> Mon profil & ma participation</CardTitle>
+        <p className="text-xs text-slate-500 mt-1">Vous pouvez modifier librement les informations de votre structure. L&apos;email de connexion est figé pour des raisons de sécurité.</p>
+      </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid md:grid-cols-2 gap-3">
-          <div><Label>Nom de la structure</Label><Input value={form.name} disabled /></div>
-          <div><Label>Discipline</Label><Input value={form.discipline} disabled /></div>
-          <div><Label>Email principal</Label><Input value={form.main_email || ''} disabled /></div>
-          <div><Label>Téléphone</Label><Input value={form.main_phone || ''} disabled /></div>
-          <div className="md:col-span-2"><Label>Contact principal</Label><Input value={form.contact_name || ''} disabled /></div>
+          <div><Label>Nom de la structure *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+          <div>
+            <Label>Discipline *</Label>
+            <Select value={form.discipline} onValueChange={v => setForm({ ...form, discipline: v })}>
+              <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
+              <SelectContent>{DISCIPLINES.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}<SelectItem value="Autre">Autre…</SelectItem></SelectContent>
+            </Select>
+          </div>
+          <div><Label>Email principal <Lock className="w-3 h-3 inline ml-1 text-slate-400" /></Label><Input value={organization.main_email || ''} disabled /></div>
+          <div><Label>Téléphone</Label><Input value={form.main_phone} onChange={e => setForm({ ...form, main_phone: e.target.value })} placeholder="87 XX XX XX" /></div>
+          <div className="md:col-span-2"><Label>Contact principal (Nom Prénom)</Label><Input value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} /></div>
+          <div className="md:col-span-2"><Label>Description / présentation publique</Label><Textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Présentation de votre structure (sera affichée dans le programme public)" /></div>
         </div>
-        <div className="text-xs text-slate-500">Pour modifier les infos de base, contactez ARACOM.</div>
 
         <div className="pt-3 border-t">
           <div className="font-medium text-sm mb-2 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> Jours de participation</div>
@@ -237,7 +270,7 @@ function ProfilBlock({ organization, registration, onRefresh }) {
             {EVENT_DATES.map(d => {
               const key = d.label === 'vendredi' ? 'friday' : 'saturday';
               return (
-                <button key={d.label} onClick={() => setForm({ ...form, [key]: !form[key] })} className={`border rounded-md p-3 text-left transition ${form[key] ? 'bg-emerald-50 border-emerald-300' : 'bg-white hover:border-slate-400'}`}>
+                <button key={d.label} type="button" onClick={() => setForm({ ...form, [key]: !form[key] })} className={`border rounded-md p-3 text-left transition ${form[key] ? 'bg-emerald-50 border-emerald-300' : 'bg-white hover:border-slate-400'}`}>
                   <div className="flex items-center justify-between"><div className="font-semibold">{d.display}</div>{form[key] && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}</div>
                   <div className="text-xs text-slate-500 mt-1">{form[key] ? 'Vous serez présent' : 'Cliquez pour confirmer'}</div>
                 </button>
@@ -246,194 +279,365 @@ function ProfilBlock({ organization, registration, onRefresh }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div><Label>Heure d’arrivée prévue</Label><Input type="time" value={form.planned_arrival_time} onChange={e => setForm({ ...form, planned_arrival_time: e.target.value })} /></div>
-          <div><Label>Heure de départ prévue</Label><Input type="time" value={form.planned_departure_time} onChange={e => setForm({ ...form, planned_departure_time: e.target.value })} /></div>
-        </div>
-        <Button onClick={save} className="gap-2"><CheckCircle2 className="w-4 h-4" /> Enregistrer</Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function PreferencesBlock({ organizationId, onRefresh }) {
-  const [venues, setVenues] = useState([]);
-  const [prefs, setPrefs] = useState([]);
-  const [selected, setSelected] = useState('');
-  const load = async () => {
-    const [v, p] = await Promise.all([api('/api/venues'), api(`/api/organization-preferences?organization_id=${organizationId}`)]);
-    setVenues(v); setPrefs(p);
-  };
-  useEffect(() => { load(); }, [organizationId]);
-  const addPref = async () => {
-    if (!selected || prefs.some(p => p.venue_id === selected)) return;
-    await api('/api/organization-preferences', { method: 'POST', body: JSON.stringify({ organization_id: organizationId, venue_id: selected, preference_rank: prefs.length + 1 }) });
-    toast.success('Site ajouté à vos préférences');
-    setSelected(''); load(); if (onRefresh) onRefresh();
-  };
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><Star className="w-4 h-4 text-amber-500" /> Mes sites préférés</CardTitle>
-        <p className="text-xs text-slate-500 mt-1">Classez par ordre de préférence. ARACOM en tiendra compte pour l’affectation.</p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {prefs.length === 0 ? <p className="text-sm text-slate-500">Aucune préférence exprimée.</p> : (
-          <div className="space-y-1.5">
-            {prefs.map((p, i) => (
-              <div key={p.id} className="flex items-center gap-3 border rounded-md p-3">
-                <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-800 text-xs font-bold flex items-center justify-center">{i + 1}</div>
-                <div className="flex-1">
-                  <div className="font-medium">{p.venue?.name}</div>
-                  <div className="text-xs text-slate-500">{p.source === 'self_service' ? 'Votre choix' : 'Pré-enregistré'}</div>
-                </div>
-                <Badge variant="secondary">Rang {p.preference_rank}</Badge>
-              </div>
-            ))}
+        <div className="pt-3 border-t">
+          <div className="font-medium text-sm mb-2 flex items-center gap-2"><Clock className="w-4 h-4 text-slate-500" /> Horaires officiels du Forum <Badge variant="secondary" className="text-[10px]">Figés</Badge></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-md bg-slate-50 border p-3">
+              <div className="text-xs text-slate-500 uppercase">Heure d&apos;arrivée</div>
+              <div className="text-2xl font-bold text-slate-700 font-mono">{EVENT_OPENING_TIME}</div>
+              <div className="text-xs text-slate-500 mt-1">Ouverture officielle</div>
+            </div>
+            <div className="rounded-md bg-slate-50 border p-3">
+              <div className="text-xs text-slate-500 uppercase">Heure de départ</div>
+              <div className="text-2xl font-bold text-slate-700 font-mono">{EVENT_CLOSING_TIME}</div>
+              <div className="text-xs text-slate-500 mt-1">Fermeture officielle</div>
+            </div>
           </div>
-        )}
-        <div className="flex gap-2">
-          <Select value={selected} onValueChange={setSelected}>
-            <SelectTrigger className="flex-1"><SelectValue placeholder="Ajouter un site préféré…" /></SelectTrigger>
-            <SelectContent>{venues.filter(v => !prefs.some(p => p.venue_id === v.id)).map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
-          </Select>
-          <Button onClick={addPref} disabled={!selected}><Plus className="w-4 h-4 mr-1" /> Ajouter</Button>
+          <p className="text-xs text-slate-500 mt-2">⚠️ Les horaires sont identiques pour tous les exposants et tous les sites. Il est demandé d&apos;être présent <b>1h avant</b> pour le montage du stand.</p>
         </div>
+
+        <Button onClick={save} disabled={saving} className="gap-2"><CheckCircle2 className="w-4 h-4" /> {saving ? 'Enregistrement…' : 'Enregistrer mon profil'}</Button>
       </CardContent>
     </Card>
   );
 }
 
-function StandMapBlock({ venueId, currentStandCode }) {
+// =====================================================================
+// SITES & PLAN — un seul site, sélection rapide d'un stand libre
+// =====================================================================
+function SiteAndStandPicker({ registration, organization, onRefresh }) {
   const [venues, setVenues] = useState([]);
-  const [selectedVenueId, setSelectedVenueId] = useState(venueId);
   const [stands, setStands] = useState([]);
-  useEffect(() => { api('/api/venues').then(v => { setVenues(v); if (!selectedVenueId && v[0]) setSelectedVenueId(v[0].id); }); }, []);
-  useEffect(() => { if (selectedVenueId) api(`/api/venues/${selectedVenueId}/stands`).then(setStands); }, [selectedVenueId]);
-  const selectedVenue = venues.find(v => v.id === selectedVenueId);
-  const occupied = stands.filter(s => s.organization).length;
-  const free = stands.length - occupied;
-  const isOwnVenue = selectedVenueId === venueId;
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle className="text-base flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-blue-600" /> Plan interactif des stands</CardTitle>
-          <Select value={selectedVenueId} onValueChange={setSelectedVenueId}>
-            <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <p className="text-xs text-slate-500 mt-1">{selectedVenue?.name} — {stands.length} stands • {occupied} attribués • {free} libres</p>
-        {currentStandCode && isOwnVenue && (
-          <div className="mt-2 inline-flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5">
-            <MapPin className="w-3.5 h-3.5 text-blue-600" />
-            <span>Votre stand : <span className="font-mono font-bold text-blue-700">{currentStandCode}</span></span>
-          </div>
-        )}
-      </CardHeader>
-      <CardContent>
-        <SmartVenueMap
-          stands={stands}
-          venue={selectedVenue}
-          highlightStandCode={isOwnVenue ? currentStandCode : null}
-        />
-      </CardContent>
-    </Card>
-  );
-}
+  const [selectedVenueId, setSelectedVenueId] = useState(registration.venue_id || '');
+  const [busy, setBusy] = useState(false);
 
-function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
-  const [planning, setPlanning] = useState([]);
-  useEffect(() => { if (venueId) api(`/api/animation-slots?venue_id=${venueId}`).then(setPlanning); }, [venueId, slots.length]);
-  const byDay = (day) => planning.filter(s => s.day_label === day).sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+  useEffect(() => { api('/api/venues').then(setVenues); }, []);
+  useEffect(() => {
+    if (selectedVenueId) api(`/api/venues/${selectedVenueId}/stands`).then(setStands);
+    else setStands([]);
+  }, [selectedVenueId]);
+
+  const venue = venues.find(v => v.id === selectedVenueId);
+  const myStandCode = registration.stand_code;
+  const isOnSelectedVenue = registration.venue_id === selectedVenueId;
+  const isLocked = registration.status === 'confirme';
+
+  const reserve = async (stand) => {
+    if (isLocked) { toast.error('Stand confirmé — contactez ARACOM pour changer'); return; }
+    if (!confirm(`Pré-réserver le stand ${stand.stand_code} sur ${venue?.name} ?\n\nLa réservation sera CONFIRMÉE par ARACOM dès réception de votre caution de 20 000 XPF.`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registration.id}/pre-reserve-stand`, {
+        method: 'POST',
+        body: JSON.stringify({ stand_id: stand.id }),
+      });
+      toast.success(`✅ Stand ${stand.stand_code} pré-réservé sur ${venue?.name}`);
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const release = async () => {
+    if (isLocked) return;
+    if (!confirm('Libérer votre stand pré-réservé ? Vous pourrez en re-choisir un autre.')) return;
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registration.id}/release-stand`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('Stand libéré');
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  // Stands FREE = those without an organization
+  const freeStands = stands.filter(s => !s.organization);
+  const myStand = stands.find(s => s.stand_code === myStandCode && isOnSelectedVenue);
+
   return (
     <div className="space-y-4">
-      <NewAnimationForm registrationId={registrationId} venueId={venueId} onDone={onRefresh} />
+      {/* Site picker */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Choix de votre site</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Vous pouvez choisir <b>un seul site</b>. Le choix sera confirmé par ARACOM après réception de votre caution.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Select value={selectedVenueId} onValueChange={setSelectedVenueId} disabled={isLocked}>
+            <SelectTrigger><SelectValue placeholder="Choisir un site…" /></SelectTrigger>
+            <SelectContent>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+          </Select>
+          {isLocked && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md p-2">🔒 Inscription confirmée — votre site et votre stand sont définitifs.</p>}
+        </CardContent>
+      </Card>
+
+      {/* Current stand status */}
+      {selectedVenueId && (
+        <Card className={myStand ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200'}>
+          <CardContent className="p-4 flex flex-col md:flex-row md:items-center gap-3">
+            {myStand ? (
+              <>
+                <CheckCircle2 className="w-5 h-5 text-blue-600 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold">Stand pré-réservé : <span className="font-mono text-blue-700">{myStandCode}</span></div>
+                  <div className="text-xs text-slate-600">{venue?.name} • {registration.status === 'confirme' ? 'Confirmé par ARACOM ✅' : 'En attente de caution ⏳'}</div>
+                </div>
+                {!isLocked && <Button variant="outline" size="sm" onClick={release} disabled={busy} className="gap-1.5"><Trash2 className="w-3.5 h-3.5" /> Libérer</Button>}
+              </>
+            ) : (
+              <>
+                <Info className="w-5 h-5 text-slate-500 shrink-0" />
+                <div className="flex-1 text-sm text-slate-600">Vous n&apos;avez pas encore choisi de stand sur ce site. Cliquez sur un stand libre ci-dessous pour le pré-réserver.</div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick stand picker — list of FREE stands */}
+      {selectedVenueId && !isLocked && freeStands.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-emerald-600" /> Sélection rapide d&apos;un stand libre</CardTitle>
+            <p className="text-xs text-slate-500 mt-1">{freeStands.length} stand(s) disponible(s) sur {venue?.name}. Cliquez pour pré-réserver.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+              {freeStands.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => reserve(s)}
+                  disabled={busy}
+                  className="border-2 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-500 rounded-md p-2 text-center transition disabled:opacity-50"
+                  title={`Pré-réserver le stand ${s.stand_code}`}
+                >
+                  <div className="font-mono font-bold text-emerald-700">{s.stand_code}</div>
+                  <div className="text-[10px] text-emerald-600">Libre</div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Visual map */}
+      {selectedVenueId && venue && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Plan interactif — {venue.name}</CardTitle>
+            <p className="text-xs text-slate-500 mt-1">Vue d&apos;ensemble : votre stand est mis en évidence en bleu.</p>
+          </CardHeader>
+          <CardContent>
+            <SmartVenueMap stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} />
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// ANIMATIONS — créneaux horaires fixes (pas de "proposer un créneau")
+// =====================================================================
+function AnimationsBlock({ registrationId, venueId, slots = [], onRefresh }) {
+  const [allSlots, setAllSlots] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // {day, start, end} for description popup
+  const [form, setForm] = useState({ title: '', description: '', location_type: 'stand' });
+
+  const loadSlots = async () => {
+    if (!venueId) return;
+    const data = await api(`/api/animation-slots?venue_id=${venueId}`);
+    setAllSlots(data);
+  };
+  useEffect(() => { loadSlots(); }, [venueId, slots.length]);
+
+  if (!venueId) {
+    return (
+      <Card><CardContent className="py-8 text-center text-slate-500">
+        <Info className="w-10 h-10 mx-auto text-slate-400 mb-2" />
+        Choisissez d&apos;abord un site dans l&apos;onglet <b>Sites & plan</b> pour voir les créneaux disponibles.
+      </CardContent></Card>
+    );
+  }
+
+  // For each (day, slot), figure out who's booked it
+  const isBookedBySomeoneElse = (day, slot) => {
+    const matches = allSlots.filter(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end);
+    // If MAX_PARALLEL_ANIMATIONS or more bookings AND none from me, slot is full
+    const fromOthers = matches.filter(s => s.registration_id !== registrationId);
+    return fromOthers.length >= MAX_PARALLEL_ANIMATIONS;
+  };
+  const myBooking = (day, slot) => allSlots.find(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end && s.registration_id === registrationId);
+  const otherBookings = (day, slot) => allSlots.filter(s => s.day_label === day && s.start_time === slot.start && s.end_time === slot.end && s.registration_id !== registrationId);
+
+  const myCountForDay = (day) => allSlots.filter(s => s.day_label === day && s.registration_id === registrationId).length;
+
+  const startBooking = (day, slot) => {
+    if (myCountForDay(day) >= MAX_ANIMATION_SLOTS_PER_DAY) {
+      toast.error(`Max ${MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour`);
+      return;
+    }
+    setEditing({ day, start: slot.start, end: slot.end });
+    setForm({ title: '', description: '', location_type: 'stand' });
+  };
+
+  const submitBooking = async () => {
+    if (!form.title.trim()) { toast.error('Titre requis'); return; }
+    setBusy(true);
+    try {
+      await api('/api/animation-slots', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          venue_id: venueId,
+          day_label: editing.day,
+          start_time: editing.start,
+          end_time: editing.end,
+          duration_minutes: 60,
+          title: form.title,
+          description: form.description,
+          slot_type: form.location_type,
+          location_type: form.location_type,
+        }),
+      });
+      toast.success(`✨ Créneau ${editing.start}–${editing.end} réservé !`);
+      setEditing(null);
+      loadSlots();
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const removeBooking = async (slotId) => {
+    if (!confirm('Supprimer ce créneau ?')) return;
+    setBusy(true);
+    try {
+      await api(`/api/animation-slots/${slotId}`, { method: 'DELETE' });
+      toast.success('Créneau supprimé');
+      loadSlots();
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-blue-50/30 border-blue-200">
+        <CardContent className="p-4 flex items-start gap-3">
+          <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-blue-900">
+            <p><b>Sélectionnez vos créneaux d&apos;animation</b> directement sur la grille horaire ci-dessous.</p>
+            <p className="text-xs mt-1 text-blue-800">Vous pouvez réserver jusqu&apos;à <b>{MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour</b>. Les créneaux déjà pris par d&apos;autres exposants apparaissent en gris et ne sont plus disponibles si la capacité ({MAX_PARALLEL_ANIMATIONS} en parallèle max par site) est atteinte.</p>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid md:grid-cols-2 gap-4">
         {EVENT_DATES.map(d => (
           <Card key={d.label}>
-            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> {d.display}</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {byDay(d.label).length === 0 ? <p className="text-sm text-slate-400">Aucun créneau planifié sur ce site.</p> : byDay(d.label).map(s => {
-                const isMine = s.registration_id === registrationId;
-                return (
-                  <div key={s.id} className={`border rounded-md p-3 flex items-center justify-between gap-2 ${isMine ? 'bg-blue-50 border-blue-200' : 'bg-slate-50'}`}>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs font-bold">{s.start_time}–{s.end_time}</span>
-                        <Badge className={`${SLOT_TYPES.find(t => t.value === s.location_type)?.color || 'bg-slate-100'} text-[10px]`}>{SLOT_TYPES.find(t => t.value === s.location_type)?.label || s.slot_type}</Badge>
-                        {isMine && <Badge className="bg-blue-600 text-[10px]">Vous</Badge>}
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> {d.display}</CardTitle>
+              <p className="text-xs text-slate-500">Vos créneaux : {myCountForDay(d.label)}/{MAX_ANIMATION_SLOTS_PER_DAY}</p>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {ANIMATION_HOURLY_SLOTS.map(slot => {
+                const mine = myBooking(d.label, slot);
+                const others = otherBookings(d.label, slot);
+                const full = isBookedBySomeoneElse(d.label, slot);
+                if (mine) {
+                  return (
+                    <div key={slot.start} className="border-2 border-blue-400 bg-blue-50 rounded-md p-3 flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-blue-700">{slot.start} → {slot.end}</span>
+                          <Badge className="bg-blue-600 text-[10px]">VOUS</Badge>
+                        </div>
+                        <div className="text-sm font-medium truncate">{mine.title}</div>
+                        {mine.description && <div className="text-xs text-slate-600 truncate">{mine.description}</div>}
                       </div>
-                      <div className="text-sm font-medium truncate mt-1">{s.title}</div>
-                      <div className="text-xs text-slate-500 truncate">{s.organization_name}</div>
-                      {s.description && <div className="text-xs text-slate-600 mt-1">{s.description}</div>}
+                      <Button size="sm" variant="ghost" onClick={() => removeBooking(mine.id)} disabled={busy}><Trash2 className="w-3.5 h-3.5 text-red-600" /></Button>
                     </div>
-                    {isMine && <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); onRefresh(); }}><Trash2 className="w-3.5 h-3.5 text-red-600" /></Button>}
-                  </div>
+                  );
+                }
+                return (
+                  <button
+                    key={slot.start}
+                    type="button"
+                    disabled={full || busy || myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY}
+                    onClick={() => startBooking(d.label, slot)}
+                    className={`w-full text-left border rounded-md p-3 flex items-center justify-between gap-2 transition disabled:cursor-not-allowed ${
+                      full ? 'bg-slate-100 border-slate-200 opacity-60' :
+                      myCountForDay(d.label) >= MAX_ANIMATION_SLOTS_PER_DAY ? 'bg-slate-50 border-slate-200 opacity-60' :
+                      'bg-white hover:bg-emerald-50 hover:border-emerald-300'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold">{slot.start} → {slot.end}</span>
+                        {full ? <Badge variant="secondary" className="text-[10px]">Complet</Badge> :
+                          others.length > 0 ? <Badge variant="secondary" className="text-[10px]">{others.length} autre(s)</Badge> :
+                          <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700">Libre</Badge>}
+                      </div>
+                      {others.length > 0 && (
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">{others.map(o => o.organization_name).join(' • ')}</div>
+                      )}
+                    </div>
+                    {!full && myCountForDay(d.label) < MAX_ANIMATION_SLOTS_PER_DAY && <Plus className="w-4 h-4 text-emerald-600 shrink-0" />}
+                  </button>
                 );
               })}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Booking dialog */}
+      {editing && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && setEditing(null)}>
+          <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-base">Réserver le créneau {editing.start} → {editing.end}</CardTitle>
+              <p className="text-xs text-slate-500 mt-1">{EVENT_DATES.find(d => d.label === editing.day)?.display}</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label>Titre de l&apos;animation *</Label>
+                <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Démo judo, concert, atelier..." autoFocus />
+              </div>
+              <div>
+                <Label>Lieu de l&apos;animation</Label>
+                <Select value={form.location_type} onValueChange={v => setForm({ ...form, location_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{SLOT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Description (optionnelle)</Label>
+                <Textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Décrivez votre animation (besoins matériels, public ciblé, nb de personnes...)" />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="ghost" onClick={() => setEditing(null)} disabled={busy}>Annuler</Button>
+                <Button onClick={submitBooking} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> {busy ? 'Réservation…' : 'Réserver'}</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
 
-function NewAnimationForm({ registrationId, venueId, onDone }) {
-  const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ day_label: 'vendredi', start_time: '11:00', end_time: '12:00', duration_minutes: 60, title: '', description: '', location_type: 'stand' });
-  const save = async () => {
-    if (!form.title.trim()) { toast.error('Titre requis'); return; }
-    try {
-      await api('/api/animation-slots', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, venue_id: venueId, ...form, slot_type: form.location_type }) });
-      toast.success('Créneau ajouté !');
-      setShow(false);
-      setForm({ day_label: 'vendredi', start_time: '11:00', end_time: '12:00', duration_minutes: 60, title: '', description: '', location_type: 'stand' });
-      onDone();
-    } catch (e) { toast.error(e.message); }
-  };
-  if (!show) return <Button onClick={() => setShow(true)} className="bg-blue-600 hover:bg-blue-700 gap-2"><Plus className="w-4 h-4" /> Proposer un créneau d’animation</Button>;
-  return (
-    <Card className="border-blue-200 bg-blue-50/30">
-      <CardHeader><CardTitle className="text-base">Nouveau créneau d’animation</CardTitle></CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid md:grid-cols-2 gap-3">
-          <div>
-            <Label>Jour</Label>
-            <Select value={form.day_label} onValueChange={v => setForm({ ...form, day_label: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{EVENT_DATES.map(d => <SelectItem key={d.label} value={d.label}>{d.display}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Lieu</Label>
-            <Select value={form.location_type} onValueChange={v => setForm({ ...form, location_type: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{SLOT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div><Label>Heure début</Label><Input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} /></div>
-          <div><Label>Heure fin</Label><Input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} /></div>
-          <div><Label>Durée (min)</Label><Input type="number" value={form.duration_minutes} onChange={e => setForm({ ...form, duration_minutes: parseInt(e.target.value) || 0 })} /></div>
-          <div><Label>Titre de l’animation</Label><Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Démo judo, concert, atelier..." /></div>
-        </div>
-        <div><Label>Description — de quoi s’agit-il ?</Label><Textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Décrivez votre animation (besoins matériels, public ciblé, nombre de personnes...)" /></div>
-        <div className="flex gap-2">
-          <Button onClick={save} className="bg-emerald-600 hover:bg-emerald-700 gap-2"><CheckCircle2 className="w-4 h-4" /> Enregistrer</Button>
-          <Button variant="ghost" onClick={() => setShow(false)}>Annuler</Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
+// =====================================================================
+// DOCUMENTS — sans "reçu de caution" (fourni par ARACOM)
+// =====================================================================
 function DocsBlockExposant({ registrationId, docs, onRefresh }) {
+  const cautionReceipt = docs.find(d => d.document_type === 'recu_caution');
+
   const uploadDoc = async (type, payload) => {
     try {
       await api('/api/documents', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, document_type: type, ...payload }) });
-      toast.success('Document déposé');
+      toast.success('Document déposé ✅');
       onRefresh();
     } catch (e) { toast.error(e.message); }
   };
@@ -443,134 +647,330 @@ function DocsBlockExposant({ registrationId, docs, onRefresh }) {
     toast.success('Document supprimé'); onRefresh();
   };
   const docsByType = DOC_TYPES.map(dt => ({ ...dt, items: docs.filter(d => d.document_type === dt.key) }));
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> Mes documents</CardTitle>
-        <p className="text-xs text-slate-500 mt-1">Déposez vos pièces (PDF ou photo, max 6 Mo chacun). L’équipe ARACOM les validera.</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {docsByType.map(dt => (
-          <div key={dt.key} className="border rounded-md p-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2"><dt.icon className="w-4 h-4 text-slate-500" /><div className="font-medium">{dt.label}</div></div>
-              <FileUploadButton onUpload={(p) => uploadDoc(dt.key, p)} label="Déposer" />
+    <div className="space-y-4">
+      {/* Reçu de caution — INFO ONLY */}
+      <Card className={cautionReceipt ? 'border-emerald-200 bg-emerald-50/30' : 'border-amber-200 bg-amber-50/30'}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-blue-600" />
+            Reçu de caution {cautionReceipt ? <Badge className="bg-emerald-600 text-white text-[10px]">Disponible</Badge> : <Badge variant="secondary" className="text-[10px]">En attente</Badge>}
+          </CardTitle>
+          <p className="text-xs text-slate-500 mt-1">📌 Ce document est <b>généré et fourni par ARACOM</b> dès réception de votre caution.</p>
+        </CardHeader>
+        <CardContent>
+          {cautionReceipt ? (
+            <a href={`/api/documents/${cautionReceipt.id}/download`} target="_blank" rel="noreferrer">
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 gap-2"><Download className="w-4 h-4" /> Télécharger mon reçu de caution</Button>
+            </a>
+          ) : (
+            <div className="text-sm text-amber-800 bg-amber-50 rounded-md p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>Votre reçu sera disponible ici dès que ARACOM aura enregistré la réception de votre caution de <b>20 000 XPF</b>.</div>
             </div>
-            {dt.items.length === 0 ? <div className="text-xs text-slate-400">Aucun fichier</div> : (
-              <div className="space-y-1">
-                {dt.items.map(d => (
-                  <div key={d.id} className="flex items-center justify-between text-sm py-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{d.file_name}</span>
-                      <Badge variant={d.status === 'valide' ? 'default' : 'secondary'} className={`text-[10px] ${d.status === 'valide' ? 'bg-emerald-600' : ''}`}>{d.status}</Badge>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      <a href={`/api/documents/${d.id}/download`} target="_blank" rel="noreferrer"><Button size="sm" variant="ghost"><Download className="w-3 h-3" /></Button></a>
-                      <Button size="sm" variant="ghost" onClick={() => deleteDoc(d.id)}><Trash2 className="w-3 h-3 text-red-600" /></Button>
-                    </div>
-                  </div>
-                ))}
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Documents to upload by exposant */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> Mes documents à fournir</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Déposez vos pièces (PDF ou photo, max 6 Mo chacun). L&apos;équipe ARACOM les validera.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {docsByType.map(dt => (
+            <div key={dt.key} className="border rounded-md p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <dt.icon className="w-4 h-4 text-slate-500" />
+                  <div className="font-medium">{dt.label}</div>
+                  {dt.mandatory && <Badge variant="secondary" className="text-[10px] bg-red-50 text-red-700 border-red-200">Obligatoire</Badge>}
+                </div>
+                <FileUploadButton onUpload={(p) => uploadDoc(dt.key, p)} label="Déposer" />
               </div>
-            )}
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+              {dt.items.length === 0 ? <div className="text-xs text-slate-400">Aucun fichier</div> : (
+                <div className="space-y-1">
+                  {dt.items.map(d => (
+                    <div key={d.id} className="flex items-center justify-between text-sm py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{d.file_name}</span>
+                        <Badge variant={d.status === 'valide' ? 'default' : 'secondary'} className={`text-[10px] ${d.status === 'valide' ? 'bg-emerald-600' : ''}`}>{d.status}</Badge>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <a href={`/api/documents/${d.id}/download`} target="_blank" rel="noreferrer"><Button size="sm" variant="ghost"><Download className="w-3 h-3" /></Button></a>
+                        <Button size="sm" variant="ghost" onClick={() => deleteDoc(d.id)}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
+// =====================================================================
+// LOGISTIQUE — info structurée (ce qui est fourni + règles)
+// =====================================================================
 function LogistiqueBlock({ registration, onRefresh }) {
   const [value, setValue] = useState(registration.exposant_notes || '');
+  const [saving, setSaving] = useState(false);
   const save = async () => {
+    setSaving(true);
     try {
       await api(`/api/registrations/${registration.id}`, { method: 'PUT', body: JSON.stringify({ exposant_notes: value }) });
-      toast.success('Complément enregistré');
+      toast.success('Demande enregistrée ✅');
       onRefresh();
     } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
   };
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><MessageCircle className="w-4 h-4 text-violet-600" /> Complément d’information & logistique</CardTitle>
-        <p className="text-xs text-slate-500 mt-1">Toute information utile pour ARACOM (besoins matériel, contraintes, demandes particulières...)</p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea rows={8} value={value} onChange={e => setValue(e.target.value)} placeholder="Ex : nous avons besoin d’une prise électrique, de 2 tables, d’un espace enfant sur notre stand, etc." />
-        <Button onClick={save} className="gap-2"><CheckCircle2 className="w-4 h-4" /> Enregistrer</Button>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card className="border-emerald-200 bg-emerald-50/30">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Truck className="w-4 h-4 text-emerald-600" /> Tenue d&apos;un stand & logistique fournie par ARACOM</CardTitle>
+          <p className="text-xs text-slate-700 mt-1">Voici exactement ce qui sera mis à disposition sur votre stand le jour J.</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-2 gap-3">
+            {LOGISTIQUE_PROVISIONS.map((p, i) => (
+              <div key={i} className="bg-white border border-emerald-100 rounded-md p-3 flex items-start gap-3">
+                <div className="text-2xl">{p.icon}</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-sm">{p.label}</div>
+                  <div className="text-xs text-slate-500">{p.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-blue-600" /> Règles à respecter sur le stand</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm">
+            {LOGISTIQUE_RULES.map((r, i) => (
+              <li key={i} className="border-l-2 border-blue-300 pl-3 py-0.5">{r}</li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><MessageCircle className="w-4 h-4 text-violet-600" /> Demandes ou besoins spécifiques</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Indiquez à ARACOM tout besoin particulier (prise électrique, espace enfant, table supplémentaire, etc.).</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea rows={5} value={value} onChange={e => setValue(e.target.value)} placeholder="Ex: nous avons besoin d'une prise électrique pour un écran de démo, d'une table supplémentaire, d'un espace de change pour les démonstrations..." />
+          <Button onClick={save} disabled={saving} className="gap-2"><CheckCircle2 className="w-4 h-4" /> {saving ? 'Enregistrement…' : 'Enregistrer ma demande'}</Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
+// =====================================================================
+// SATISFACTION (inchangé, déjà en place)
+// =====================================================================
+function SatisfactionBlock({ registration }) {
+  const [survey, setSurvey] = useState(null);
+  const [form, setForm] = useState({
+    overall_rating: 0, organization_rating: 0, stand_rating: 0, visitors_rating: 0, communication_rating: 0,
+    nps_score: null, will_participate_next: '',
+    positive_points: '', improvement_points: '', free_comment: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api(`/api/satisfaction?registration_id=${registration.id}`)
+      .then(arr => {
+        if (arr.length > 0) {
+          const s = arr[0];
+          setSurvey(s);
+          setForm({
+            overall_rating: s.overall_rating || 0,
+            organization_rating: s.organization_rating || 0,
+            stand_rating: s.stand_rating || 0,
+            visitors_rating: s.visitors_rating || 0,
+            communication_rating: s.communication_rating || 0,
+            nps_score: s.nps_score,
+            will_participate_next: s.will_participate_next || '',
+            positive_points: s.positive_points || '',
+            improvement_points: s.improvement_points || '',
+            free_comment: s.free_comment || '',
+          });
+        }
+      })
+      .catch(() => {});
+  }, [registration.id]);
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await api('/api/satisfaction', {
+        method: 'POST',
+        body: JSON.stringify({ registration_id: registration.id, ...form }),
+      });
+      toast.success(survey ? 'Réponses mises à jour ✅' : 'Merci pour votre retour ! 🙏');
+      const arr = await api(`/api/satisfaction?registration_id=${registration.id}`);
+      if (arr[0]) setSurvey(arr[0]);
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const StarRating = ({ value, onChange, label }) => (
+    <div>
+      <Label className="text-xs uppercase">{label}</Label>
+      <div className="flex gap-1 mt-1">
+        {[1,2,3,4,5].map(n => (
+          <button key={n} type="button" onClick={() => onChange(n)}>
+            <Star className={`w-7 h-7 transition ${n <= value ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-amber-200'}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-violet-200 bg-violet-50/30">
+        <CardContent className="p-4 flex items-start gap-3">
+          <Smile className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold text-violet-900">Votre avis sur le Forum 2026</p>
+            <p className="text-xs text-violet-800 mt-0.5">Vos réponses nous aident à améliorer l&apos;événement chaque année. {survey && <span className="font-semibold">Vous pouvez encore mettre à jour vos réponses.</span>}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Notes globales</CardTitle></CardHeader>
+        <CardContent className="grid md:grid-cols-2 gap-4">
+          <StarRating value={form.overall_rating} onChange={n => setForm({ ...form, overall_rating: n })} label="Note globale" />
+          <StarRating value={form.organization_rating} onChange={n => setForm({ ...form, organization_rating: n })} label="Organisation" />
+          <StarRating value={form.stand_rating} onChange={n => setForm({ ...form, stand_rating: n })} label="Mon stand" />
+          <StarRating value={form.visitors_rating} onChange={n => setForm({ ...form, visitors_rating: n })} label="Affluence visiteurs" />
+          <StarRating value={form.communication_rating} onChange={n => setForm({ ...form, communication_rating: n })} label="Communication ARACOM" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Recommanderiez-vous le Forum ? (NPS 0-10)</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">0 = pas du tout · 10 = totalement</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-11 gap-1">
+            {Array.from({ length: 11 }).map((_, n) => (
+              <button key={n} type="button" onClick={() => setForm({ ...form, nps_score: n })}
+                className={`h-10 rounded text-sm font-bold transition ${
+                  form.nps_score === n
+                    ? n <= 6 ? 'bg-rose-600 text-white' : n <= 8 ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}>{n}</button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Participation édition 2027</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-3 gap-2">
+          {[
+            { v: 'oui', label: 'Oui, sans hésiter', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
+            { v: 'peut_etre', label: 'Peut-être', color: 'bg-amber-100 text-amber-700 border-amber-300' },
+            { v: 'non', label: 'Non', color: 'bg-rose-100 text-rose-700 border-rose-300' },
+          ].map(o => (
+            <button key={o.v} type="button" onClick={() => setForm({ ...form, will_participate_next: o.v })}
+              className={`border-2 rounded-md p-3 text-center text-sm font-medium transition ${
+                form.will_participate_next === o.v ? o.color : 'bg-white border-slate-200 hover:border-slate-400'
+              }`}>{o.label}</button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Vos commentaires</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div><Label>Points positifs</Label><Textarea rows={2} value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ce qui a particulièrement bien fonctionné…" /></div>
+          <div><Label>À améliorer</Label><Textarea rows={2} value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Suggestions pour améliorer le Forum…" /></div>
+          <div><Label>Commentaire libre</Label><Textarea rows={3} value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Toute remarque libre…" /></div>
+        </CardContent>
+      </Card>
+
+      <Button onClick={submit} disabled={saving} className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
+        <Send className="w-4 h-4" /> {saving ? 'Envoi…' : (survey ? 'Mettre à jour mes réponses' : 'Envoyer mes réponses')}
+      </Button>
+    </div>
+  );
+}
+
+// =====================================================================
+// GUIDE EXPOSANT
+// =====================================================================
 function GuideBlock() {
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base flex items-center gap-2"><BookOpen className="w-4 h-4 text-emerald-600" /> Guide de l’exposant</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><BookOpen className="w-4 h-4 text-emerald-600" /> Guide de l&apos;exposant</CardTitle></CardHeader>
       <CardContent className="space-y-5 prose prose-sm max-w-none">
         <section>
           <h3 className="font-semibold text-base">Bienvenue au Forum de la Rentrée 2026</h3>
-          <p className="text-slate-700">Le Forum de la Rentrée 2026 se tiendra les <strong>vendredi 14 et samedi 15 août 2026</strong> sur 6 sites en Polynésie française : Faaa, Punaauia, Arue, Taravao, Mahina et Moorea. Merci pour votre engagement !</p>
+          <p className="text-slate-700">Le Forum se tiendra les <strong>vendredi 14 et samedi 15 août 2026</strong> sur 6 sites en Polynésie française : Faaa, Punaauia, Arue, Taravao, Mahina et Moorea. Merci pour votre engagement !</p>
         </section>
 
         <section>
-          <h4 className="font-semibold">1. Inscription & validation</h4>
+          <h4 className="font-semibold">1. Inscription en 4 étapes</h4>
+          <ol className="list-decimal pl-5 text-slate-700">
+            <li>Complétez votre <strong>profil</strong> (description, contact, jours de présence).</li>
+            <li>Choisissez <strong>un site et pré-réservez un stand</strong> dans l&apos;onglet <em>Sites & plan</em>.</li>
+            <li>Versez votre <strong>caution de 20 000 XPF</strong> à ARACOM (chèque, virement ou espèces).</li>
+            <li>ARACOM <strong>confirme votre inscription</strong> et vous remet le reçu de caution.</li>
+          </ol>
+        </section>
+
+        <section>
+          <h4 className="font-semibold">2. Animations</h4>
+          <p className="text-slate-700">Sélectionnez vos créneaux d&apos;animation (1h chacun) directement sur la grille horaire. Maximum {MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour.</p>
+        </section>
+
+        <section>
+          <h4 className="font-semibold">3. Documents obligatoires</h4>
           <ul className="list-disc pl-5 text-slate-700">
-            <li>Complétez votre profil dans l’onglet <strong>Profil</strong> (jours de présence, horaires).</li>
-            <li>Indiquez vos sites préférés dans <strong>Sites & plan</strong>.</li>
-            <li>ARACOM validera votre stand et vous confirmera l’affectation.</li>
+            <li><strong>Attestation d&apos;assurance RC</strong> couvrant votre présence (à déposer)</li>
+            <li><strong>Convention</strong> signée et scannée (à déposer)</li>
+            <li><strong>Reçu de caution</strong> (fourni automatiquement par ARACOM)</li>
           </ul>
         </section>
 
         <section>
-          <h4 className="font-semibold">2. Caution de 20 000 XPF</h4>
-          <p className="text-slate-700">La caution est obligatoire pour valider votre inscription. Elle est restituée sous 2 semaines après l’événement si :</p>
+          <h4 className="font-semibold">4. Jour J — horaires figés</h4>
+          <p className="text-slate-700">Le Forum est ouvert au public de <b>{EVENT_OPENING_TIME}</b> à <b>{EVENT_CLOSING_TIME}</b>, identique pour tous les sites et tous les exposants. Soyez sur place <b>1h avant l&apos;ouverture</b> pour le montage du stand.</p>
+        </section>
+
+        <section>
+          <h4 className="font-semibold">5. Caution</h4>
+          <p className="text-slate-700">La caution est restituée intégralement sous 2 semaines après l&apos;événement si :</p>
           <ul className="list-disc pl-5 text-slate-700">
-            <li>vous êtes présent sur les deux jours confirmés</li>
+            <li>vous êtes présent sur les jours confirmés</li>
             <li>votre stand est monté et démonté dans les horaires</li>
-            <li>aucune dégradation n’est constatée</li>
+            <li>aucune dégradation n&apos;est constatée</li>
           </ul>
-          <p className="text-slate-700"><strong>Modes acceptés :</strong> chèque à l’ordre d’ARACOM, virement bancaire ou espèces sur rendez-vous.</p>
-        </section>
-
-        <section>
-          <h4 className="font-semibold">3. Animations & créneaux</h4>
-          <p className="text-slate-700">Utilisez l’onglet <strong>Animations</strong> pour proposer un ou plusieurs créneaux. Précisez :</p>
-          <ul className="list-disc pl-5 text-slate-700">
-            <li>le lieu : <em>sur votre stand</em> (anim permanente), <em>zone d’animation centrale</em>, ou <em>spectacle</em>.</li>
-            <li>la durée et les besoins (sono, estrade, public max, etc.).</li>
-            <li>la description précise pour que le public et la communication sachent à quoi s’attendre.</li>
-          </ul>
-        </section>
-
-        <section>
-          <h4 className="font-semibold">4. Documents obligatoires</h4>
-          <ul className="list-disc pl-5 text-slate-700">
-            <li><strong>Assurance RC</strong> couvrant votre présence sur site (2026)</li>
-            <li><strong>Convention</strong> signée et scannée</li>
-            <li><strong>Reçu de caution</strong> (fourni par ARACOM après réception)</li>
-          </ul>
-        </section>
-
-        <section>
-          <h4 className="font-semibold">5. Jour J — arrivée & présence</h4>
-          <ul className="list-disc pl-5 text-slate-700">
-            <li>Arrivée : <strong>au moins 1 h avant</strong> l’ouverture du public (généralement 9h30 pour une ouverture à 10h30).</li>
-            <li>Un agent ARACOM vous accueille, vérifie votre stand et effectue un <strong>check-in</strong>.</li>
-            <li>Un <strong>check-out</strong> est fait avant votre départ.</li>
-            <li>Tout départ anticipé non autorisé peut entraîner une retenue partielle de la caution.</li>
-          </ul>
-        </section>
-
-        <section>
-          <h4 className="font-semibold">6. Contacts ARACOM</h4>
-          <p className="text-slate-700">En cas de question, utilisez l’onglet <strong>Logistique</strong> pour laisser un mot à ARACOM, ou contactez directement l’équipe par email/téléphone communiqué dans votre convention.</p>
         </section>
 
         <div className="rounded-md bg-emerald-50 border border-emerald-200 p-4 not-prose">
           <div className="flex items-start gap-2"><Sparkles className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" /><div>
             <div className="font-semibold text-emerald-900">Merci pour votre engagement !</div>
-            <p className="text-sm text-emerald-800 mt-1">Votre participation contribue au succès du Forum et à l’épanouissement des familles polynésiennes. L’équipe ARACOM est là pour vous accompagner.</p>
+            <p className="text-sm text-emerald-800 mt-1">Votre participation contribue au succès du Forum et à l&apos;épanouissement des familles polynésiennes. L&apos;équipe ARACOM est là pour vous accompagner.</p>
           </div></div>
         </div>
       </CardContent>
@@ -578,6 +978,9 @@ function GuideBlock() {
   );
 }
 
+// =====================================================================
+// PASSWORD CHANGE
+// =====================================================================
 function PasswordButton({ user, onChanged }) {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState('');
@@ -598,223 +1001,15 @@ function PasswordButton({ user, onChanged }) {
       {open && (
         <div className="absolute right-0 top-10 w-72 bg-white border rounded-md shadow-lg p-3 z-50 space-y-2">
           <div className="font-medium text-sm">Changer mon mot de passe</div>
-          <Input type="password" placeholder="Mot de passe actuel" value={current} onChange={e => setCurrent(e.target.value)} />
-          <Input type="password" placeholder="Nouveau mot de passe" value={next} onChange={e => setNext(e.target.value)} />
+          <Input type="password" placeholder="Actuel" value={current} onChange={e => setCurrent(e.target.value)} />
+          <Input type="password" placeholder="Nouveau (6 char min)" value={next} onChange={e => setNext(e.target.value)} />
           <Input type="password" placeholder="Confirmer" value={next2} onChange={e => setNext2(e.target.value)} />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={submit} className="flex-1">Changer</Button>
+          <div className="flex gap-2 justify-end">
             <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Annuler</Button>
+            <Button size="sm" onClick={submit}>OK</Button>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-
-// ---------- SatisfactionBlock (questionnaire de fin d'événement) ----------
-function SatisfactionBlock({ registration }) {
-  const [survey, setSurvey] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-  const [form, setForm] = useState({
-    overall_rating: 0, organization_rating: 0, stand_rating: 0,
-    visitors_rating: 0, communication_rating: 0, nps_score: null,
-    will_participate_next: '', positive_points: '', improvement_points: '', free_comment: '',
-  });
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!registration?.id) return;
-    api(`/api/satisfaction?registration_id=${registration.id}`).then(list => {
-      const s = list?.[0];
-      if (s) {
-        setSurvey(s);
-        setForm({
-          overall_rating: s.overall_rating || 0,
-          organization_rating: s.organization_rating || 0,
-          stand_rating: s.stand_rating || 0,
-          visitors_rating: s.visitors_rating || 0,
-          communication_rating: s.communication_rating || 0,
-          nps_score: typeof s.nps_score === 'number' ? s.nps_score : null,
-          will_participate_next: s.will_participate_next || '',
-          positive_points: s.positive_points || '',
-          improvement_points: s.improvement_points || '',
-          free_comment: s.free_comment || '',
-        });
-      }
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, [registration?.id]);
-
-  const submit = async () => {
-    if (!form.overall_rating) { toast.error('Merci de donner une note globale'); return; }
-    setSaving(true);
-    try {
-      const res = await api('/api/satisfaction', {
-        method: 'POST',
-        body: JSON.stringify({
-          registration_id: registration.id,
-          overall_rating: form.overall_rating || null,
-          organization_rating: form.organization_rating || null,
-          stand_rating: form.stand_rating || null,
-          visitors_rating: form.visitors_rating || null,
-          communication_rating: form.communication_rating || null,
-          nps_score: form.nps_score,
-          will_participate_next: form.will_participate_next || null,
-          positive_points: form.positive_points || null,
-          improvement_points: form.improvement_points || null,
-          free_comment: form.free_comment || null,
-        }),
-      });
-      setSurvey(res);
-      toast.success(survey ? 'Votre retour a été mis à jour. Merci !' : 'Merci pour votre retour ! 🙏');
-    } catch (e) { toast.error(e.message); }
-    finally { setSaving(false); }
-  };
-
-  if (!loaded) return <div className="text-center py-8 text-slate-500">Chargement…</div>;
-
-  return (
-    <div className="space-y-4">
-      <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/60 to-white">
-        <CardContent className="p-5 flex items-start gap-4">
-          <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-            <ThumbsUp className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Votre retour sur le Forum de la Rentrée 2026</h3>
-            <p className="text-sm text-slate-600 mt-1">
-              {survey
-                ? `Vous avez partagé votre retour le ${new Date(survey.submitted_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}. Vous pouvez le modifier à tout moment.`
-                : "Votre avis compte ! Il nous aidera à améliorer les prochaines éditions. Ce questionnaire vous prend environ 2 minutes."}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Star className="w-4 h-4 text-amber-500" /> Notez cette édition</CardTitle></CardHeader>
-        <CardContent className="space-y-5">
-          <StarRating label="Note globale de l'événement" value={form.overall_rating} onChange={v => setForm({ ...form, overall_rating: v })} required />
-          <StarRating label="Organisation générale (logistique, signalétique)" value={form.organization_rating} onChange={v => setForm({ ...form, organization_rating: v })} />
-          <StarRating label="Qualité de votre stand et emplacement" value={form.stand_rating} onChange={v => setForm({ ...form, stand_rating: v })} />
-          <StarRating label="Affluence et engagement des visiteurs" value={form.visitors_rating} onChange={v => setForm({ ...form, visitors_rating: v })} />
-          <StarRating label="Communication et support ARACOM" value={form.communication_rating} onChange={v => setForm({ ...form, communication_rating: v })} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2"><Smile className="w-4 h-4 text-blue-600" /> Recommanderiez-vous ce forum à d'autres associations ?</CardTitle>
-          <p className="text-xs text-slate-500 mt-1">Sur une échelle de 0 (pas du tout) à 10 (absolument)</p>
-        </CardHeader>
-        <CardContent>
-          <NpsRating value={form.nps_score} onChange={v => setForm({ ...form, nps_score: v })} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-violet-600" /> Souhaitez-vous participer à la prochaine édition ?</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { v: 'oui', label: 'Oui, avec plaisir', cls: 'border-emerald-500 bg-emerald-50', emoji: '✅' },
-              { v: 'peut_etre', label: 'Peut-être', cls: 'border-amber-500 bg-amber-50', emoji: '🤔' },
-              { v: 'non', label: 'Non', cls: 'border-rose-500 bg-rose-50', emoji: '❌' },
-            ].map(opt => (
-              <button
-                key={opt.v}
-                onClick={() => setForm({ ...form, will_participate_next: opt.v })}
-                className={`p-4 rounded-lg border-2 transition-all text-center ${form.will_participate_next === opt.v ? opt.cls : 'border-slate-200 hover:border-slate-300'}`}
-              >
-                <div className="text-2xl mb-1">{opt.emoji}</div>
-                <div className="text-sm font-medium">{opt.label}</div>
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><MessageCircle className="w-4 h-4 text-slate-600" /> Vos commentaires</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label className="text-sm font-medium">Ce qui vous a plu <span className="text-slate-400 font-normal">(facultatif)</span></Label>
-            <Textarea value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ex : accueil chaleureux, bonne affluence, stand bien placé…" rows={3} className="mt-1.5" />
-          </div>
-          <div>
-            <Label className="text-sm font-medium">Points à améliorer <span className="text-slate-400 font-normal">(facultatif)</span></Label>
-            <Textarea value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Ex : signalétique, parking, horaires…" rows={3} className="mt-1.5" />
-          </div>
-          <div>
-            <Label className="text-sm font-medium">Commentaire libre <span className="text-slate-400 font-normal">(facultatif)</span></Label>
-            <Textarea value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Autre chose à partager avec nous ?" rows={3} className="mt-1.5" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end gap-3 pt-2 pb-8">
-        <Button onClick={submit} disabled={saving} size="lg" className="bg-emerald-600 hover:bg-emerald-700 gap-2">
-          <Send className="w-4 h-4" />
-          {saving ? 'Envoi…' : survey ? 'Mettre à jour mon retour' : 'Envoyer mon retour'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function StarRating({ label, value, onChange, required }) {
-  const [hover, setHover] = useState(0);
-  const disp = hover || value;
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <Label className="text-sm font-medium">{label} {required && <span className="text-red-500">*</span>}</Label>
-        {disp > 0 && <span className="text-xs text-slate-500">{['', 'Très insatisfait', 'Insatisfait', 'Correct', 'Satisfait', 'Excellent'][disp]}</span>}
-      </div>
-      <div className="flex gap-1">
-        {[1, 2, 3, 4, 5].map(n => (
-          <button
-            key={n}
-            type="button"
-            onMouseEnter={() => setHover(n)}
-            onMouseLeave={() => setHover(0)}
-            onClick={() => onChange(n)}
-            className="p-1 hover:scale-110 transition-transform"
-          >
-            <Star className={`w-8 h-8 ${n <= disp ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NpsRating({ value, onChange }) {
-  const getCls = (n, selected) => {
-    if (!selected) return 'bg-white border-slate-200 text-slate-700 hover:border-slate-300';
-    if (n <= 6) return 'bg-rose-500 text-white border-rose-600 scale-105 shadow-md';
-    if (n <= 8) return 'bg-amber-500 text-white border-amber-600 scale-105 shadow-md';
-    return 'bg-emerald-500 text-white border-emerald-600 scale-105 shadow-md';
-  };
-  return (
-    <div className="flex items-center justify-between gap-1 flex-wrap">
-      {Array.from({ length: 11 }).map((_, n) => {
-        const selected = value === n;
-        return (
-          <button
-            key={n}
-            onClick={() => onChange(n)}
-            className={`flex-1 min-w-[40px] h-12 rounded-lg border-2 font-bold text-sm transition-all ${getCls(n, selected)}`}
-          >
-            {n}
-          </button>
-        );
-      })}
-      <div className="w-full flex justify-between text-[10px] text-slate-400 mt-1 px-1">
-        <span>😕 Pas du tout</span>
-        <span>🤩 Absolument</span>
-      </div>
     </div>
   );
 }

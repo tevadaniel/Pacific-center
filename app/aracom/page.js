@@ -755,11 +755,28 @@ function CautionsView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [venueFilter, setVenueFilter] = useState('all');
-  useEffect(() => { api('/api/registrations').then(r => { setRows(r); setLoading(false); }); }, []);
+  const reload = () => api('/api/registrations').then(r => { setRows(r); setLoading(false); });
+  useEffect(() => { reload(); }, []);
   const updateStatus = async (depId, status) => {
     await api(`/api/deposits/${depId}`, { method: 'PUT', body: JSON.stringify({ status }) });
     const r = await api('/api/registrations'); setRows(r);
     toast.success('Caution mise à jour');
+  };
+  const generateReceipt = async (reg) => {
+    if (!confirm(`Générer le reçu de caution pour ${reg.organization?.name} ?\n\nLe document sera automatiquement disponible dans son espace exposant.`)) return;
+    try {
+      const res = await api(`/api/registrations/${reg.id}/generate-caution-receipt`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(`✅ Reçu ${res.receipt_number} généré et transmis à l'exposant`);
+      reload();
+    } catch (e) { toast.error(e.message); }
+  };
+  const confirmStand = async (reg) => {
+    if (!confirm(`Confirmer définitivement l'inscription de ${reg.organization?.name} (stand ${reg.stand_code}) ?\n\nLa caution sera marquée comme reçue et l'exposant passera en statut "Confirmé".`)) return;
+    try {
+      await api(`/api/registrations/${reg.id}/confirm-stand`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(`✅ ${reg.organization?.name} confirmé`);
+      reload();
+    } catch (e) { toast.error(e.message); }
   };
 
   const venues = [...new Set(rows.map(r => r.venue?.name).filter(Boolean))].sort();
@@ -814,23 +831,42 @@ function CautionsView() {
       </Card>
       <Card><CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Email</th><th>Statut</th><th>Actions</th></tr></thead>
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Email</th><th>Statut caution</th><th>Inscription</th><th className="text-right pr-4">Actions</th></tr></thead>
           <tbody className="divide-y">
-            {loading ? <tr><td colSpan="6" className="py-6 text-center text-slate-400">…</td></tr> : filtered.length === 0 ? <tr><td colSpan="6" className="py-6 text-center text-slate-400">Aucun résultat</td></tr> : filtered.map(r => (
-              <tr key={r.id} className="hover:bg-slate-50/50">
-                <td className="py-2 px-4"><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
-                <td>{r.venue?.name}</td>
-                <td className="font-mono text-xs">{r.stand_code}</td>
-                <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
-                <td><Badge variant={r.deposit?.status === 'recue' ? 'default' : 'secondary'} className={r.deposit?.status === 'recue' ? 'bg-emerald-600' : ''}>{DEPOSIT_STATUS_LABEL[r.deposit?.status] || '—'}</Badge></td>
-                <td className="py-1 pr-4">
-                  <Select value={r.deposit?.status} onValueChange={v => updateStatus(r.deposit.id || r.deposit._id, v)}>
-                    <SelectTrigger className="h-8 w-[160px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
-                  </Select>
-                </td>
-              </tr>
-            ))}
+            {loading ? <tr><td colSpan="7" className="py-6 text-center text-slate-400">…</td></tr> : filtered.length === 0 ? <tr><td colSpan="7" className="py-6 text-center text-slate-400">Aucun résultat</td></tr> : filtered.map(r => {
+              const isPreReserved = r.is_pre_reserved && r.status !== 'confirme';
+              return (
+                <tr key={r.id} className="hover:bg-slate-50/50">
+                  <td className="py-2 px-4"><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
+                  <td>{r.venue?.name}</td>
+                  <td className="font-mono text-xs">{r.stand_code}</td>
+                  <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
+                  <td><Badge variant={r.deposit?.status === 'recue' ? 'default' : 'secondary'} className={r.deposit?.status === 'recue' ? 'bg-emerald-600' : ''}>{DEPOSIT_STATUS_LABEL[r.deposit?.status] || '—'}</Badge></td>
+                  <td>
+                    <Badge className={REGISTRATION_STATUS_COLOR[r.status]}>{REGISTRATION_STATUS_LABEL[r.status]}</Badge>
+                    {isPreReserved && <div className="text-[10px] text-amber-600 mt-0.5">⏳ Pré-réservé</div>}
+                  </td>
+                  <td className="py-1 pr-4">
+                    <div className="flex gap-1.5 justify-end items-center flex-wrap">
+                      <Select value={r.deposit?.status} onValueChange={v => updateStatus(r.deposit?.id || r.deposit?._id, v)}>
+                        <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
+                        <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
+                      </Select>
+                      {r.deposit?.status === 'recue' && (
+                        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => generateReceipt(r)} title="Générer un reçu de caution PDF/HTML">
+                          <FileText className="w-3 h-3" /> Reçu
+                        </Button>
+                      )}
+                      {isPreReserved && r.deposit?.status === 'recue' && (
+                        <Button size="sm" className="h-8 gap-1 text-xs bg-emerald-600 hover:bg-emerald-700" onClick={() => confirmStand(r)} title="Confirmer définitivement l'inscription">
+                          <CheckCircle2 className="w-3 h-3" /> Confirmer
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </CardContent></Card>
@@ -912,10 +948,22 @@ function MailingView() {
     if (!subject || !body) { toast.error('Objet et corps requis'); return; }
     if (!targetRegs.length) { toast.error('Aucun destinataire'); return; }
     const realSend = smtp.ok;
-    const confirmMsg = realSend
-      ? `📧 Envoyer RÉELLEMENT ce mail à ${targetRegs.length} destinataire(s) via Gmail SMTP ?`
-      : `Envoyer ce mail à ${targetRegs.length} destinataire(s) ? (MOCK — SMTP non configuré, aucun email réel ne partira)`;
+    // Build a detailed confirm message listing the first recipients
+    const samples = targetRegs.slice(0, 5).map(r => `• ${r.organization?.name} <${r.organization?.main_email}>`).join('\n');
+    const more = targetRegs.length > 5 ? `\n... et ${targetRegs.length - 5} autre(s)` : '';
+    const isGroup = targetRegs.length > 1;
+    const head = isGroup
+      ? `📧 ENVOI GROUPÉ à ${targetRegs.length} destinataires`
+      : `📧 ENVOI INDIVIDUEL à 1 destinataire`;
+    const mode = realSend
+      ? '✅ MODE RÉEL via Gmail SMTP — les emails partiront réellement.'
+      : '⚠️ MODE MOCK — SMTP non configuré, aucun email réel ne partira (uniquement enregistrement en base).';
+    const confirmMsg = `${head}\n${mode}\n\nObjet : ${subject}\n\nDestinataires :\n${samples}${more}\n\nConfirmer l'envoi ?`;
     if (!confirm(confirmMsg)) return;
+    // Double-confirm pour les ENVOIS RÉELS de masse (>10)
+    if (realSend && targetRegs.length > 10) {
+      if (!confirm(`⚠️ DOUBLE CONFIRMATION : vous allez envoyer ${targetRegs.length} emails RÉELS. Cette action est irréversible. Continuer ?`)) return;
+    }
     setSending(true);
     try {
       const res = await api('/api/mailing/send', {

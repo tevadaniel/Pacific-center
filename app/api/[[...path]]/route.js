@@ -1302,6 +1302,128 @@ export async function POST(request, { params }) {
       return json({ ok: true, updated: count });
     }
 
+    // ---- Exposant : édition de son profil (org info + reg info) ----
+    if (route.match(/^registrations\/[^/]+\/profile$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const orgUpd = {};
+      ['name', 'discipline', 'contact_name', 'main_phone', 'description', 'animation_default'].forEach(k => {
+        if (typeof body[k] === 'string') orgUpd[k] = body[k];
+      });
+      if (Object.keys(orgUpd).length) {
+        orgUpd.updated_at = new Date();
+        await db.collection('organizations').updateOne({ id: reg.organization_id }, { $set: orgUpd });
+      }
+      // Hours are FIXED to the event start/end — ignore any client-sent override
+      const regUpd = {
+        planned_arrival_time: '09:00',
+        planned_departure_time: '17:00',
+        updated_at: new Date(),
+      };
+      ['friday_slot_label', 'saturday_slot_label', 'exposant_notes'].forEach(k => {
+        if (body[k] !== undefined) regUpd[k] = body[k];
+      });
+      await db.collection('registrations').updateOne({ id: regId }, { $set: regUpd });
+      return json({ ok: true });
+    }
+
+    // ---- Exposant : pré-réservation d'un stand (atomique) ----
+    if (route.match(/^registrations\/[^/]+\/pre-reserve-stand$/)) {
+      const regId = p[1];
+      const { stand_id } = body;
+      if (!stand_id) return err('stand_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const stand = await db.collection('venue_stands').findOne({ id: stand_id });
+      if (!stand) return err('Stand introuvable', 404);
+      // Check the stand is FREE (not assigned to another registration)
+      const occupant = await db.collection('registrations').findOne({
+        edition_id: EDITION_ID,
+        venue_id: stand.venue_id,
+        stand_code: stand.stand_code,
+        id: { $ne: regId },
+      });
+      if (occupant) return err('Ce stand est déjà pré-réservé ou attribué à un autre exposant', 409);
+      // Update registration: assign venue + stand, status pre_reserve (a_confirmer)
+      const upd = {
+        venue_id: stand.venue_id,
+        stand_code: stand.stand_code,
+        status: reg.status === 'confirme' ? 'confirme' : 'a_confirmer',
+        is_pre_reserved: true,
+        pre_reserved_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
+      await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id });
+      return json({ ok: true, stand_code: stand.stand_code, status: upd.status });
+    }
+
+    // ---- Exposant : libération du stand pré-réservé ----
+    if (route.match(/^registrations\/[^/]+\/release-stand$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (reg.status === 'confirme') return err('Impossible de libérer un stand confirmé. Contactez ARACOM.', 400);
+      await db.collection('registrations').updateOne({ id: regId }, { $set: {
+        stand_code: null,
+        is_pre_reserved: false,
+        pre_reserved_at: null,
+        updated_at: new Date(),
+      } });
+      return json({ ok: true });
+    }
+
+    // ---- ARACOM : confirme un stand pré-réservé après réception caution ----
+    if (route.match(/^registrations\/[^/]+\/confirm-stand$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      await db.collection('registrations').updateOne({ id: regId }, { $set: {
+        status: 'confirme',
+        is_pre_reserved: false,
+        confirmed_at: new Date(),
+        updated_at: new Date(),
+      } });
+      // Mark deposit as received if not already
+      const dep = await db.collection('deposits').findOne({ registration_id: regId });
+      if (dep && dep.status !== 'recue') {
+        await db.collection('deposits').updateOne({ id: dep.id }, { $set: {
+          status: 'recue', received_at: new Date(), updated_at: new Date(),
+        } });
+      }
+      return json({ ok: true });
+    }
+
+    // ---- ARACOM : générer un reçu de caution PDF-like (texte HTML) pour un exposant ----
+    if (route.match(/^registrations\/[^/]+\/generate-caution-receipt$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const dep = await db.collection('deposits').findOne({ registration_id: regId });
+      const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+      const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937}h1{color:#1d4ed8}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}</style></head><body><h1>REÇU DE CAUTION</h1><p><b>Forum de la Rentrée 2026</b> · 14 & 15 août 2026<br>Organisé par <b>ARACOM</b></p><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode</span><span>${dep?.deposit_mode || 'Chèque / Virement / Espèces'}</span></div></div><div style="text-align:center;padding:18px 0"><div class="label">Montant</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Reçu en garantie de présence sur le Forum</div></div><p style="font-size:12px;color:#64748b">Cette caution sera restituée intégralement sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées.</p><p style="margin-top:40px"><i>L'équipe ARACOM</i></p></body></html>`;
+      // Save as document of type "recu_caution" attached to registration
+      const docId = uuid();
+      await db.collection('documents').insertOne({
+        id: docId,
+        registration_id: regId,
+        document_type: 'recu_caution',
+        file_name: `Recu_caution_${(org?.name || 'exposant').replace(/\s+/g,'_')}_${receiptNumber}.html`,
+        file_type: 'text/html',
+        file_size: html.length,
+        file_data_base64: Buffer.from(html, 'utf-8').toString('base64'),
+        status: 'valide',
+        uploaded_by: 'aracom',
+        validated_at: new Date(),
+        receipt_number: receiptNumber,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      return json({ ok: true, receipt_number: receiptNumber, document_id: docId });
+    }
+
     // ---- AI-powered email generation (Claude Sonnet 4.5 via Emergent LLM proxy) ----
     if (route === 'mailing/generate-ai') {
       const { mail_type, registration_ids, tone = 'professionnel chaleureux', custom_instruction = '', preview_only = true } = body;

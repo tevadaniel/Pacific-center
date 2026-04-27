@@ -13,7 +13,7 @@ const BG_BY_VENUE = {
   FAAA: '/plans/faaa_bg.png',
   PUN: '/plans/punaauia_bg.png',
   ARU: '/plans/arue_bg.png',
-  TAR: '/plans/taravao_bg.png',
+  TAR: '/plans/taravao.png', // utilise le plan complet (le bg cropé n'avait pas tous les stands)
 };
 
 // Default layout positions (percentages). Used when stand has no saved position.
@@ -25,11 +25,11 @@ const DEFAULT_POSITIONS = {
     'A-C05': { x: 33.2, y: 26.2 }, 'A-C06': { x: 36.4, y: 26.2 }, 'A-C07': { x: 39.8, y: 25.8 }, 'A-C08': { x: 43.0, y: 25.6 },
     'A-C09': { x: 64.1, y: 24.7 }, 'A-C10': { x: 67.4, y: 24.7 }, 'A-C11': { x: 70.9, y: 24.7 }, 'A-C12': { x: 74.1, y: 24.7 },
   },
-  TAR: { // 12 stands : 6 à gauche + DEMO + 6 à droite + Kiosque
-    'T-D01': { x: 16.5, y: 50 }, 'T-D02': { x: 20.3, y: 50 }, 'T-D03': { x: 24.1, y: 50 }, 'T-D04': { x: 27.9, y: 50 },
-    'T-D05': { x: 31.7, y: 50 }, 'T-D06': { x: 35.5, y: 50 },
-    'T-D07': { x: 58.5, y: 50 }, 'T-D08': { x: 62.3, y: 50 }, 'T-D09': { x: 66.1, y: 50 }, 'T-D10': { x: 69.9, y: 50 },
-    'T-D11': { x: 73.7, y: 50 }, 'T-D12': { x: 77.5, y: 50 },
+  TAR: { // 12 stands : plan Taravao officiel — répartis sur 2 rangées (Côte intervenant / Côte client)
+    'T-D01': { x: 21, y: 23 }, 'T-D02': { x: 26, y: 23 }, 'T-D03': { x: 31, y: 23 },
+    'T-D04': { x: 36, y: 23 }, 'T-D05': { x: 41, y: 23 }, 'T-D06': { x: 46, y: 23 },
+    'T-D07': { x: 19, y: 32 }, 'T-D08': { x: 24, y: 32 }, 'T-D09': { x: 29, y: 32 },
+    'T-D10': { x: 34, y: 32 }, 'T-D11': { x: 39, y: 32 }, 'T-D12': { x: 44, y: 32 },
   },
   FAAA: { // 16 stands : 3 groupes séparés par 2 Kiosques
     'F-A01': { x: 19.5, y: 48 }, 'F-A02': { x: 21.9, y: 48 }, 'F-A03': { x: 24.3, y: 48 }, 'F-A04': { x: 26.8, y: 48 },
