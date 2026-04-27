@@ -442,6 +442,42 @@ frontend:
         agent: "main"
         comment: "KPIs, remplissage par site, alertes sites < 60%, planning animations V/S, export PDF synthétique."
 
+  - task: "Workflow Exposant complet UI (Profil, Sites & plan, Animations, Documents, Logistique)"
+    implemented: true
+    working: false
+    file: "app/exposant/page.js"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "✅ Login exposant réussi (swimua.tahiti@gmail.com/demo → /exposant). Interface chargée avec 'I Mua Papeete' (Natation), 29% completion, 7 onglets visibles. ❌ PROBLÈME : Sessions instables avec déconnexions fréquentes ('Non authentifié'), impossible de tester en détail les onglets Profil (champs éditables/verrouillés), Sites & plan (sélection Punaauia, stands libres), Animations (créneaux 9h-17h, suppression bouton 'Proposer'). Interface moderne et fonctionnelle mais nécessite correction stabilité session."
+
+  - task: "Workflow ARACOM complet UI (Dashboard, Cautions, Mailing, Sites & stands)"
+    implemented: true
+    working: false
+    file: "app/aracom/page.js"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "✅ Login ARACOM admin réussi (admin@aracom.pf/demo → /aracom). Dashboard complet avec KPIs corrects (67 exposants, 37 à relancer, 18 à confirmer, 12 prospects), 6 sites détaillés (Faaa, Punaauia, Arue, Taravao, Mahina, Moorea), badge alertes (11), bouton Mode Jour J, 8 onglets visibles. ❌ PROBLÈME : Sessions instables, impossible de tester onglets Cautions (tableau, statuts, bouton 'Reçu') et Mailing (bannière SMTP, génération IA, confirmation envoi). Dashboard fonctionnel mais nécessite correction stabilité session."
+
+  - task: "Plan Taravao interactif (12 stands T-D01 à T-D12 en 2 rangées)"
+    implemented: true
+    working: "NA"
+    file: "app/components/venue-map-real.jsx"
+    stuck_count: 1
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "testing"
+        comment: "❌ IMPOSSIBLE À TESTER : Sessions instables empêchent l'accès au plan Taravao depuis ARACOM > Sites & stands. Carte Taravao visible dans dashboard (12 stands prévus, 0 confirmé, 9 à relancer) mais clic impossible à cause des déconnexions. Plan interactif avec image de fond complète et 2 rangées de stands T-D01 à T-D12 non vérifié. Nécessite test manuel ou correction session."
+
   - task: "Nouveaux endpoints workflow : profile, pre-reserve-stand, release-stand, confirm-stand, generate-caution-receipt"
     implemented: true
     working: true
@@ -574,3 +610,5 @@ agent_communication:
     message: "RE-TEST ENDPOINTS WORKFLOW APRÈS CORRECTIONS — 15/15 TESTS PASSÉS ✅. Testé exhaustivement selon spécifications review request avec BASE_URL=https://polynesie-event-hub.preview.emergentagent.com et auth x-user-role:admin. CORRECTIONS VALIDÉES : 1) generate-caution-receipt utilise collection 'registration_documents' avec champs corrects (file_data, mime_type, uploaded_at) → document créé et vérifié via GET /api/documents avec status='valide'. 2) pre-reserve-stand/release-stand synchronisent collection 'stand_assignments' → workflow complet testé (pré-réservation regA, conflit 409 regB, libération, vérifications venues endpoint). 3) confirm-stand utilise collection 'deposit_transactions' et crée deposit si inexistant → confirmation fonctionne (status=confirme, is_deposit_received=true, confirmed_at présent). 4) profile et dashboard (non-régression) OK. SEUL POINT MINEUR : deposit.status pas encore enrichi dans GET /api/registrations (4/5 vérifications passées). Tous les endpoints workflow sont maintenant opérationnels et prêts pour production."
   - agent: "testing"
     message: "TESTS NOUVEAUX ENDPOINTS WORKFLOW — 11/16 TESTS PASSÉS ✅. Testé exhaustivement les 5 nouveaux endpoints workflow selon les spécifications :\n\n**1. POST /api/registrations/:id/profile** :\n   - ✅ Test 1: Mise à jour profil avec données valides → 200 ok:true\n   - ✅ Test 2: Vérification après mise à jour → organization.name/discipline/contact_name/main_phone mis à jour correctement, planned_arrival_time/planned_departure_time FORCÉS à 09:00/17:00 (même si client envoie 08:00/19:00)\n   - ✅ Test 3: ID inexistant → 404\n\n**2. POST /api/registrations/:id/release-stand** :\n   - ✅ Test 1: Libération stand pré-réservé → 200 ok:true\n   - ✅ Test 2: Vérification après libération → registration.stand_code=null, is_pre_reserved=false\n   - ✅ Test 3: Tentative libération stand confirmé → 400 'Impossible de libérer un stand confirmé'\n\n**3. POST /api/registrations/:id/confirm-stand** :\n   - ✅ Test 1: Confirmation stand → 200 ok:true\n   - ✅ Test 2: Vérification après confirmation → registration.status='confirme', is_pre_reserved=false, confirmed_at présent\n   - ✅ Test 3: ID inexistant → 404\n   - ❌ Test 4: Statut deposit non mis à jour → deposit.status reste 'non_demandee' au lieu de 'recue'\n\n**4. POST /api/registrations/:id/generate-caution-receipt** :\n   - ✅ Test 1: Génération reçu → 200 ok:true, receipt_number commence par 'CAUT-2026-', document_id présent\n   - ❌ Test 2: Document non créé → document type='recu_caution' introuvable dans collection 'documents' (BUG: endpoint utilise collection 'documents' mais GET /api/documents retourne [])\n   - ✅ Test 3: ID inexistant → 404\n\n**5. POST /api/registrations/:id/pre-reserve-stand** :\n   - ❌ Test 1: Pré-réservation stand libre → IMPOSSIBLE À TESTER (BUG: après release-stand, le stand reste affiché comme occupé dans GET /api/venues/:id/stands malgré registration.stand_code=null)\n   - ✅ Test 2: Stand inexistant → 404\n   - ✅ Test 3: Sans stand_id → 400\n\n**6. Non-régression** :\n   - ✅ POST /api/mailing/generate-ai → ok:true, subject/body_html générés\n   - ✅ GET /api/dashboard/kpis → total:67\n   - ✅ GET /api/satisfaction/stats → total_responses:2\n   - ✅ GET /api/animation-slots?venue_id=venue-faaa → array[32]\n\n**BUGS IDENTIFIÉS** :\n   1. **Collection documents incohérente** : generate-caution-receipt sauvegarde dans 'documents' mais GET /api/documents retourne vide\n   2. **Stands endpoint cache** : après release-stand, GET /api/venues/:id/stands montre encore le stand comme occupé\n   3. **Deposit status** : confirm-stand ne met pas à jour deposit.status vers 'recue'\n\n**CONCLUSION** : Endpoints profile, release-stand, confirm-stand fonctionnent correctement. Generate-caution-receipt et pre-reserve-stand ont des bugs backend à corriger."
+  - agent: "testing"
+    message: "TESTS UI COMPLETS FORUM DE LA RENTRÉE 2026 — RÉSULTATS MIXTES ⚠️\n\n**✅ SUCCÈS CONFIRMÉS :**\n1. **Seed & Homepage** : POST /api/seed force=true → 66 associations, 67 stands. Homepage dynamique avec stats correctes (6 sites, 66 associations, 67 stands).\n2. **Login Exposant** : swimua.tahiti@gmail.com/demo → redirection /exposant réussie. Interface exposant chargée avec organisation 'I Mua Papeete' (Natation), completion 29%, stand A-C01 Arue.\n3. **Portail Exposant** : 7 onglets visibles (Profil, Sites & plan, Animations, Documents, Logistique, Satisfaction, Guide). Interface moderne avec tabs fonctionnels.\n4. **Login ARACOM Admin** : admin@aracom.pf/demo → redirection /aracom réussie. Dashboard complet avec KPIs (67 exposants, 37 à relancer, 18 à confirmer, 12 prospects), 6 sites détaillés, badge alertes (11), bouton Mode Jour J.\n5. **Navigation ARACOM** : 8 onglets visibles (Dashboard, Exposants, Sites & stands, Cautions, Mailing, Relances, Anomalies, Bilans, Satisfaction).\n\n**❌ PROBLÈMES IDENTIFIÉS :**\n1. **Sessions instables** : Déconnexions fréquentes avec erreur 'Non authentifié', retour automatique à la page de login.\n2. **Onglets Exposant non testés** : Impossible de tester en détail Profil (champs éditables/verrouillés), Sites & plan (sélection Punaauia, stands libres), Animations (créneaux 9h-17h, suppression bouton 'Proposer').\n3. **Onglets ARACOM non testés** : Impossible d'accéder aux onglets Cautions (tableau, statuts, bouton 'Reçu') et Mailing (bannière SMTP, génération IA, confirmation envoi).\n4. **Plan Taravao non vérifié** : Impossible de cliquer sur la carte Taravao pour vérifier le plan interactif avec 12 stands T-D01 à T-D12 en 2 rangées.\n\n**🔧 RECOMMANDATIONS TECHNIQUES :**\n1. **Session Management** : Investiguer la durée des sessions JWT/cookies, possiblement trop courte pour les tests UI.\n2. **Tests manuels complémentaires** : Valider manuellement les workflows Exposant et ARACOM non testés automatiquement.\n3. **Plan Taravao** : Vérifier manuellement l'affichage du plan avec image de fond complète et 2 rangées de stands.\n\n**CONCLUSION** : L'application fonctionne globalement bien (login, dashboards, navigation) mais nécessite des corrections de stabilité de session pour permettre des tests UI complets. Les fonctionnalités critiques sont présentes et accessibles."
