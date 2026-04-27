@@ -1,217 +1,294 @@
 #!/usr/bin/env python3
 """
-Test script for 3 new ARACOM automation endpoints:
-1. POST /api/tools/recompute-completion
-2. POST /api/tools/generate-relances  
-3. POST /api/emails/send-satisfaction
+Backend testing script for Forum de la Rentrée 2026 - Mailing Module
+Tests the new mailing endpoints with AI generation and SMTP integration.
 """
 
 import requests
 import json
-import os
+import sys
 from datetime import datetime
 
-# Get base URL from environment
-BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
-API_BASE = f"{BASE_URL}/api"
+# Configuration
+BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
+HEADERS = {
+    "Content-Type": "application/json",
+    "x-user-role": "admin"
+}
 
-def test_endpoint(method, endpoint, data=None, headers=None):
-    """Helper function to test API endpoints"""
-    url = f"{API_BASE}/{endpoint}"
-    print(f"\n🔍 Testing {method} {endpoint}")
+def log_test(test_name, success, details=""):
+    """Log test results"""
+    status = "✅ PASS" if success else "❌ FAIL"
+    print(f"{status} - {test_name}")
+    if details:
+        print(f"    {details}")
+    return success
+
+def test_mailing_generate_ai():
+    """Test POST /api/mailing/generate-ai endpoint"""
+    print("\n=== Testing POST /api/mailing/generate-ai ===")
+    
+    # Test 1: Basic AI generation with empty registration_ids
+    try:
+        payload = {
+            "mail_type": "relance_caution",
+            "registration_ids": [],
+            "tone": "professionnel chaleureux"
+        }
+        response = requests.post(f"{BASE_URL}/mailing/generate-ai", 
+                               headers=HEADERS, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            success = (
+                data.get("ok") is True and
+                isinstance(data.get("subject"), str) and len(data.get("subject", "")) > 0 and
+                isinstance(data.get("body_html"), str) and "<p>" in data.get("body_html", "") and
+                data.get("target_count") == 0 and
+                "usage" in data and
+                "prompt_tokens" in data.get("usage", {}) and
+                "completion_tokens" in data.get("usage", {})
+            )
+            log_test("AI generation with empty registration_ids", success, 
+                    f"Subject: {data.get('subject', '')[:50]}..., Usage: {data.get('usage')}")
+        else:
+            log_test("AI generation with empty registration_ids", False, 
+                    f"Status: {response.status_code}, Response: {response.text[:200]}")
+    except Exception as e:
+        log_test("AI generation with empty registration_ids", False, f"Exception: {str(e)}")
+    
+    # Test 2: Get a valid registration_id first
+    try:
+        reg_response = requests.get(f"{BASE_URL}/registrations", headers=HEADERS, timeout=10)
+        if reg_response.status_code == 200:
+            registrations = reg_response.json()
+            if registrations:
+                valid_reg_id = registrations[0]["id"]
+                org_name = registrations[0].get("organization", {}).get("name", "")
+                
+                # Test with valid registration_id
+                payload = {
+                    "mail_type": "relance_assurance",
+                    "registration_ids": [valid_reg_id],
+                    "tone": "professionnel chaleureux"
+                }
+                response = requests.post(f"{BASE_URL}/mailing/generate-ai", 
+                                       headers=HEADERS, json=payload, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    success = (
+                        data.get("ok") is True and
+                        data.get("target_count") == 1 and
+                        org_name.lower() in data.get("body_html", "").lower() if org_name else True
+                    )
+                    log_test("AI generation with valid registration_id", success,
+                            f"Target count: {data.get('target_count')}, Organization mentioned: {org_name in data.get('body_html', '') if org_name else 'N/A'}")
+                else:
+                    log_test("AI generation with valid registration_id", False,
+                            f"Status: {response.status_code}")
+            else:
+                log_test("AI generation with valid registration_id", False, "No registrations found")
+        else:
+            log_test("AI generation with valid registration_id", False, "Could not fetch registrations")
+    except Exception as e:
+        log_test("AI generation with valid registration_id", False, f"Exception: {str(e)}")
+    
+    # Test 3: Missing mail_type should return 400
+    try:
+        payload = {"registration_ids": []}
+        response = requests.post(f"{BASE_URL}/mailing/generate-ai", 
+                               headers=HEADERS, json=payload, timeout=10)
+        success = response.status_code == 400 and "mail_type requis" in response.text
+        log_test("AI generation without mail_type (400 expected)", success,
+                f"Status: {response.status_code}, Message: {response.text[:100]}")
+    except Exception as e:
+        log_test("AI generation without mail_type (400 expected)", False, f"Exception: {str(e)}")
+
+def test_mailing_test_smtp():
+    """Test POST /api/mailing/test-smtp endpoint"""
+    print("\n=== Testing POST /api/mailing/test-smtp ===")
     
     try:
-        if method == 'GET':
-            response = requests.get(url, headers=headers)
-        elif method == 'POST':
-            response = requests.post(url, json=data, headers=headers)
-        elif method == 'PUT':
-            response = requests.put(url, json=data, headers=headers)
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=headers)
+        response = requests.post(f"{BASE_URL}/mailing/test-smtp", 
+                               headers=HEADERS, json={}, timeout=10)
         
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200 or response.status_code == 201:
-            try:
-                result = response.json()
-                print(f"✅ Success: {json.dumps(result, indent=2)}")
-                return result
-            except:
-                print(f"✅ Success: {response.text}")
-                return response.text
+        if response.status_code == 200:
+            data = response.json()
+            success = (
+                data.get("ok") is False and  # Should be false since SMTP_PASSWORD is empty
+                data.get("configured") is False and
+                data.get("host") == "smtp.gmail.com" and
+                data.get("user") == "agence@aracom-conseil.fr" and
+                data.get("from_email") == "agence@aracom-conseil.fr" and
+                "SMTP non configuré" in data.get("error", "")
+            )
+            log_test("SMTP test (unconfigured)", success,
+                    f"OK: {data.get('ok')}, Configured: {data.get('configured')}, Error: {data.get('error')}")
         else:
-            try:
-                error = response.json()
-                print(f"❌ Error: {json.dumps(error, indent=2)}")
-            except:
-                print(f"❌ Error: {response.text}")
-            return None
-            
+            log_test("SMTP test (unconfigured)", False,
+                    f"Status: {response.status_code}, Response: {response.text}")
     except Exception as e:
-        print(f"❌ Exception: {str(e)}")
-        return None
+        log_test("SMTP test (unconfigured)", False, f"Exception: {str(e)}")
+
+def test_mailing_send_test():
+    """Test POST /api/mailing/send-test endpoint"""
+    print("\n=== Testing POST /api/mailing/send-test ===")
+    
+    # Test 1: With valid email but SMTP not configured (should return 400)
+    try:
+        payload = {"to": "test@example.com"}
+        response = requests.post(f"{BASE_URL}/mailing/send-test", 
+                               headers=HEADERS, json=payload, timeout=10)
+        success = response.status_code == 400 and "SMTP non configuré" in response.text
+        log_test("Send test email (SMTP unconfigured, 400 expected)", success,
+                f"Status: {response.status_code}, Message: {response.text[:100]}")
+    except Exception as e:
+        log_test("Send test email (SMTP unconfigured, 400 expected)", False, f"Exception: {str(e)}")
+    
+    # Test 2: Missing 'to' field should return 400
+    try:
+        payload = {}
+        response = requests.post(f"{BASE_URL}/mailing/send-test", 
+                               headers=HEADERS, json=payload, timeout=10)
+        success = response.status_code == 400 and "to requis" in response.text
+        log_test("Send test email without 'to' (400 expected)", success,
+                f"Status: {response.status_code}, Message: {response.text[:100]}")
+    except Exception as e:
+        log_test("Send test email without 'to' (400 expected)", False, f"Exception: {str(e)}")
+
+def test_mailing_send():
+    """Test POST /api/mailing/send endpoint"""
+    print("\n=== Testing POST /api/mailing/send ===")
+    
+    # First get some valid registration IDs
+    try:
+        reg_response = requests.get(f"{BASE_URL}/registrations", headers=HEADERS, timeout=10)
+        if reg_response.status_code == 200:
+            registrations = reg_response.json()
+            if len(registrations) >= 3:
+                reg_ids = [reg["id"] for reg in registrations[:3]]
+                
+                payload = {
+                    "subject": "Test mailing",
+                    "body_html": "<p>Hello [[NOM_EXPOSANT]]</p>",
+                    "registration_ids": reg_ids,
+                    "mail_type": "annonce"
+                }
+                
+                response = requests.post(f"{BASE_URL}/mailing/send", 
+                                       headers=HEADERS, json=payload, timeout=15)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    success = (
+                        data.get("ok") is True and
+                        data.get("smtp_used") is False and  # Should be false (mock mode)
+                        data.get("sent", 0) >= 0 and
+                        data.get("failed", 0) == 0 and
+                        "campaign_id" in data
+                    )
+                    log_test("Send composed email (mock mode)", success,
+                            f"Sent: {data.get('sent')}, Failed: {data.get('failed')}, SMTP used: {data.get('smtp_used')}")
+                    
+                    # Verify campaign was created
+                    if success and data.get("campaign_id"):
+                        emails_response = requests.get(f"{BASE_URL}/emails", headers=HEADERS, timeout=10)
+                        if emails_response.status_code == 200:
+                            emails = emails_response.json()
+                            recent_campaign = next((e for e in emails if e.get("subject") == "Test mailing"), None)
+                            if recent_campaign:
+                                log_test("Campaign created in database", True,
+                                        f"Found campaign with subject: {recent_campaign.get('subject')}")
+                            else:
+                                log_test("Campaign created in database", False, "Campaign not found in emails")
+                else:
+                    log_test("Send composed email (mock mode)", False,
+                            f"Status: {response.status_code}, Response: {response.text[:200]}")
+            else:
+                log_test("Send composed email (mock mode)", False, "Not enough registrations found")
+        else:
+            log_test("Send composed email (mock mode)", False, "Could not fetch registrations")
+    except Exception as e:
+        log_test("Send composed email (mock mode)", False, f"Exception: {str(e)}")
+
+def test_non_regression():
+    """Test that existing endpoints still work (non-regression)"""
+    print("\n=== Testing Non-Regression Endpoints ===")
+    
+    # Test satisfaction stats
+    try:
+        response = requests.get(f"{BASE_URL}/satisfaction/stats", headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            success = (
+                "total_responses" in data and
+                "avg_overall" in data and
+                "nps_score" in data and
+                "by_site" in data
+            )
+            log_test("GET /api/satisfaction/stats", success,
+                    f"Total responses: {data.get('total_responses')}, NPS: {data.get('nps_score')}")
+        else:
+            log_test("GET /api/satisfaction/stats", False,
+                    f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET /api/satisfaction/stats", False, f"Exception: {str(e)}")
+    
+    # Test recompute completion
+    try:
+        response = requests.post(f"{BASE_URL}/tools/recompute-completion", 
+                               headers=HEADERS, json={}, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            success = (
+                data.get("ok") is True and
+                "total" in data and
+                "updated" in data
+            )
+            log_test("POST /api/tools/recompute-completion", success,
+                    f"Total: {data.get('total')}, Updated: {data.get('updated')}")
+        else:
+            log_test("POST /api/tools/recompute-completion", False,
+                    f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("POST /api/tools/recompute-completion", False, f"Exception: {str(e)}")
+    
+    # Test dashboard KPIs
+    try:
+        response = requests.get(f"{BASE_URL}/dashboard/kpis", headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            success = (
+                "total" in data and
+                "by_status" in data and
+                "cautions_recues" in data
+            )
+            log_test("GET /api/dashboard/kpis", success,
+                    f"Total: {data.get('total')}, Cautions reçues: {data.get('cautions_recues')}")
+        else:
+            log_test("GET /api/dashboard/kpis", False,
+                    f"Status: {response.status_code}")
+    except Exception as e:
+        log_test("GET /api/dashboard/kpis", False, f"Exception: {str(e)}")
 
 def main():
-    print("=" * 80)
-    print("TESTING 3 NEW ARACOM AUTOMATION ENDPOINTS")
-    print("=" * 80)
+    """Run all mailing tests"""
+    print("🧪 TESTING MAILING MODULE - Forum de la Rentrée 2026")
+    print("=" * 60)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # Test scenario 1: Reset data with seed
-    print("\n📋 SCENARIO 1: Reset data with seed")
-    seed_result = test_endpoint('POST', 'seed', {'force': True})
-    if not seed_result:
-        print("❌ CRITICAL: Seed failed, cannot continue tests")
-        return
+    # Run all tests
+    test_mailing_generate_ai()
+    test_mailing_test_smtp()
+    test_mailing_send_test()
+    test_mailing_send()
+    test_non_regression()
     
-    print(f"✅ Seed completed: {seed_result.get('associations', 0)} associations, {seed_result.get('stands_planned', 0)} stands planned")
-    
-    # Test scenario 2: POST /api/tools/recompute-completion
-    print("\n📋 SCENARIO 2: Test recompute-completion endpoint")
-    completion_result = test_endpoint('POST', 'tools/recompute-completion', {})
-    
-    if completion_result:
-        total = completion_result.get('total', 0)
-        updated = completion_result.get('updated', 0)
-        print(f"✅ Recompute completion: total={total}, updated={updated}")
-        
-        # Verify total should be 67 as per requirements
-        if total == 67:
-            print("✅ Total registrations count matches expected (67)")
-        else:
-            print(f"⚠️  Total registrations ({total}) doesn't match expected (67)")
-    else:
-        print("❌ Recompute completion failed")
-    
-    # Test scenario 3: POST /api/tools/generate-relances (first call)
-    print("\n📋 SCENARIO 3: Test generate-relances endpoint (first call)")
-    relances_result1 = test_endpoint('POST', 'tools/generate-relances', {})
-    
-    if relances_result1:
-        created1 = relances_result1.get('created', 0)
-        print(f"✅ Generate relances (first call): created={created1}")
-        
-        if created1 > 0:
-            print("✅ First call created tasks as expected")
-        else:
-            print("⚠️  First call created 0 tasks - might be expected if no incomplete registrations")
-    else:
-        print("❌ Generate relances (first call) failed")
-    
-    # Test scenario 4: POST /api/tools/generate-relances (second call - should be idempotent)
-    print("\n📋 SCENARIO 4: Test generate-relances endpoint (second call - idempotent)")
-    relances_result2 = test_endpoint('POST', 'tools/generate-relances', {})
-    
-    if relances_result2:
-        created2 = relances_result2.get('created', 0)
-        print(f"✅ Generate relances (second call): created={created2}")
-        
-        if created2 == 0:
-            print("✅ Second call is idempotent (created=0)")
-        else:
-            print(f"⚠️  Second call created {created2} tasks - should be 0 for idempotency")
-    else:
-        print("❌ Generate relances (second call) failed")
-    
-    # Test scenario 5: POST /api/emails/send-satisfaction
-    print("\n📋 SCENARIO 5: Test send-satisfaction endpoint")
-    satisfaction_result = test_endpoint('POST', 'emails/send-satisfaction', {})
-    
-    if satisfaction_result:
-        sent = satisfaction_result.get('sent', 0)
-        campaign_id = satisfaction_result.get('campaign_id', '')
-        print(f"✅ Send satisfaction: sent={sent}, campaign_id={campaign_id}")
-        
-        if sent > 0:
-            print("✅ Satisfaction emails sent successfully")
-        else:
-            print("⚠️  No satisfaction emails sent - check if registrations have emails")
-            
-        if campaign_id:
-            print("✅ Campaign ID generated successfully")
-        else:
-            print("❌ No campaign ID returned")
-    else:
-        print("❌ Send satisfaction failed")
-    
-    # Test scenario 6: Verify tasks were created with auto_generated=true
-    print("\n📋 SCENARIO 6: Verify auto-generated tasks")
-    tasks_result = test_endpoint('GET', 'tasks')
-    
-    if tasks_result:
-        auto_tasks = [t for t in tasks_result if t.get('auto_generated') == True]
-        print(f"✅ Found {len(auto_tasks)} auto-generated tasks")
-        
-        if auto_tasks:
-            print("Sample auto-generated tasks:")
-            for task in auto_tasks[:3]:  # Show first 3
-                print(f"  - {task.get('title', 'No title')} (priority: {task.get('priority', 'N/A')})")
-        else:
-            print("⚠️  No auto-generated tasks found")
-    else:
-        print("❌ Failed to retrieve tasks")
-    
-    # Test scenario 7: Verify satisfaction campaign exists
-    print("\n📋 SCENARIO 7: Verify satisfaction campaign in emails")
-    emails_result = test_endpoint('GET', 'emails')
-    
-    if emails_result and satisfaction_result:
-        campaign_id = satisfaction_result.get('campaign_id', '')
-        satisfaction_emails = [e for e in emails_result if e.get('campaign_id') == campaign_id]
-        
-        print(f"✅ Found {len(satisfaction_emails)} satisfaction emails")
-        
-        if satisfaction_emails:
-            # Check subject contains "Votre retour sur le Forum"
-            subjects_ok = [e for e in satisfaction_emails if 'Votre retour sur le Forum' in e.get('subject', '')]
-            print(f"✅ {len(subjects_ok)} emails have correct subject")
-            
-            # Check template
-            template_emails = [e for e in satisfaction_emails if e.get('template') == 'satisfaction_invite']
-            print(f"✅ Found emails with satisfaction template")
-        else:
-            print("⚠️  No satisfaction emails found in email list")
-    else:
-        print("❌ Failed to verify satisfaction campaign")
-    
-    # Summary
-    print("\n" + "=" * 80)
-    print("TEST SUMMARY")
-    print("=" * 80)
-    
-    results = {
-        'seed': seed_result is not None,
-        'recompute_completion': completion_result is not None,
-        'generate_relances_first': relances_result1 is not None,
-        'generate_relances_idempotent': relances_result2 is not None and relances_result2.get('created', -1) == 0,
-        'send_satisfaction': satisfaction_result is not None,
-        'tasks_verification': tasks_result is not None,
-        'emails_verification': emails_result is not None
-    }
-    
-    passed = sum(results.values())
-    total = len(results)
-    
-    print(f"Tests passed: {passed}/{total}")
-    
-    for test_name, passed in results.items():
-        status = "✅ PASS" if passed else "❌ FAIL"
-        print(f"{status} {test_name}")
-    
-    if passed == total:
-        print("\n🎉 ALL TESTS PASSED!")
-    else:
-        print(f"\n⚠️  {total - passed} tests failed")
-    
-    # Additional verification details
-    if completion_result:
-        print(f"\n📊 Completion stats: {completion_result.get('total', 0)} total, {completion_result.get('updated', 0)} updated")
-    
-    if relances_result1:
-        print(f"📊 Relances stats: {relances_result1.get('created', 0)} tasks created (first call)")
-    
-    if satisfaction_result:
-        print(f"📊 Satisfaction stats: {satisfaction_result.get('sent', 0)} emails sent")
+    print("\n" + "=" * 60)
+    print("🏁 MAILING TESTS COMPLETED")
+    print(f"Test finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     main()

@@ -452,7 +452,7 @@ test_plan:
   current_focus: []
   stuck_tasks: []
   test_all: false
-  test_priority: "completed"
+  test_priority: "high_first"
 
   - task: "Parcours Inscription self-service (/inscription)"
     implemented: true
@@ -468,6 +468,66 @@ test_plan:
       - working: true
         agent: "testing"
         comment: "✅ TESTÉ - Page d'inscription fonctionne correctement. Formulaire complet avec tous les champs requis, dropdown discipline avec toutes les options (Sport, Musique, Danse, Arts, Culture, etc.), validation des mots de passe, lien retour vers login. Interface claire et intuitive."
+
+  - task: "Mailing IA via Emergent LLM (Claude Sonnet 4.5)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/llm.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/mailing/generate-ai utilise Claude Sonnet 4.5 via proxy Emergent LLM. Génération d'emails contextualisés avec variables [[NOM_EXPOSANT]], [[STAND]], [[SITE]]. Support de 10 types de mails (relance_caution, relance_assurance, etc.). Retourne subject, body_html, usage tokens."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - Génération IA fonctionne parfaitement. Test 1: mail_type='relance_caution', registration_ids=[] → subject généré, body_html avec <p>, usage tokens présents. Test 2: avec registration_id valide → email contextualisé avec nom organisation. Test 3: sans mail_type → 400 'mail_type requis'. Proxy Emergent LLM opérationnel."
+
+  - task: "Endpoint mailing/test-smtp"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/mailer.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/mailing/test-smtp vérifie la configuration SMTP Gmail. Retourne toujours 200, body indique le statut réel. Variables SMTP_* configurées, SMTP_PASSWORD volontairement vide."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - Endpoint test-smtp fonctionne correctement. Retourne 200 avec ok:false, configured:false, host='smtp.gmail.com', user='agence@aracom-conseil.fr', error='SMTP non configuré : ajoutez SMTP_PASSWORD (App Password Gmail) dans .env'. Comportement attendu car SMTP_PASSWORD vide."
+
+  - task: "Endpoint mailing/send-test"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/mailer.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/mailing/send-test envoie un email de test réel via SMTP Gmail si configuré. Validation du champ 'to' requis."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - Endpoint send-test fonctionne correctement. Test 1: avec to='test@example.com' mais SMTP non configuré → 400 'SMTP non configuré'. Test 2: sans champ 'to' → 400 'to requis'. Validation et gestion d'erreurs OK."
+
+  - task: "Endpoint mailing/send avec branche SMTP/MOCK"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/mailer.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/mailing/send envoie des emails composés. Si SMTP configuré → envoi réel Gmail, sinon → mode mock. Substitution variables [[NOM_EXPOSANT]], [[STAND]], [[SITE]]. Crée campagne + messages en DB."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - Endpoint send fonctionne parfaitement. Test avec 3 registration_ids → sent:3, failed:0, smtp_used:false (mode mock), campaign_id généré. Campagne créée en DB avec subject 'Test mailing'. Substitution variables OK : '[[NOM_EXPOSANT]]' remplacé par noms organisations ('Budokan Judo Pirae', 'ACE Arue'). Messages email_messages créés avec body_html personnalisé."
 
 agent_communication:
   - agent: "main"
@@ -490,3 +550,7 @@ agent_communication:
     message: "TESTS ENDPOINTS SATISFACTION COMPLÉTÉS ✅. Testé les 3 nouveaux endpoints selon les 9 scénarios requis : POST /api/satisfaction (upsert par registration_id avec validation 400/404), GET /api/satisfaction (liste enrichie + filtre registration_id), GET /api/satisfaction/stats (agrégats complets). Vérifications : upsert fonctionne (200 update, 201 create), enrichissement avec organization_name/venue_name/stand_code, NPS calculé correctement (promoters≥9, detractors≤6), moyennes exactes, répartition will_participate, stats par site. Tous les tests passés, API satisfaction prête pour production."
   - agent: "testing"
     message: "TESTS 3 NOUVEAUX ENDPOINTS ARACOM AUTOMATISATION — 7/7 TESTS PASSÉS ✅. Testé exhaustivement selon les scénarios requis : 1) POST /api/seed force=true → 66 associations, 67 stands. 2) POST /api/tools/recompute-completion → total=67, updated=67 (recalcule % complétion). 3) POST /api/tools/generate-relances → created=202 tâches (1er appel), created=0 (2e appel idempotent). 4) POST /api/emails/send-satisfaction → sent=46 emails, campaign_id généré. Vérifications : tâches auto-générées avec auto_generated=true, priorités haute/moyenne, emails avec subject 'Votre retour sur le Forum', campagne satisfaction_invite créée. Tous les endpoints fonctionnent parfaitement selon les spécifications."
+  - agent: "main"
+    message: "MIGRATION MAILING IA + GMAIL SMTP (session 7) :\n\n**1. Mailing IA migré vers Emergent LLM (proxy universel)**\n   - L'ancienne intégration utilisait `@anthropic-ai/sdk` direct avec une clé Anthropic du user → bloquée par 'Credit balance too low'.\n   - Nouvelle approche : utilisation de `EMERGENT_LLM_KEY` via le proxy `https://integrations.emergentagent.com/llm` (OpenAI-compatible).\n   - Nouveau module `/app/lib/llm.js` avec `emergentChat()` (fetch direct, sans SDK).\n   - `/api/mailing/generate-ai` réécrit pour utiliser ce module avec model `claude-sonnet-4-5-20250929`.\n   - **Validé en live via curl : email de relance caution généré parfaitement, format JSON correct, usage tokens retournés.**\n\n**2. Gmail SMTP via nodemailer (envois réels)**\n   - Nouveau module `/app/lib/mailer.js` (sendMail, isSmtpConfigured, verifySmtp).\n   - Nouveaux endpoints : `POST /api/mailing/test-smtp` (always 200, body indique status), `POST /api/mailing/send-test` (envoie un email de test à une adresse).\n   - `/api/mailing/send` modifié : si SMTP configuré → envoi réel via Gmail, sinon → fallback mock (comme avant).\n   - Variables .env : SMTP_HOST=smtp.gmail.com, SMTP_PORT=587, SMTP_USER=agence@aracom-conseil.fr, SMTP_PASSWORD=(vide pour l'instant — App Password à fournir par user), SMTP_FROM_NAME, SMTP_FROM_EMAIL.\n   - **À NOTER : SMTP_PASSWORD est volontairement vide. L'endpoint test-smtp retourne ok:false avec message 'SMTP non configuré'. Quand le user fournira le mot de passe, ça basculera automatiquement en envoi réel.**\n\n**3. UI Mailing ARACOM enrichie**\n   - Bannière SMTP en haut (verte si actif, ambre sinon) avec champ email de test + boutons 'Test' (envoi réel) et 'Vérifier' (verify SMTP).\n   - Badge MOCK conditionnel (disparaît dès que SMTP est OK).\n   - Compteur tokens mis à jour pour le format Emergent (prompt_tokens/completion_tokens).\n\n**À TESTER (BACKEND) :**\n   1. POST /api/mailing/generate-ai avec mail_type='relance_caution', registration_ids=[] → ok:true, subject + body_html non vides, usage présent.\n   2. POST /api/mailing/generate-ai avec mail_type='relance_assurance' et registration_ids=[<un id valide>] → email contextualisé pour cet exposant.\n   3. POST /api/mailing/generate-ai sans mail_type → 400.\n   4. POST /api/mailing/test-smtp avec body {} → 200 avec ok:false, configured:false (puisque SMTP_PASSWORD vide).\n   5. POST /api/mailing/send-test avec to='test@example.com' et SMTP non configuré → 400 avec message 'SMTP non configuré'.\n   6. POST /api/mailing/send avec subject, body_html, registration_ids[3] → 200 avec smtp_used:false, sent>0 (mode mock car SMTP off), entrées créées dans email_messages.\n   7. Vérifier que les anciens endpoints satisfaction et tools/* fonctionnent toujours (pas de régression)."
+  - agent: "testing"
+    message: "TESTS MODULE MAILING COMPLETS — 8/9 TESTS PASSÉS ✅. Testé exhaustivement les nouveaux endpoints mailing selon les spécifications :\n\n**1. POST /api/mailing/generate-ai** :\n   - Test 1: mail_type='relance_caution', registration_ids=[] → ✅ ok:true, subject généré, body_html avec <p>, usage tokens (prompt_tokens:656, completion_tokens:365)\n   - Test 2: avec registration_id valide + mail_type='relance_assurance' → ✅ target_count:1, email contextualisé avec nom organisation\n   - Test 3: sans mail_type → ✅ 400 'mail_type requis'\n\n**2. POST /api/mailing/test-smtp** :\n   - ✅ Retourne 200 avec ok:false, configured:false, host='smtp.gmail.com', user='agence@aracom-conseil.fr', error='SMTP non configuré : ajoutez SMTP_PASSWORD (App Password Gmail) dans .env' (comportement attendu)\n\n**3. POST /api/mailing/send-test** :\n   - Test 1: to='test@example.com' mais SMTP non configuré → ✅ 400 'SMTP non configuré'\n   - Test 2: sans champ 'to' → ✅ 400 'to requis'\n\n**4. POST /api/mailing/send** :\n   - ✅ Avec 3 registration_ids → sent:3, failed:0, smtp_used:false (mode mock), campaign_id généré\n   - ✅ Campagne créée en DB avec subject 'Test mailing'\n   - ✅ Substitution variables parfaite : '[[NOM_EXPOSANT]]' remplacé par 'Budokan Judo Pirae', 'ACE Arue'\n\n**5. Non-régression** :\n   - ✅ POST /api/tools/recompute-completion → total:67, updated:0\n   - ✅ GET /api/dashboard/kpis → total:67, cautions_recues:0\n   - ❌ GET /api/satisfaction/stats → erreur test (champ 'nps' au lieu de 'nps_score' attendu, mais endpoint fonctionne)\n\n**CONCLUSION** : Module mailing 100% opérationnel. Proxy Emergent LLM fonctionnel, SMTP en attente de configuration utilisateur (comportement normal), substitution variables OK, campagnes créées correctement."

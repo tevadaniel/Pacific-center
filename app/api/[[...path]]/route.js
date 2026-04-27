@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
 import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
-import Anthropic from '@anthropic-ai/sdk';
+import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
+import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 
 const EDITION_ID = 'edition-2026';
 
@@ -1301,10 +1302,10 @@ export async function POST(request, { params }) {
       return json({ ok: true, updated: count });
     }
 
-    // ---- AI-powered email generation (Claude Sonnet 4.5) ----
+    // ---- AI-powered email generation (Claude Sonnet 4.5 via Emergent LLM proxy) ----
     if (route === 'mailing/generate-ai') {
       const { mail_type, registration_ids, tone = 'professionnel chaleureux', custom_instruction = '', preview_only = true } = body;
-      if (!process.env.ANTHROPIC_API_KEY) return err('Clé Anthropic non configurée', 500);
+      if (!process.env.EMERGENT_LLM_KEY) return err('Clé Emergent LLM non configurée', 500);
       if (!mail_type) return err('mail_type requis', 400);
 
       const regs = registration_ids?.length
@@ -1324,7 +1325,7 @@ export async function POST(request, { params }) {
         contextDescription = `Destinataire unique : ${o?.name} (${o?.discipline}), contact ${o?.contact_name || 'responsable'}.
 Site : ${v?.name}, stand ${r.stand_code || 'non attribué'}.
 Statut du dossier : ${r.status}. Complétion : ${r.completion_percent || 0}%.
-Documents : assurance ${r.is_insurance_uploaded ? '✅' : '❌ manquante'}, convention ${r.is_convention_signed ? '✅' : '❌ non signée'}, caution ${r.is_deposit_received ? '✅ reçue' : '❌ non reçue'}.`;
+Documents : assurance ${r.is_insurance_uploaded ? 'OK' : 'manquante'}, convention ${r.is_convention_signed ? 'OK' : 'non signée'}, caution ${r.is_deposit_received ? 'reçue' : 'non reçue'}.`;
       } else if (regs.length > 1) {
         contextDescription = `Mail groupé à ${regs.length} exposants (exemples : ${regs.slice(0, 3).map(r => orgById[r.organization_id]?.name).join(', ')}...).
 Utilise [[NOM_EXPOSANT]], [[STAND]], [[SITE]] comme variables de personnalisation.`;
@@ -1375,29 +1376,26 @@ Contraintes :
 
 Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
 
-      try {
-        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const res = await client.messages.create({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 2000,
-          temperature: 0.7,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-        });
-        const text = res.content?.[0]?.text || '';
-        // Extract JSON (Claude sometimes wraps in backticks)
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
-        let parsed;
-        try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
-        return json({ ok: true, mail_type, subject: parsed.subject, body_html: parsed.body_html, target_count: regs.length, usage: res.usage });
-      } catch (e) {
-        console.error('Anthropic error:', e);
-        return err('Erreur IA : ' + (e.message || 'inconnue'), 500);
+      const result = await emergentChat({
+        model: DEFAULT_MODEL_CLAUDE,
+        system: systemPrompt,
+        user: userPrompt,
+        max_tokens: 2000,
+        temperature: 0.7,
+      });
+      if (!result.ok) {
+        console.error('Emergent LLM error:', result.error);
+        return err('Erreur IA : ' + (result.error || 'inconnue'), 500);
       }
+      const text = result.text || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
+      let parsed;
+      try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
+      return json({ ok: true, mail_type, subject: parsed.subject, body_html: parsed.body_html, target_count: regs.length, usage: result.usage });
     }
 
-    // ---- Send a composed AI email to selected registrations (mocked delivery) ----
+    // ---- Send a composed email to selected registrations (Gmail SMTP if configured, else mocked) ----
     if (route === 'mailing/send') {
       const { subject, body_html, registration_ids, mail_type } = body;
       if (!subject || !body_html) return err('subject et body_html requis', 400);
@@ -1408,16 +1406,20 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
 
+      const smtpReady = isSmtpConfigured();
       const campaignId = uuid();
       await db.collection('email_campaigns').insertOne({
         id: campaignId, edition_id: EDITION_ID,
         name: `IA — ${mail_type || 'custom'} — ${new Date().toISOString().slice(0,16)}`,
-        template: mail_type || 'ai_custom', status: 'envoyee',
+        template: mail_type || 'ai_custom',
+        status: smtpReady ? 'envoyee' : 'envoyee_mock',
         target_filter: { registration_ids },
         sent_count: 0, opened_count: 0, clicked_count: 0,
         created_at: new Date(), updated_at: new Date(),
       });
       let sent = 0;
+      let failed = 0;
+      const errors = [];
       for (const r of regs) {
         const o = orgById[r.organization_id];
         const v = venueById[r.venue_id];
@@ -1434,18 +1436,65 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
           .replaceAll('[[STAND]]', r.stand_code || '')
           .replaceAll('[[SITE]]', v?.name || '')
           .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
+
+        let sendStatus = 'envoye';
+        let providerId = `mock_${uuid()}`;
+        let errorMsg = null;
+        if (smtpReady) {
+          const r2 = await sendMail({
+            to: o.main_email,
+            subject: personalizedSubject,
+            html: personalizedBody,
+          });
+          if (r2.ok) {
+            providerId = r2.messageId || providerId;
+          } else {
+            sendStatus = 'echec';
+            errorMsg = r2.error;
+            failed++;
+            errors.push({ to: o.main_email, error: r2.error });
+          }
+        }
+
         await db.collection('email_messages').insertOne({
           id: uuid(), campaign_id: campaignId, registration_id: r.id,
           to_email: o.main_email, subject: personalizedSubject, body_html: personalizedBody,
-          send_status: 'envoye', sent_at: new Date(),
+          send_status: sendStatus, sent_at: new Date(),
           opened_at: null, clicked_at: null, response_status: 'attente',
-          provider_message_id: `mock_${uuid()}`,
+          provider_message_id: providerId,
+          error_message: errorMsg,
           created_at: new Date(), updated_at: new Date(),
         });
-        sent++;
+        if (sendStatus === 'envoye') sent++;
       }
       await db.collection('email_campaigns').updateOne({ id: campaignId }, { $set: { sent_count: sent, updated_at: new Date() } });
-      return json({ ok: true, sent, campaign_id: campaignId });
+      return json({ ok: true, sent, failed, smtp_used: smtpReady, errors: errors.slice(0, 5), campaign_id: campaignId });
+    }
+
+    // ---- SMTP test endpoint (verifies Gmail SMTP credentials) ----
+    if (route === 'mailing/test-smtp') {
+      const result = await verifySmtp();
+      return json({
+        ok: result.ok,
+        configured: isSmtpConfigured(),
+        host: process.env.SMTP_HOST || null,
+        user: process.env.SMTP_USER || null,
+        from_email: process.env.SMTP_FROM_EMAIL || null,
+        error: result.error || null,
+      }); // always 200 — body indicates actual SMTP status
+    }
+
+    // ---- Send a real test email via SMTP (admin only) ----
+    if (route === 'mailing/send-test') {
+      const { to } = body;
+      if (!to) return err('to requis', 400);
+      if (!isSmtpConfigured()) return err('SMTP non configuré : ajoutez SMTP_PASSWORD (App Password Gmail)', 400);
+      const result = await sendMail({
+        to,
+        subject: '✅ Test SMTP — Forum de la Rentrée 2026',
+        html: `<p>Bonjour,</p><p>Ceci est un email de test envoyé depuis l'application <b>Forum de la Rentrée 2026</b>.</p><p>Si vous recevez ce message, la configuration Gmail SMTP fonctionne parfaitement. 🎉</p><p>Bien cordialement,<br>L'équipe ARACOM</p>`,
+      });
+      return json(result, result.ok ? 200 : 500);
     }
 
     // ---- Send satisfaction survey invitation campaign (mocked) ----

@@ -15,7 +15,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
@@ -864,9 +864,22 @@ function MailingView() {
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [lastUsage, setLastUsage] = useState(null);
+  const [smtp, setSmtp] = useState({ ok: false, configured: false, host: null, user: null, error: 'Non testé' });
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testRecipient, setTestRecipient] = useState('');
 
   const load = () => Promise.all([api('/api/emails').then(setEmails), api('/api/registrations').then(setRegs)]);
-  useEffect(() => { load(); }, []);
+  const loadSmtp = async () => {
+    try {
+      const r = await api('/api/mailing/test-smtp', { method: 'POST', body: JSON.stringify({}) });
+      setSmtp(r);
+    } catch (e) {
+      // 400 returns from api() throw; parse anyway
+      setSmtp({ ok: false, configured: false, error: e.message });
+    }
+  };
+  useEffect(() => { load(); loadSmtp(); }, []);
 
   const targetRegs = regs.filter(r => {
     if (filter === 'a_relancer' && r.status !== 'a_relancer') return false;
@@ -890,7 +903,7 @@ function MailingView() {
       setSubject(res.subject || '');
       setBody(res.body_html || '');
       setLastUsage(res.usage);
-      toast.success(`✨ Mail généré par Claude Sonnet (${res.target_count} destinataire${res.target_count > 1 ? 's' : ''} ciblé${res.target_count > 1 ? 's' : ''})`);
+      toast.success(`✨ Mail généré par Claude Sonnet 4.5 (${res.target_count} destinataire${res.target_count > 1 ? 's' : ''} ciblé${res.target_count > 1 ? 's' : ''})`);
     } catch (e) { toast.error(`IA: ${e.message}`); }
     finally { setGenerating(false); }
   };
@@ -898,23 +911,89 @@ function MailingView() {
   const send = async () => {
     if (!subject || !body) { toast.error('Objet et corps requis'); return; }
     if (!targetRegs.length) { toast.error('Aucun destinataire'); return; }
-    if (!confirm(`Envoyer ce mail à ${targetRegs.length} destinataire(s) ? (MOCK — pas d'envoi réel)`)) return;
+    const realSend = smtp.ok;
+    const confirmMsg = realSend
+      ? `📧 Envoyer RÉELLEMENT ce mail à ${targetRegs.length} destinataire(s) via Gmail SMTP ?`
+      : `Envoyer ce mail à ${targetRegs.length} destinataire(s) ? (MOCK — SMTP non configuré, aucun email réel ne partira)`;
+    if (!confirm(confirmMsg)) return;
     setSending(true);
     try {
       const res = await api('/api/mailing/send', {
         method: 'POST',
         body: JSON.stringify({ subject, body_html: body, registration_ids: targetRegs.map(r => r.id), mail_type: type }),
       });
-      toast.success(`✉️ ${res.sent} email(s) envoyé(s) (mock)`);
+      if (res.smtp_used) {
+        toast.success(`📧 ${res.sent} email(s) envoyé(s) via Gmail${res.failed ? ` — ${res.failed} échec(s)` : ''}`);
+      } else {
+        toast.success(`✉️ ${res.sent} email(s) enregistrés (MOCK — SMTP non configuré)`);
+      }
       load();
     } catch (e) { toast.error(e.message); }
     finally { setSending(false); }
+  };
+
+  const testSmtp = async () => {
+    setTestingSmtp(true);
+    try {
+      await loadSmtp();
+      // Re-read after loadSmtp to display result
+      const r = await api('/api/mailing/test-smtp', { method: 'POST', body: JSON.stringify({}) }).catch(e => ({ ok: false, error: e.message }));
+      if (r.ok) toast.success('✅ Connexion SMTP réussie !');
+      else toast.error(`❌ ${r.error || 'Erreur SMTP'}`);
+      setSmtp(r);
+    } finally { setTestingSmtp(false); }
+  };
+
+  const sendTestEmail = async () => {
+    if (!testRecipient) { toast.error('Adresse de test requise'); return; }
+    setSendingTest(true);
+    try {
+      const r = await api('/api/mailing/send-test', { method: 'POST', body: JSON.stringify({ to: testRecipient }) });
+      if (r.ok) toast.success(`📨 Email de test envoyé à ${testRecipient}`);
+      else toast.error(`❌ ${r.error}`);
+    } catch (e) { toast.error(e.message); }
+    finally { setSendingTest(false); }
   };
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
       {/* Colonne 1 : composition */}
       <div className="lg:col-span-2 space-y-4">
+        {/* SMTP status banner */}
+        <Card className={smtp.ok ? 'border-emerald-200 bg-emerald-50/30' : 'border-amber-200 bg-amber-50/30'}>
+          <CardContent className="p-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm">
+              {smtp.ok ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span><b>Gmail SMTP actif</b> — envois réels via <code className="text-xs bg-white px-1 py-0.5 rounded border">{smtp.user || '—'}</code></span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-4 h-4 text-amber-600" />
+                  <span><b>SMTP non actif</b> — {smtp.configured ? 'erreur de connexion' : 'mot de passe Gmail manquant'}. {smtp.error && <span className="text-amber-700 text-xs">({smtp.error})</span>}</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="email"
+                placeholder="email@test.com"
+                value={testRecipient}
+                onChange={e => setTestRecipient(e.target.value)}
+                className="h-8 text-xs w-44"
+                disabled={!smtp.ok}
+              />
+              <Button size="sm" variant="outline" disabled={!smtp.ok || sendingTest || !testRecipient} onClick={sendTestEmail} className="h-8 text-xs gap-1">
+                <Send className="w-3 h-3" /> {sendingTest ? '…' : 'Test'}
+              </Button>
+              <Button size="sm" variant="outline" disabled={testingSmtp} onClick={testSmtp} className="h-8 text-xs gap-1">
+                <RefreshCw className={`w-3 h-3 ${testingSmtp ? 'animate-spin' : ''}`} /> Vérifier
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="border-violet-200 bg-gradient-to-br from-violet-50/40 to-white">
           <CardHeader>
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -954,7 +1033,7 @@ function MailingView() {
               <Sparkles className="w-4 h-4" />
               {generating ? 'Claude rédige le mail…' : targetRegs.length > 0 ? `Générer un mail pour ${targetRegs.length} destinataire(s)` : 'Sélectionnez des destinataires'}
             </Button>
-            {lastUsage && <p className="text-[11px] text-slate-400">Claude Sonnet 4.5 • {lastUsage.input_tokens} tokens in / {lastUsage.output_tokens} out</p>}
+            {lastUsage && <p className="text-[11px] text-slate-400">Claude Sonnet 4.5 (via Emergent) • {lastUsage.prompt_tokens || lastUsage.input_tokens || 0} tokens in / {lastUsage.completion_tokens || lastUsage.output_tokens || 0} out</p>}
           </CardContent>
         </Card>
 
@@ -976,7 +1055,7 @@ function MailingView() {
               </div>
             )}
             <Button className="w-full gap-2" onClick={send} disabled={sending || !subject || !body}>
-              <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer à ${targetRegs.length} destinataire(s)`} <Badge variant="secondary" className="ml-1">MOCK</Badge>
+              <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer à ${targetRegs.length} destinataire(s)`} {!smtp.ok && <Badge variant="secondary" className="ml-1">MOCK</Badge>}
             </Button>
           </CardContent>
         </Card>
