@@ -897,6 +897,8 @@ function MailingView() {
   const [customInstruction, setCustomInstruction] = useState('');
   const [filter, setFilter] = useState('a_relancer');
   const [siteFilter, setSiteFilter] = useState('all');
+  const [recipientSearch, setRecipientSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [lastUsage, setLastUsage] = useState(null);
@@ -911,22 +913,50 @@ function MailingView() {
       const r = await api('/api/mailing/test-smtp', { method: 'POST', body: JSON.stringify({}) });
       setSmtp(r);
     } catch (e) {
-      // 400 returns from api() throw; parse anyway
       setSmtp({ ok: false, configured: false, error: e.message });
     }
   };
   useEffect(() => { load(); loadSmtp(); }, []);
 
-  const targetRegs = regs.filter(r => {
+  // Liste filtrée par les filtres (statut + site + recherche)
+  const filteredRegs = regs.filter(r => {
     if (filter === 'a_relancer' && r.status !== 'a_relancer') return false;
     if (filter === 'a_confirmer' && r.status !== 'a_confirmer') return false;
     if (filter === 'confirme' && r.status !== 'confirme') return false;
     if (filter === 'no_caution' && r.deposit?.status === 'recue') return false;
     if (filter === 'no_insurance' && r.is_insurance_uploaded) return false;
     if (siteFilter !== 'all' && r.venue?.name !== siteFilter) return false;
+    if (recipientSearch.trim()) {
+      const q = recipientSearch.trim().toLowerCase();
+      const hit = (r.organization?.name || '').toLowerCase().includes(q) ||
+        (r.organization?.main_email || '').toLowerCase().includes(q) ||
+        (r.organization?.discipline || '').toLowerCase().includes(q) ||
+        (r.stand_code || '').toLowerCase().includes(q);
+      if (!hit) return false;
+    }
     return true;
   });
   const venues = [...new Set(regs.map(r => r.venue?.name).filter(Boolean))].sort();
+
+  // Quand les filtres changent, on resync la sélection avec tous les visibles
+  useEffect(() => {
+    setSelectedIds(new Set(filteredRegs.map(r => r.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, siteFilter, regs.length]);
+
+  // Destinataires effectifs (= cochés ET visibles dans le filtre)
+  const targetRegs = filteredRegs.filter(r => selectedIds.has(r.id));
+
+  const toggleOne = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+  const selectOnly = (id) => {
+    setSelectedIds(new Set([id]));
+  };
+  const selectAll = () => setSelectedIds(new Set(filteredRegs.map(r => r.id)));
+  const selectNone = () => setSelectedIds(new Set());
 
   const generateAI = async () => {
     setGenerating(true);
@@ -946,9 +976,8 @@ function MailingView() {
 
   const send = async () => {
     if (!subject || !body) { toast.error('Objet et corps requis'); return; }
-    if (!targetRegs.length) { toast.error('Aucun destinataire'); return; }
+    if (!targetRegs.length) { toast.error('Aucun destinataire sélectionné — cochez au moins une case'); return; }
     const realSend = smtp.ok;
-    // Build a detailed confirm message listing the first recipients
     const samples = targetRegs.slice(0, 5).map(r => `• ${r.organization?.name} <${r.organization?.main_email}>`).join('\n');
     const more = targetRegs.length > 5 ? `\n... et ${targetRegs.length - 5} autre(s)` : '';
     const isGroup = targetRegs.length > 1;
@@ -960,7 +989,6 @@ function MailingView() {
       : '⚠️ MODE MOCK — SMTP non configuré, aucun email réel ne partira (uniquement enregistrement en base).';
     const confirmMsg = `${head}\n${mode}\n\nObjet : ${subject}\n\nDestinataires :\n${samples}${more}\n\nConfirmer l'envoi ?`;
     if (!confirm(confirmMsg)) return;
-    // Double-confirm pour les ENVOIS RÉELS de masse (>10)
     if (realSend && targetRegs.length > 10) {
       if (!confirm(`⚠️ DOUBLE CONFIRMATION : vous allez envoyer ${targetRegs.length} emails RÉELS. Cette action est irréversible. Continuer ?`)) return;
     }
@@ -1138,18 +1166,57 @@ function MailingView() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="pt-2 border-t">
-              <div className="text-2xl font-bold text-blue-600">{targetRegs.length}</div>
-              <p className="text-xs text-slate-500">destinataire(s) sélectionné(s)</p>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Recherche (nom, email, stand)</Label>
+              <div className="relative mt-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <Input value={recipientSearch} onChange={e => setRecipientSearch(e.target.value)} placeholder="ex: teva, swimua, A-C04…" className="pl-8 h-9" />
+              </div>
             </div>
-            <div className="max-h-[240px] overflow-y-auto text-xs space-y-1 pt-2 border-t">
-              {targetRegs.slice(0, 20).map(r => (
-                <div key={r.id} className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="truncate">{r.organization?.name}</span>
-                  <span className="text-slate-400 shrink-0 ml-2">{r.stand_code}</span>
-                </div>
-              ))}
-              {targetRegs.length > 20 && <div className="text-slate-400 text-center pt-1">+ {targetRegs.length - 20} autre(s)…</div>}
+
+            <div className="pt-2 border-t flex items-end justify-between gap-2">
+              <div>
+                <div className="text-2xl font-bold text-blue-600">{targetRegs.length}<span className="text-sm font-normal text-slate-400"> / {filteredRegs.length}</span></div>
+                <p className="text-xs text-slate-500">cochés / visibles</p>
+              </div>
+              <div className="flex gap-1">
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={selectAll} disabled={filteredRegs.length === 0}>Tout cocher</Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={selectNone} disabled={selectedIds.size === 0}>Tout décocher</Button>
+              </div>
+            </div>
+
+            <div className="max-h-[360px] overflow-y-auto text-xs space-y-1 pt-2 border-t">
+              {filteredRegs.length === 0 && <p className="text-slate-400 text-center py-3">Aucun exposant trouvé</p>}
+              {filteredRegs.slice(0, 100).map(r => {
+                const checked = selectedIds.has(r.id);
+                return (
+                  <div key={r.id} className={`flex items-center gap-2 py-1.5 px-2 rounded border ${checked ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleOne(r.id)}
+                      className="w-4 h-4 cursor-pointer accent-blue-600 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium truncate">{r.organization?.name}</span>
+                        {r.stand_code && <span className="text-[10px] font-mono text-slate-400 shrink-0">{r.stand_code}</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">{r.organization?.main_email}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-[10px] shrink-0"
+                      onClick={() => selectOnly(r.id)}
+                      title="Sélectionner uniquement celui-ci"
+                    >
+                      Lui seul
+                    </Button>
+                  </div>
+                );
+              })}
+              {filteredRegs.length > 100 && <div className="text-slate-400 text-center pt-1">+ {filteredRegs.length - 100} autre(s)… affinez avec la recherche</div>}
             </div>
           </CardContent>
         </Card>
