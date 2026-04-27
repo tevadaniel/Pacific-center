@@ -4,6 +4,31 @@ import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
 import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
+import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
+
+// ===== Tracking helpers =====
+function getPublicBaseUrl() {
+  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+}
+/**
+ * Inject tracking pixel + wrap links for click tracking
+ * @param {string} html - email body HTML
+ * @param {string} messageId - email_messages.id
+ * @returns {string} HTML with tracking instrumentation
+ */
+function injectTracking(html, messageId) {
+  if (!html) return html;
+  const base = getPublicBaseUrl();
+  // Wrap <a href="..."> to redirect through our tracker
+  let out = html.replace(/<a([^>]*?)href="(https?:\/\/[^"]+)"([^>]*?)>/gi, (m, pre, url, post) => {
+    if (url.includes('/api/track/')) return m; // avoid double-wrap
+    const tracked = `${base}/api/track/click/${messageId}?u=${encodeURIComponent(url)}`;
+    return `<a${pre}href="${tracked}"${post}>`;
+  });
+  // Append 1x1 tracking pixel
+  out += `\n<img src="${base}/api/track/open/${messageId}.gif" alt="" width="1" height="1" style="display:none" />`;
+  return out;
+}
 
 const EDITION_ID = 'edition-2026';
 
@@ -539,6 +564,105 @@ export async function GET(request, { params }) {
     if (route === 'mail-recipient-lists') {
       const list = await db.collection('mail_recipient_lists').find({}).sort({ created_at: -1 }).toArray();
       return json(list.map(({ _id, ...rest }) => rest));
+    }
+
+    // ---- Scheduled emails listing ----
+    if (route === 'mailing/scheduled') {
+      const list = await db.collection('email_campaigns').find({ status: 'programmee' }).sort({ scheduled_at: 1 }).toArray();
+      return json(list.map(({ _id, scheduled_payload, ...rest }) => ({ ...rest, recipients_count: scheduled_payload?.registration_ids?.length || 0 })));
+    }
+
+    // ---- Tracking : open pixel (1x1 GIF) ----
+    if (route.match(/^track\/open\/[^/]+\.gif$/)) {
+      const messageId = p[2].replace(/\.gif$/, '');
+      await db.collection('email_messages').updateOne({ id: messageId, opened_at: null }, { $set: { opened_at: new Date(), updated_at: new Date() } });
+      const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+      return new Response(gif, { status: 200, headers: { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0', 'Pragma': 'no-cache' } });
+    }
+
+    // ---- Tracking : click redirect ----
+    if (route.match(/^track\/click\/[^/]+$/)) {
+      const messageId = p[2];
+      const target = url.searchParams.get('u');
+      await db.collection('email_messages').updateOne({ id: messageId }, { $set: { clicked_at: new Date(), updated_at: new Date() }, $inc: { click_count: 1 } });
+      if (!target) return new Response('Missing target', { status: 400 });
+      return new Response(null, { status: 302, headers: { 'Location': target, 'Cache-Control': 'no-store' } });
+    }
+
+    // ---- Dashboard enrichi ----
+    if (route === 'dashboard/extended') {
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      const orgs = await db.collection('organizations').find({}).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const deps = await db.collection('deposit_transactions').find({}).toArray();
+      const depByReg = Object.fromEntries(deps.map(d => [d.registration_id, d]));
+      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      const vById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      const atRisk = regs
+        .filter(r => r.status !== 'confirme')
+        .map(r => {
+          const o = orgById[r.organization_id];
+          const dep = depByReg[r.id];
+          let score = 0;
+          if (!r.is_convention_signed) score += 30;
+          if (!r.is_insurance_uploaded) score += 30;
+          if (!dep || dep.status !== 'recue') score += 30;
+          if ((r.completion_percent || 0) < 30) score += 20;
+          return {
+            id: r.id, organization_name: o?.name || '—', discipline: o?.discipline,
+            venue_name: vById[r.venue_id]?.name || '—',
+            completion_percent: r.completion_percent || 0,
+            email: o?.main_email, status: r.status, risk_score: score,
+            missing: [
+              !r.is_convention_signed && 'Convention',
+              !r.is_insurance_uploaded && 'Assurance',
+              (!dep || dep.status !== 'recue') && 'Caution',
+            ].filter(Boolean),
+          };
+        })
+        .sort((a, b) => b.risk_score - a.risk_score)
+        .slice(0, 5);
+
+      const since = new Date(Date.now() - 14 * 86400000);
+      const msgs = await db.collection('email_messages').find({ sent_at: { $gte: since } }).toArray();
+      const byDay = {};
+      for (const m of msgs) {
+        const d = new Date(m.sent_at).toISOString().slice(0, 10);
+        byDay[d] = (byDay[d] || 0) + 1;
+      }
+      const cadence = Object.entries(byDay).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+
+      const totalSent = msgs.filter(m => m.send_status === 'envoye').length;
+      const totalOpened = msgs.filter(m => m.opened_at).length;
+      const totalClicked = msgs.filter(m => m.clicked_at).length;
+      const openRate = totalSent ? Math.round((totalOpened / totalSent) * 100) : 0;
+      const clickRate = totalSent ? Math.round((totalClicked / totalSent) * 100) : 0;
+
+      const eventStart = new Date('2026-08-14T08:00:00');
+      const daysToEvent = Math.max(0, Math.ceil((eventStart - new Date()) / 86400000));
+
+      const completions = regs.map(r => r.completion_percent || 0);
+      const avgCompletion = completions.length ? Math.round(completions.reduce((a, b) => a + b, 0) / completions.length) : 0;
+      const fullyComplete = completions.filter(c => c >= 100).length;
+
+      const alerts = [];
+      const stale = regs.filter(r => r.status === 'a_relancer' && r.updated_at && (new Date() - new Date(r.updated_at)) > 7 * 86400000);
+      if (stale.length > 0) alerts.push({ severity: 'warning', icon: '⏳', text: `${stale.length} exposant(s) sans réponse depuis +7 jours` });
+      const noPayment = regs.filter(r => (depByReg[r.id]?.status !== 'recue') && r.status !== 'prospect');
+      if (daysToEvent < 60 && noPayment.length > 0) alerts.push({ severity: 'critical', icon: '🚨', text: `${noPayment.length} caution(s) non encaissée(s) à ${daysToEvent}j de l'événement` });
+      const noInsurance = regs.filter(r => !r.is_insurance_uploaded && r.status !== 'prospect');
+      if (noInsurance.length > 5) alerts.push({ severity: 'warning', icon: '🛡️', text: `${noInsurance.length} exposant(s) sans assurance déposée` });
+
+      return json({
+        days_to_event: daysToEvent,
+        at_risk: atRisk,
+        cadence,
+        mailing_engagement: { sent: totalSent, opened: totalOpened, clicked: totalClicked, open_rate_pct: openRate, click_rate_pct: clickRate },
+        avg_completion: avgCompletion,
+        fully_complete_count: fullyComplete,
+        smart_alerts: alerts,
+      });
     }
 
     if (route.startsWith('documents/') && route.endsWith('/download')) {
@@ -1336,6 +1460,142 @@ export async function POST(request, { params }) {
       return json({ ok: true, list: lst });
     }
 
+    // ============ BULK ACTIONS (ARACOM productivity) ============
+    if (route === 'registrations/bulk-confirm') {
+      const { ids } = body;
+      if (!Array.isArray(ids) || ids.length === 0) return err('ids requis', 400);
+      let confirmed = 0;
+      for (const id of ids) {
+        const reg = await db.collection('registrations').findOne({ id });
+        if (!reg) continue;
+        await db.collection('registrations').updateOne({ id }, { $set: {
+          status: 'confirme', is_pre_reserved: false, is_deposit_received: true,
+          confirmed_at: new Date(), updated_at: new Date(),
+        } });
+        const dep = await db.collection('deposit_transactions').findOne({ registration_id: id });
+        if (dep && dep.status !== 'recue') {
+          await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: { status: 'recue', received_at: new Date(), updated_at: new Date() } });
+        } else if (!dep) {
+          await db.collection('deposit_transactions').insertOne({ id: uuid(), registration_id: id, amount_xpf: 20000, status: 'recue', received_at: new Date(), created_at: new Date(), updated_at: new Date() });
+        }
+        await db.collection('stand_assignments').updateMany({ registration_id: id, status: 'pre_reserve' }, { $set: { status: 'confirme', updated_at: new Date() } });
+        confirmed++;
+      }
+      return json({ ok: true, confirmed });
+    }
+    if (route === 'registrations/bulk-generate-receipts') {
+      const { ids } = body;
+      if (!Array.isArray(ids) || ids.length === 0) return err('ids requis', 400);
+      let generated = 0;
+      for (const id of ids) {
+        const reg = await db.collection('registrations').findOne({ id });
+        if (!reg) continue;
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        const dep = await db.collection('deposit_transactions').findOne({ registration_id: id });
+        const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+        const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
+        // Skip if already has a recu_caution
+        const existing = await db.collection('registration_documents').findOne({ registration_id: id, document_type: 'recu_caution' });
+        if (existing) continue;
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937}h1{color:#1d4ed8}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}</style></head><body><h1>REÇU DE CAUTION</h1><p><b>Forum de la Rentrée 2026</b> · 14 & 15 août 2026<br>Organisé par <b>ARACOM</b></p><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div></div><div style="text-align:center;padding:18px 0"><div class="label">Montant</div><div class="amount">20 000 XPF</div></div></body></html>`;
+        await db.collection('registration_documents').insertOne({
+          id: uuid(), registration_id: id, document_type: 'recu_caution',
+          file_name: `Recu_caution_${(org?.name || 'exp').replace(/\s+/g,'_')}_${receiptNumber}.html`,
+          mime_type: 'text/html', file_size: html.length,
+          file_data: Buffer.from(html, 'utf-8').toString('base64'),
+          status: 'valide', uploaded_by: 'aracom',
+          uploaded_at: new Date(), validated_at: new Date(),
+          receipt_number: receiptNumber,
+          created_at: new Date(), updated_at: new Date(),
+        });
+        generated++;
+      }
+      return json({ ok: true, generated });
+    }
+    if (route === 'deposits/bulk-update-status') {
+      const { ids, status } = body;
+      if (!Array.isArray(ids) || !status) return err('ids et status requis', 400);
+      const r = await db.collection('deposit_transactions').updateMany(
+        { id: { $in: ids } },
+        { $set: { status, ...(status === 'recue' ? { received_at: new Date() } : {}), updated_at: new Date() } }
+      );
+      return json({ ok: true, modified: r.modifiedCount });
+    }
+    if (route === 'anomalies/bulk-resolve') {
+      const { ids, comment = 'Résolu en masse' } = body;
+      if (!Array.isArray(ids) || ids.length === 0) return err('ids requis', 400);
+      const r = await db.collection('registration_anomalies').updateMany(
+        { id: { $in: ids } },
+        { $set: { resolved_status: 'resolu', resolution_comment: comment, resolved_at: new Date(), updated_at: new Date() } }
+      );
+      return json({ ok: true, modified: r.modifiedCount });
+    }
+
+    // ============ SCHEDULED MAILING ============
+    if (route === 'mailing/schedule') {
+      const { subject, body_html, registration_ids, mail_type, scheduled_at } = body;
+      if (!subject || !body_html) return err('subject et body_html requis', 400);
+      if (!Array.isArray(registration_ids) || registration_ids.length === 0) return err('registration_ids requis', 400);
+      if (!scheduled_at) return err('scheduled_at requis (ISO date)', 400);
+      const when = new Date(scheduled_at);
+      if (isNaN(when.getTime()) || when.getTime() < Date.now() - 5 * 60 * 1000) return err('Date programmée invalide ou passée', 400);
+      const campaignId = uuid();
+      await db.collection('email_campaigns').insertOne({
+        id: campaignId, edition_id: EDITION_ID,
+        name: `Programmé — ${mail_type || 'custom'} — ${when.toISOString().slice(0, 16)}`,
+        template: mail_type || 'ai_custom',
+        status: 'programmee',
+        scheduled_at: when,
+        scheduled_payload: { subject, body_html, registration_ids, mail_type },
+        target_filter: { registration_ids },
+        sent_count: 0, opened_count: 0, clicked_count: 0,
+        created_at: new Date(), updated_at: new Date(),
+      });
+      return json({ ok: true, campaign_id: campaignId, scheduled_at: when });
+    }
+    if (route === 'mailing/process-scheduled') {
+      // Process all scheduled campaigns whose time has come
+      const now = new Date();
+      const due = await db.collection('email_campaigns').find({ status: 'programmee', scheduled_at: { $lte: now } }).toArray();
+      let totalSent = 0, totalFailed = 0, processed = 0;
+      for (const camp of due) {
+        const payload = camp.scheduled_payload || {};
+        const regs = await db.collection('registrations').find({ id: { $in: payload.registration_ids || [] } }).toArray();
+        const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+        const venues = await db.collection('venues').find({ id: { $in: regs.map(r => r.venue_id).filter(Boolean) } }).toArray();
+        const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+        const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+        const smtpReady = isSmtpConfigured();
+        let sent = 0, failed = 0;
+        for (const r of regs) {
+          const o = orgById[r.organization_id]; const v = venueById[r.venue_id];
+          if (!o?.main_email) continue;
+          const personSub = (payload.subject || '').replaceAll('[[NOM_EXPOSANT]]', o.name || '').replaceAll('[[STAND]]', r.stand_code || '').replaceAll('[[SITE]]', v?.name || '').replaceAll('[[CONTACT_NAME]]', o.contact_name || '').replaceAll('[[DISCIPLINE]]', o.discipline || '');
+          const personBody = (payload.body_html || '').replaceAll('[[NOM_EXPOSANT]]', o.name || '').replaceAll('[[STAND]]', r.stand_code || '').replaceAll('[[SITE]]', v?.name || '').replaceAll('[[CONTACT_NAME]]', o.contact_name || '').replaceAll('[[DISCIPLINE]]', o.discipline || '');
+          const messageId = uuid();
+          const trackedBody = injectTracking(personBody, messageId);
+          let sendStatus = 'envoye', errorMsg = null;
+          if (smtpReady) {
+            const r2 = await sendMail({ to: o.main_email, subject: personSub, html: trackedBody });
+            if (!r2.ok) { sendStatus = 'echec'; errorMsg = r2.error; failed++; }
+          }
+          await db.collection('email_messages').insertOne({
+            id: messageId, campaign_id: camp.id, registration_id: r.id,
+            to_email: o.main_email, subject: personSub, body_html: trackedBody,
+            send_status: sendStatus, sent_at: new Date(),
+            opened_at: null, clicked_at: null, response_status: 'attente',
+            provider_message_id: smtpReady ? messageId : `mock_${messageId}`,
+            error_message: errorMsg,
+            created_at: new Date(), updated_at: new Date(),
+          });
+          if (sendStatus === 'envoye') sent++;
+        }
+        await db.collection('email_campaigns').updateOne({ id: camp.id }, { $set: { status: 'envoyee', sent_count: sent, failed_count: failed, processed_at: new Date(), updated_at: new Date() } });
+        totalSent += sent; totalFailed += failed; processed++;
+      }
+      return json({ ok: true, processed, sent: totalSent, failed: totalFailed });
+    }
+
     if (route === 'venue-stands/positions') {
       const { updates } = body;
       if (!Array.isArray(updates)) return err('updates requis', 400);
@@ -1640,14 +1900,17 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
           .replaceAll('[[SITE]]', v?.name || '')
           .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
 
+        const messageId = uuid();
+        const trackedBody = injectTracking(personalizedBody, messageId);
+
         let sendStatus = 'envoye';
-        let providerId = `mock_${uuid()}`;
+        let providerId = `mock_${messageId}`;
         let errorMsg = null;
         if (smtpReady) {
           const r2 = await sendMail({
             to: o.main_email,
             subject: personalizedSubject,
-            html: personalizedBody,
+            html: trackedBody,
           });
           if (r2.ok) {
             providerId = r2.messageId || providerId;
@@ -1660,8 +1923,8 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         }
 
         await db.collection('email_messages').insertOne({
-          id: uuid(), campaign_id: campaignId, registration_id: r.id,
-          to_email: o.main_email, subject: personalizedSubject, body_html: personalizedBody,
+          id: messageId, campaign_id: campaignId, registration_id: r.id,
+          to_email: o.main_email, subject: personalizedSubject, body_html: trackedBody,
           send_status: sendStatus, sent_at: new Date(),
           opened_at: null, clicked_at: null, response_status: 'attente',
           provider_message_id: providerId,

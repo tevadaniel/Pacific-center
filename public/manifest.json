@@ -1,0 +1,41 @@
+{
+  "name": "Forum de la Rentrée 2026 — ARACOM",
+  "short_name": "Forum 2026",
+  "description": "Application de gestion du Forum de la Rentrée 2026 en Polynésie française",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#1d4ed8",
+  "lang": "fr",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mode Jour J",
+      "short_name": "Jour J",
+      "description": "Tableau de bord terrain",
+      "url": "/jour-j"
+    },
+    {
+      "name": "Cockpit ARACOM",
+      "short_name": "ARACOM",
+      "description": "Administration",
+      "url": "/aracom"
+    }
+  ]
+}

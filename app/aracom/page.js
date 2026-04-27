@@ -77,12 +77,13 @@ export default function AracomPage() {
 function DashboardView({ onGoto }) {
   const [kpis, setKpis] = useState(null);
   const [sites, setSites] = useState([]);
+  const [extended, setExtended] = useState(null);
   const [loading, setLoading] = useState(true);
   const load = async () => {
     setLoading(true);
     try {
-      const [k, s] = await Promise.all([api('/api/dashboard/kpis'), api('/api/dashboard/by-site')]);
-      setKpis(k); setSites(s);
+      const [k, s, e] = await Promise.all([api('/api/dashboard/kpis'), api('/api/dashboard/by-site'), api('/api/dashboard/extended').catch(() => null)]);
+      setKpis(k); setSites(s); setExtended(e);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
@@ -97,6 +98,44 @@ function DashboardView({ onGoto }) {
 
   return (
     <div className="space-y-6">
+      {/* Hero countdown */}
+      {extended && (
+        <Card className="bg-gradient-to-r from-blue-600 to-emerald-600 text-white border-0">
+          <CardContent className="p-5 flex flex-col md:flex-row items-center gap-4">
+            <div className="text-center md:text-left flex-1">
+              <div className="text-xs uppercase tracking-wider opacity-90">Forum de la Rentrée 2026</div>
+              <div className="text-2xl font-bold">14 & 15 août 2026 · 6 sites</div>
+            </div>
+            <div className="text-center">
+              <div className="text-5xl font-extrabold">{extended.days_to_event}</div>
+              <div className="text-xs uppercase tracking-wider opacity-90">jours restants</div>
+            </div>
+            <div className="text-center border-l border-white/20 pl-4">
+              <div className="text-3xl font-bold">{extended.avg_completion}%</div>
+              <div className="text-xs uppercase tracking-wider opacity-90">complétion moy.</div>
+            </div>
+            <div className="text-center border-l border-white/20 pl-4">
+              <div className="text-3xl font-bold">{extended.fully_complete_count}</div>
+              <div className="text-xs uppercase tracking-wider opacity-90">dossiers prêts</div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Smart alerts */}
+      {extended?.smart_alerts?.length > 0 && (
+        <div className="space-y-2">
+          {extended.smart_alerts.map((a, i) => (
+            <div key={i} className={`rounded-md border-l-4 px-4 py-3 flex items-center gap-3 ${
+              a.severity === 'critical' ? 'border-rose-500 bg-rose-50' : 'border-amber-500 bg-amber-50'
+            }`}>
+              <span className="text-2xl">{a.icon}</span>
+              <span className={`flex-1 font-medium ${a.severity === 'critical' ? 'text-rose-900' : 'text-amber-900'}`}>{a.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <KpiCard label="Exposants" value={kpis.total} hint={`${kpis.by_status?.confirme || 0} confirmés`} accent="blue" icon={Users} />
         <KpiCard label="À relancer" value={kpis.by_status?.a_relancer || 0} accent="orange" icon={Clock} />
@@ -105,6 +144,62 @@ function DashboardView({ onGoto }) {
         <KpiCard label="Cautions reçues" value={kpis.cautions_recues} hint={`${(kpis.xpf_encaisses || 0).toLocaleString('fr-FR')} XPF`} accent="emerald" icon={Wallet} />
         <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
       </div>
+
+      {/* Top 5 at risk + Mailing engagement */}
+      {extended && (
+        <div className="grid lg:grid-cols-3 gap-4">
+          <Card className="lg:col-span-2">
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-600" /> Top 5 dossiers à risque</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {extended.at_risk.length === 0 ? <p className="text-sm text-slate-400">Aucun dossier à risque 👍</p> : extended.at_risk.map(r => (
+                <div key={r.id} className="border rounded-md p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 font-bold flex items-center justify-center text-xs">{r.risk_score}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2"><span className="font-medium truncate">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
+                    <div className="text-xs text-slate-500">{r.venue_name} · {r.discipline}</div>
+                    <div className="flex flex-wrap gap-1 mt-1">{r.missing.map(m => <Badge key={m} className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">❌ {m}</Badge>)}</div>
+                  </div>
+                  <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => onGoto?.('exposants')}>Ouvrir</Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Mail className="w-4 h-4 text-violet-600" /> Engagement mailing</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-md bg-violet-50 p-3 text-center">
+                <div className="text-3xl font-extrabold text-violet-700">{extended.mailing_engagement.sent}</div>
+                <div className="text-xs uppercase text-slate-500">emails envoyés (14j)</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-md bg-white border p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-600">{extended.mailing_engagement.open_rate_pct}%</div>
+                  <div className="text-[10px] uppercase text-slate-500">Taux d&apos;ouverture</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">{extended.mailing_engagement.opened} ouverts</div>
+                </div>
+                <div className="rounded-md bg-white border p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-600">{extended.mailing_engagement.click_rate_pct}%</div>
+                  <div className="text-[10px] uppercase text-slate-500">Taux de clic</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">{extended.mailing_engagement.clicked} clics</div>
+                </div>
+              </div>
+              {extended.cadence.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500 mb-1">Cadence (14j)</div>
+                  <div className="flex items-end gap-0.5 h-12">
+                    {extended.cadence.map(d => {
+                      const max = Math.max(...extended.cadence.map(x => x.count));
+                      const h = max > 0 ? Math.max(8, (d.count / max) * 48) : 4;
+                      return <div key={d.date} className="flex-1 bg-violet-400 rounded-t" style={{ height: `${h}px` }} title={`${d.date}: ${d.count}`} />;
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -755,6 +850,8 @@ function CautionsView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [venueFilter, setVenueFilter] = useState('all');
+  const [bulkSelected, setBulkSelected] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const reload = () => api('/api/registrations').then(r => { setRows(r); setLoading(false); });
   useEffect(() => { reload(); }, []);
   const updateStatus = async (depId, status) => {
@@ -779,6 +876,43 @@ function CautionsView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  // ===== BULK ACTIONS =====
+  const toggleBulk = (id) => { const n = new Set(bulkSelected); if (n.has(id)) n.delete(id); else n.add(id); setBulkSelected(n); };
+  const bulkConfirm = async () => {
+    if (bulkSelected.size === 0) return;
+    if (!confirm(`Confirmer DÉFINITIVEMENT les inscriptions de ${bulkSelected.size} exposant(s) ? Les cautions passeront en "Reçue" et le statut en "Confirmé".`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await api('/api/registrations/bulk-confirm', { method: 'POST', body: JSON.stringify({ ids: Array.from(bulkSelected) }) });
+      toast.success(`✅ ${r.confirmed} exposant(s) confirmé(s)`);
+      setBulkSelected(new Set()); reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setBulkBusy(false); }
+  };
+  const bulkGenerateReceipts = async () => {
+    if (bulkSelected.size === 0) return;
+    if (!confirm(`Générer ${bulkSelected.size} reçus de caution en masse ? (Les exposants ayant déjà un reçu seront ignorés)`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await api('/api/registrations/bulk-generate-receipts', { method: 'POST', body: JSON.stringify({ ids: Array.from(bulkSelected) }) });
+      toast.success(`✅ ${r.generated} reçu(s) généré(s)`);
+      setBulkSelected(new Set()); reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setBulkBusy(false); }
+  };
+  const bulkMarkCaution = async (status) => {
+    if (bulkSelected.size === 0) return;
+    if (!confirm(`Marquer les cautions de ${bulkSelected.size} exposant(s) comme "${DEPOSIT_STATUS_LABEL[status]}" ?`)) return;
+    setBulkBusy(true);
+    try {
+      const depIds = rows.filter(r => bulkSelected.has(r.id)).map(r => r.deposit?.id).filter(Boolean);
+      const r = await api('/api/deposits/bulk-update-status', { method: 'POST', body: JSON.stringify({ ids: depIds, status }) });
+      toast.success(`✅ ${r.modified} caution(s) mises à jour`);
+      setBulkSelected(new Set()); reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setBulkBusy(false); }
+  };
+
   const venues = [...new Set(rows.map(r => r.venue?.name).filter(Boolean))].sort();
   const filtered = rows.filter(r => {
     if (statusFilter !== 'all' && r.deposit?.status !== statusFilter) return false;
@@ -795,6 +929,12 @@ function CautionsView() {
   });
   const totalExpected = rows.length * 20000;
   const totalReceived = rows.filter(r => r.deposit?.status === 'recue').length * 20000;
+  const allFilteredChecked = filtered.length > 0 && filtered.every(r => bulkSelected.has(r.id));
+  const toggleAll = () => {
+    if (allFilteredChecked) { const n = new Set(bulkSelected); filtered.forEach(r => n.delete(r.id)); setBulkSelected(n); }
+    else { const n = new Set(bulkSelected); filtered.forEach(r => n.add(r.id)); setBulkSelected(n); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -803,6 +943,29 @@ function CautionsView() {
         <KpiCard label="Reçues" value={rows.filter(r => r.deposit?.status === 'recue').length} accent="emerald" />
         <KpiCard label="Non demandées" value={rows.filter(r => !r.deposit || r.deposit.status === 'non_demandee').length} accent="slate" />
       </div>
+
+      {bulkSelected.size > 0 && (
+        <Card className="border-violet-200 bg-violet-50/40 sticky top-2 z-10">
+          <CardContent className="p-3 flex flex-wrap items-center gap-2">
+            <Badge className="bg-violet-600">{bulkSelected.size} sélectionné(s)</Badge>
+            <Button size="sm" className="h-8 gap-1 bg-emerald-600 hover:bg-emerald-700" onClick={bulkConfirm} disabled={bulkBusy}>
+              <CheckCircle2 className="w-3.5 h-3.5" /> Confirmer en masse
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={bulkGenerateReceipts} disabled={bulkBusy}>
+              <FileText className="w-3.5 h-3.5" /> Générer reçus
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => bulkMarkCaution('recue')} disabled={bulkBusy}>
+              <Wallet className="w-3.5 h-3.5" /> Caution reçue
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => bulkMarkCaution('demandee')} disabled={bulkBusy}>
+              Caution demandée
+            </Button>
+            <div className="flex-1" />
+            <Button size="sm" variant="ghost" className="h-8" onClick={() => setBulkSelected(new Set())}>Annuler sélection</Button>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
@@ -829,15 +992,21 @@ function CautionsView() {
           </div>
         </CardContent>
       </Card>
+
       <Card><CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Exposant</th><th>Site</th><th>Stand</th><th>Email</th><th>Statut caution</th><th>Inscription</th><th className="text-right pr-4">Actions</th></tr></thead>
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr>
+            <th className="py-2 pl-4 w-8"><input type="checkbox" checked={allFilteredChecked} onChange={toggleAll} className="w-4 h-4 accent-violet-600" /></th>
+            <th>Exposant</th><th>Site</th><th>Stand</th><th>Email</th><th>Statut caution</th><th>Inscription</th><th className="text-right pr-4">Actions</th>
+          </tr></thead>
           <tbody className="divide-y">
-            {loading ? <tr><td colSpan="7" className="py-6 text-center text-slate-400">…</td></tr> : filtered.length === 0 ? <tr><td colSpan="7" className="py-6 text-center text-slate-400">Aucun résultat</td></tr> : filtered.map(r => {
+            {loading ? <tr><td colSpan="8" className="py-6 text-center text-slate-400">…</td></tr> : filtered.length === 0 ? <tr><td colSpan="8" className="py-6 text-center text-slate-400">Aucun résultat</td></tr> : filtered.map(r => {
               const isPreReserved = r.is_pre_reserved && r.status !== 'confirme';
+              const checked = bulkSelected.has(r.id);
               return (
-                <tr key={r.id} className="hover:bg-slate-50/50">
-                  <td className="py-2 px-4"><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
+                <tr key={r.id} className={`hover:bg-slate-50/50 ${checked ? 'bg-violet-50/30' : ''}`}>
+                  <td className="py-2 pl-4"><input type="checkbox" checked={checked} onChange={() => toggleBulk(r.id)} className="w-4 h-4 accent-violet-600" /></td>
+                  <td><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
                   <td>{r.venue?.name}</td>
                   <td className="font-mono text-xs">{r.stand_code}</td>
                   <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
@@ -853,7 +1022,7 @@ function CautionsView() {
                         <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
                       </Select>
                       {r.deposit?.status === 'recue' && (
-                        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => generateReceipt(r)} title="Générer un reçu de caution PDF/HTML">
+                        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => generateReceipt(r)} title="Générer un reçu de caution">
                           <FileText className="w-3 h-3" /> Reçu
                         </Button>
                       )}
@@ -1076,6 +1245,38 @@ function MailingView() {
     finally { setSending(false); }
   };
 
+  // Schedule send for later
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduled, setScheduled] = useState([]);
+  const loadScheduled = () => api('/api/mailing/scheduled').then(setScheduled).catch(() => {});
+  useEffect(() => { loadScheduled(); }, []);
+
+  const scheduleSend = async () => {
+    if (!subject || !body) { toast.error('Objet et corps requis'); return; }
+    if (!targetRegs.length) { toast.error('Aucun destinataire sélectionné'); return; }
+    if (!scheduledDate) { toast.error('Choisissez une date/heure'); return; }
+    const when = new Date(scheduledDate);
+    if (isNaN(when.getTime())) { toast.error('Date invalide'); return; }
+    if (when.getTime() < Date.now()) { toast.error('La date doit être dans le futur'); return; }
+    if (!confirm(`Programmer l'envoi de ce mail à ${targetRegs.length} destinataire(s) pour le ${when.toLocaleString('fr-FR')} ?`)) return;
+    try {
+      await api('/api/mailing/schedule', {
+        method: 'POST',
+        body: JSON.stringify({ subject, body_html: body, registration_ids: targetRegs.map(r => r.id), mail_type: type, scheduled_at: when.toISOString() }),
+      });
+      toast.success(`📅 Envoi programmé pour le ${when.toLocaleString('fr-FR')}`);
+      setScheduledDate('');
+      loadScheduled();
+    } catch (e) { toast.error(e.message); }
+  };
+  const processNow = async () => {
+    try {
+      const r = await api('/api/mailing/process-scheduled', { method: 'POST', body: JSON.stringify({}) });
+      toast.success(`🚀 ${r.processed} campagne(s) traitée(s) — ${r.sent} envoyé(s) — ${r.failed} échec(s)`);
+      loadScheduled(); load();
+    } catch (e) { toast.error(e.message); }
+  };
+
   const testSmtp = async () => {
     setTestingSmtp(true);
     try {
@@ -1219,8 +1420,45 @@ function MailingView() {
             <Button className="w-full gap-2" onClick={send} disabled={sending || !subject || !body}>
               <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer à ${targetRegs.length} destinataire(s)`} {!smtp.ok && <Badge variant="secondary" className="ml-1">MOCK</Badge>}
             </Button>
+
+            {/* Schedule for later */}
+            <div className="pt-3 border-t">
+              <Label className="text-xs uppercase text-slate-500 flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> Ou programmer pour plus tard</Label>
+              <div className="flex gap-2 mt-1">
+                <Input type="datetime-local" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} className="text-xs" />
+                <Button onClick={scheduleSend} disabled={!subject || !body || !scheduledDate || !targetRegs.length} variant="outline" className="gap-1 shrink-0">
+                  <Calendar className="w-3.5 h-3.5" /> Programmer
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
+
+        {/* Scheduled mailings list */}
+        {scheduled.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center justify-between">
+                <span className="flex items-center gap-2"><Calendar className="w-4 h-4 text-amber-600" /> Mails programmés ({scheduled.length})</span>
+                <Button size="sm" variant="outline" onClick={processNow} className="h-7 text-xs gap-1"><Zap className="w-3 h-3" /> Traiter dûs maintenant</Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {scheduled.map(s => {
+                const due = new Date(s.scheduled_at) <= new Date();
+                return (
+                  <div key={s.id} className={`border rounded-md p-3 text-xs ${due ? 'bg-rose-50 border-rose-200' : 'bg-white border-amber-100'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium truncate">{s.name}</div>
+                      <Badge variant={due ? 'destructive' : 'secondary'}>{due ? 'À traiter' : 'Programmé'}</Badge>
+                    </div>
+                    <div className="text-slate-500 mt-0.5">📅 {new Date(s.scheduled_at).toLocaleString('fr-FR')} · 👥 {s.recipients_count} destinataire(s)</div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Colonne 2 : destinataires + historique */}
