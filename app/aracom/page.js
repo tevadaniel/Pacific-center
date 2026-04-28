@@ -17,7 +17,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
@@ -2200,9 +2200,10 @@ function AccessTokensView() {
           <div className="flex-1">
             <b>Comment ça marche :</b> Chaque exposant et chaque Pacific Centers reçoit par email un <i>lien personnel permanent</i> qui ouvre directement son espace, sans mot de passe. Vous pouvez aussi générer un <i>lien d&apos;inscription</i> pour démarcher un nouveau prospect (formulaire vierge).
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 flex-wrap">
             <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5"><Send className="w-4 h-4" /> Lien d&apos;accès</Button>
             <Button size="sm" onClick={() => setShowCreate('inscription')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Plus className="w-4 h-4" /> Lien d&apos;inscription</Button>
+            <Button size="sm" onClick={() => setShowCreate('pacific')} className="bg-cyan-600 hover:bg-cyan-700 gap-1.5"><Eye className="w-4 h-4" /> Lien Pacific Centers</Button>
           </div>
         </CardContent>
       </Card>
@@ -2263,7 +2264,12 @@ function AccessTokensView() {
 function CreateAccessTokenModal({ mode, onClose, onCreated }) {
   const [busy, setBusy] = useState(false);
   const [orgs, setOrgs] = useState([]);
-  const [form, setForm] = useState({ organization_id: '', email: '', send_email: true, label: '' });
+  const [form, setForm] = useState({
+    organization_id: '',
+    email: mode === 'pacific' ? 'pacific@centers.pf' : '',
+    send_email: true,
+    label: '',
+  });
   const [created, setCreated] = useState(null);
 
   useEffect(() => {
@@ -2287,11 +2293,18 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
   const submit = async () => {
     if (mode === 'access' && !form.organization_id) { toast.error('Choisissez un exposant'); return; }
     if (mode === 'inscription' && !form.email) { toast.error('Email requis'); return; }
+    if (mode === 'pacific' && !form.email) { toast.error('Email requis'); return; }
     setBusy(true);
     try {
-      const body = mode === 'access'
-        ? { purpose: 'access', organization_id: form.organization_id, send_email: form.send_email }
-        : { purpose: 'inscription_exposant', email: form.email, label: form.label || null, send_email: form.send_email };
+      let body;
+      if (mode === 'access') {
+        body = { purpose: 'access', organization_id: form.organization_id, send_email: form.send_email };
+      } else if (mode === 'inscription') {
+        body = { purpose: 'inscription_exposant', email: form.email, label: form.label || null, send_email: form.send_email };
+      } else {
+        // pacific
+        body = { purpose: 'pacific_centers', email: form.email, label: form.label || 'Pacific Centers', send_email: form.send_email };
+      }
       const res = await api('/api/access-tokens', { method: 'POST', body: JSON.stringify(body) });
       if (res.reused) {
         toast.info(res.message || 'Lien existant réutilisé (pas de nouveau lien créé)');
@@ -2304,16 +2317,28 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
     } catch (e) { toast.error(e.message); setBusy(false); }
   };
 
+  const titleNode = mode === 'access'
+    ? <><Send className="w-5 h-5 text-blue-600" /> Lien d&apos;accès exposant</>
+    : mode === 'inscription'
+      ? <><Plus className="w-5 h-5 text-violet-600" /> Lien d&apos;inscription nouveau prospect</>
+      : <><Eye className="w-5 h-5 text-cyan-600" /> Lien Pacific Centers (lecture seule)</>;
+  const subtitleNode = mode === 'access'
+    ? "L'exposant recevra un email avec son lien personnel permanent. Aucun mot de passe à retenir."
+    : mode === 'inscription'
+      ? "Créez un lien que vous pouvez envoyer à un nouveau prospect pour qu'il s'inscrive lui-même au Forum."
+      : "Génère un lien magique pour le portail Pacific Centers (vue consolidée en lecture seule). Le destinataire accède sans mot de passe.";
+  const submitClass = mode === 'access'
+    ? 'bg-blue-600 hover:bg-blue-700 gap-2'
+    : mode === 'inscription'
+      ? 'bg-violet-600 hover:bg-violet-700 gap-2'
+      : 'bg-cyan-600 hover:bg-cyan-700 gap-2';
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && !created && onClose()}>
       <Card className="max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {mode === 'access' ? <><Send className="w-5 h-5 text-blue-600" /> Lien d&apos;accès exposant</> : <><Plus className="w-5 h-5 text-violet-600" /> Lien d&apos;inscription nouveau prospect</>}
-          </CardTitle>
-          <p className="text-sm text-slate-600">
-            {mode === 'access' ? "L'exposant recevra un email avec son lien personnel permanent. Aucun mot de passe à retenir." : "Créez un lien que vous pouvez envoyer à un nouveau prospect pour qu'il s'inscrive lui-même au Forum."}
-          </p>
+          <CardTitle className="flex items-center gap-2">{titleNode}</CardTitle>
+          <p className="text-sm text-slate-600">{subtitleNode}</p>
         </CardHeader>
         {!created ? (
           <CardContent className="space-y-3">
@@ -2335,6 +2360,19 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
                 <div>
                   <Label>Nom de la structure (facultatif)</Label>
                   <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Nouvelle Association" />
+                </div>
+              </>
+            )}
+            {mode === 'pacific' && (
+              <>
+                <div>
+                  <Label>Email du destinataire Pacific Centers</Label>
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="pacific@centers.pf" />
+                  <p className="text-[11px] text-slate-500 mt-1">L&apos;email doit correspondre à un compte Pacific Centers existant. Par défaut : <code>pacific@centers.pf</code></p>
+                </div>
+                <div>
+                  <Label>Étiquette interne (facultatif)</Label>
+                  <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Pacific Centers — Direction" />
                 </div>
               </>
             )}
@@ -2363,7 +2401,7 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
           {!created ? (
             <>
               <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
-              <Button onClick={submit} disabled={busy} className={mode === 'access' ? 'bg-blue-600 hover:bg-blue-700 gap-2' : 'bg-violet-600 hover:bg-violet-700 gap-2'}>
+              <Button onClick={submit} disabled={busy} className={submitClass}>
                 {busy ? 'Création…' : <><Send className="w-4 h-4" /> Créer le lien</>}
               </Button>
             </>
