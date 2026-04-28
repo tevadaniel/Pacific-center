@@ -704,8 +704,32 @@ export async function GET(request, { params }) {
       const id = p[1];
       const doc = await db.collection('registration_documents').findOne({ id });
       if (!doc) return err('Document introuvable', 404);
+      // Heavy file stored in Drive → stream content from Drive
+      if (doc.drive_file_id) {
+        try {
+          const drive = await (await import('@/lib/drive')).getDriveClient();
+          const r = await drive.files.get(
+            { fileId: doc.drive_file_id, alt: 'media', supportsAllDrives: true },
+            { responseType: 'arraybuffer' }
+          );
+          return new Response(Buffer.from(r.data), {
+            status: 200,
+            headers: {
+              'Content-Type': doc.mime_type || 'application/octet-stream',
+              'Content-Disposition': `inline; filename="${doc.file_name}"`,
+              'Cache-Control': 'private, max-age=300',
+            },
+          });
+        } catch (e) {
+          // If Drive fails but we have a view link, redirect there
+          if (doc.drive_view_link) {
+            return Response.redirect(doc.drive_view_link, 302);
+          }
+          return err('Erreur lecture Drive: ' + e.message, 500);
+        }
+      }
+      // Legacy : base64 stored in MongoDB
       if (!doc.file_data) return err('Fichier manquant', 404);
-      // Return base64 with mime via Response
       const buf = Buffer.from(doc.file_data, 'base64');
       return new Response(buf, { status: 200, headers: { 'Content-Type': doc.mime_type || 'application/octet-stream', 'Content-Disposition': `inline; filename="${doc.file_name}"` } });
     }
@@ -1350,20 +1374,55 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'documents') {
+      const sizeBytes = body.size_bytes || (body.file_data ? Math.floor(body.file_data.length * 0.75) : 0);
+      const HEAVY_THRESHOLD = 4 * 1024 * 1024; // 4 MB → upload vers Drive
+      let driveMeta = null;
+      let storeBase64 = body.file_data || null;
+
+      // Upload heavy files to Google Drive instead of MongoDB base64
+      if (sizeBytes > HEAVY_THRESHOLD && body.file_data && isDriveConfigured()) {
+        try {
+          const buffer = Buffer.from(String(body.file_data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+          // Resolve org name for folder structure
+          const reg = await db.collection('registrations').findOne({ id: body.registration_id });
+          const org = reg ? await db.collection('organizations').findOne({ id: reg.organization_id }) : null;
+          const orgName = driveSafeName(org?.name || body.registration_id || 'inconnu');
+          const folderId = await ensureFolderPath(['Documents exposants', orgName]);
+          const safeName = driveSafeName(body.file_name || 'document');
+          const uploaded = await driveUploadFile({
+            folderId,
+            fileName: `${body.document_type || 'doc'}__${Date.now()}__${safeName}`,
+            mimeType: body.mime_type || 'application/octet-stream',
+            buffer,
+          });
+          driveMeta = {
+            drive_file_id: uploaded.id,
+            drive_view_link: uploaded.webViewLink || null,
+            drive_download_link: uploaded.webContentLink || null,
+            stored_in_drive: true,
+          };
+          storeBase64 = null; // do not duplicate in DB
+        } catch (driveErr) {
+          console.error('[documents/drive-upload]', driveErr);
+          // Fallback : keep base64 in DB if Drive fails
+        }
+      }
+
       const doc = {
         id: uuid(),
         registration_id: body.registration_id,
         document_type: body.document_type || 'autre',
         file_path: null,
         file_name: body.file_name || 'document',
-        file_data: body.file_data || null,
+        file_data: storeBase64,
         mime_type: body.mime_type || 'application/octet-stream',
-        size_bytes: body.size_bytes || 0,
+        size_bytes: sizeBytes,
         uploaded_by: ctx.userId || 'u-admin',
         status: body.status || 'depose',
         uploaded_at: new Date(),
         validated_at: null,
         notes: body.notes || null,
+        ...driveMeta,
         created_at: new Date(),
         updated_at: new Date(),
       };

@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Upload, Camera, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB par défaut (images / docs)
-const VIDEO_MAX_SIZE = 80 * 1024 * 1024; // 80 MB pour les vidéos
+const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB pour documents PDF/images (auto-routé vers Drive si > 4 MB)
+const VIDEO_MAX_SIZE = 200 * 1024 * 1024; // 200 MB pour les vidéos (Drive)
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
