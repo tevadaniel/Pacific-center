@@ -803,6 +803,14 @@ export async function GET(request, { params }) {
       return json(prefs.map(p => { delete p._id; return { ...p, venue: vById[p.venue_id] }; }));
     }
 
+    // ---- Venue elements : list (formes décoratives sur le plan) ----
+    if (route === 'venue-elements') {
+      const venue_id = url.searchParams.get('venue_id');
+      const q = venue_id ? { venue_id } : {};
+      const list = await db.collection('venue_elements').find(q).sort({ z_index: 1, created_at: 1 }).toArray();
+      return json(list.map(e => { delete e._id; return e; }));
+    }
+
     // ---- Access tokens : list (admin only) ----
     if (route === 'access-tokens') {
       const list = await db.collection('access_tokens').find({}).sort({ created_at: -1 }).toArray();
@@ -2044,6 +2052,37 @@ export async function POST(request, { params }) {
       return json({ ok: true });
     }
 
+    // ============ VENUE ELEMENTS (formes décoratives sur le plan) ============
+    if (route === 'venue-elements') {
+      const { venue_id, type, shape, pos_x, pos_y, width, height, rotation = 0, color, label = '', icon = null, z_index = 1 } = body;
+      if (!venue_id || !type) return err('venue_id et type requis', 400);
+      const id = uuid();
+      const doc = {
+        id, venue_id, type, shape: shape || 'rectangle',
+        pos_x: pos_x ?? 50, pos_y: pos_y ?? 50,
+        width: width ?? 8, height: height ?? 5,
+        rotation, color: color || '#3b82f6',
+        label, icon, z_index,
+        created_at: new Date(), updated_at: new Date(),
+      };
+      await db.collection('venue_elements').insertOne(doc);
+      delete doc._id;
+      return json(doc, 201);
+    }
+
+    if (route === 'venue-elements/bulk-update') {
+      const { updates = [] } = body;
+      if (!Array.isArray(updates)) return err('updates doit être un tableau', 400);
+      let n = 0;
+      for (const u of updates) {
+        if (!u.id) continue;
+        const { id, ...rest } = u;
+        await db.collection('venue_elements').updateOne({ id }, { $set: { ...rest, updated_at: new Date() } });
+        n++;
+      }
+      return json({ ok: true, updated: n });
+    }
+
     // ============ VALIDATION REQUESTS (workflow lock) ============
     // Helper : retrouver l'org/exposant pour les emails
     const buildExposantContext = async (registrationId) => {
@@ -3061,6 +3100,10 @@ export async function DELETE(request, { params }) {
     }
     if (route.startsWith('mail-recipient-lists/')) {
       await db.collection('mail_recipient_lists').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('venue-elements/')) {
+      await db.collection('venue_elements').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
     if (route.startsWith('venue-stands/')) {

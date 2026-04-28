@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/auth-client';
 import { toast } from 'sonner';
+import VenueElementsLayer from '@/components/venue-elements-layer';
 
 // Map venue.code -> PNG file
 const BG_BY_VENUE = {
@@ -188,6 +189,9 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         className="relative rounded-xl overflow-hidden border bg-black shadow-lg"
         style={{ aspectRatio: '1600 / 556', backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
       >
+        {/* Couche d'éléments décoratifs (zones, kiosques, commerces, flèches, prises) */}
+        <VenueElementsLayer venueId={venue?.id} editable={editable} containerRef={containerRef} />
+
         {stands.map(s => {
           const pos = positions[s.stand_code];
           if (!pos) return null;
