@@ -5,6 +5,7 @@ import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
 import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
+import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, uploadFile as driveUploadFile, makeAnyoneReader, getServiceAccountEmail, safeName as driveSafeName } from '@/lib/drive';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
 
 // ===== Tracking helpers =====
@@ -704,7 +705,25 @@ export async function GET(request, { params }) {
     if (route.startsWith('field-media/') && route.endsWith('/view')) {
       const id = p[1];
       const m = await db.collection('field_media').findOne({ id });
-      if (!m?.file_data) return err('Media introuvable', 404);
+      if (!m) return err('Media introuvable', 404);
+      // Prefer Drive direct view link
+      if (m.drive_file_id) {
+        // Try to stream from Drive (needs auth) — easier: redirect to Drive direct download via proxy
+        try {
+          const { google } = await import('googleapis');
+          const { GoogleAuth } = google.auth;
+          const auth = new GoogleAuth({
+            credentials: JSON.parse(require('fs').readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_FILE, 'utf-8')),
+            scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+          });
+          const drive = google.drive({ version: 'v3', auth: await auth.getClient() });
+          const r = await drive.files.get({ fileId: m.drive_file_id, alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' });
+          return new Response(Buffer.from(r.data), { status: 200, headers: { 'Content-Type': m.mime_type || 'image/jpeg', 'Cache-Control': 'private, max-age=300' } });
+        } catch (e) {
+          console.error('[field-media drive read]', e?.message);
+        }
+      }
+      if (!m.file_data) return err('Contenu introuvable', 404);
       const buf = Buffer.from(m.file_data, 'base64');
       return new Response(buf, { status: 200, headers: { 'Content-Type': m.mime_type || 'image/jpeg' } });
     }
@@ -799,6 +818,17 @@ export async function GET(request, { params }) {
         is_revoked: Boolean(t.revoked_at),
         is_expired: t.expires_at ? new Date(t.expires_at) < new Date() : false,
       })));
+    }
+
+    // ---- Google Drive : info / status ----
+    if (route === 'drive/info') {
+      if (!isDriveConfigured()) return json({ configured: false });
+      try {
+        const v = await driveValidate();
+        return json({ configured: true, ...v });
+      } catch (e) {
+        return json({ configured: true, ok: false, error: e.message });
+      }
     }
 
     // ---- Push notifications : VAPID public key ----
@@ -1324,19 +1354,67 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'field-media') {
+      // Resolve registration → organization → venue for folder path
+      let folderPath = ['Photos Jour J'];
+      let driveFile = null;
+      const reg = body.registration_id ? await db.collection('registrations').findOne({ id: body.registration_id }) : null;
+      const org = reg?.organization_id ? await db.collection('organizations').findOne({ id: reg.organization_id }) : null;
+      const venue = reg?.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      // Build path: Photos Jour J / 2026-08-14 (vendredi) / Arue / I Mua Papeete - A-C01 /
+      const captureDate = body.captured_at ? new Date(body.captured_at) : new Date();
+      const dayLabel = captureDate.toLocaleDateString('fr-FR', { weekday: 'long' });
+      const dateStr = captureDate.toISOString().slice(0, 10);
+      folderPath.push(`${dateStr} (${dayLabel})`);
+      if (venue?.name) folderPath.push(driveSafeName(venue.name));
+      if (org?.name) folderPath.push(driveSafeName(`${org.name}${reg?.stand_code ? ' - ' + reg.stand_code : ''}`));
+
+      // Build target file name: arrivee_I-Mua-Papeete_A-C01_20260814-0915.jpg
+      const ext = (body.file_name || 'photo.jpg').split('.').pop().toLowerCase();
+      const ts = captureDate.toISOString().replace(/[-:T]/g, '').slice(0, 13); // YYYYMMDDHHMM
+      const orgSlug = driveSafeName(org?.name || 'exposant').replace(/\s+/g, '-');
+      const stand = reg?.stand_code || '';
+      const mediaType = body.media_type || 'autre';
+      const targetName = `${mediaType}_${orgSlug}${stand ? '_' + stand : ''}_${ts}.${ext}`;
+
+      // Try Drive upload if configured
+      const wantDrive = body.upload_drive !== false; // default true
+      if (wantDrive && isDriveConfigured() && body.file_data) {
+        try {
+          const folderId = await ensureFolderPath(folderPath);
+          const buffer = Buffer.from(body.file_data, 'base64');
+          const uploaded = await driveUploadFile({
+            folderId,
+            fileName: targetName,
+            mimeType: body.mime_type || 'image/jpeg',
+            buffer,
+          });
+          // Make readable by anyone with the link (so we can embed in app)
+          await makeAnyoneReader(uploaded.id);
+          driveFile = uploaded;
+        } catch (e) {
+          console.error('[field-media drive upload]', e?.message);
+        }
+      }
+
       const m = {
         id: uuid(),
         registration_id: body.registration_id,
         attendance_session_id: body.attendance_session_id || null,
         anomaly_id: body.anomaly_id || null,
         media_type: body.media_type || 'autre',
-        file_path: null,
-        file_name: body.file_name || `photo-${Date.now()}.jpg`,
-        file_data: body.file_data || null,
+        file_path: driveFile ? `drive:${driveFile.id}` : null,
+        file_name: targetName,
+        // If uploaded to Drive successfully, drop base64 from MongoDB to save space
+        file_data: driveFile ? null : (body.file_data || null),
         mime_type: body.mime_type || 'image/jpeg',
-        size_bytes: body.size_bytes || 0,
+        size_bytes: body.size_bytes || (body.file_data ? Math.floor(body.file_data.length * 0.75) : 0),
+        // Drive metadata
+        drive_file_id: driveFile?.id || null,
+        drive_view_link: driveFile?.webViewLink || null,
+        drive_thumbnail: driveFile?.thumbnailLink || null,
+        drive_folder_path: driveFile ? folderPath.join('/') : null,
         uploaded_by: ctx.userId || 'u-admin',
-        captured_at: new Date(),
+        captured_at: captureDate,
         created_at: new Date(),
       };
       await db.collection('field_media').insertOne(m);
