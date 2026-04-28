@@ -1,5 +1,6 @@
 const nextConfig = {
-  output: 'standalone',
+  // Note: 'output: standalone' was removed because Emergent's deploy doesn't auto-copy /public
+  // for standalone builds, which broke logos and PWA icons in production.
   images: {
     unoptimized: true,
   },
