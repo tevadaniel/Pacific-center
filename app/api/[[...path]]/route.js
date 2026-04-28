@@ -786,6 +786,21 @@ export async function GET(request, { params }) {
       return json(prefs.map(p => { delete p._id; return { ...p, venue: vById[p.venue_id] }; }));
     }
 
+    // ---- Access tokens : list (admin only) ----
+    if (route === 'access-tokens') {
+      const list = await db.collection('access_tokens').find({}).sort({ created_at: -1 }).toArray();
+      const orgIds = [...new Set(list.map(t => t.organization_id).filter(Boolean))];
+      const orgs = orgIds.length ? await db.collection('organizations').find({ id: { $in: orgIds } }).toArray() : [];
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      return json(list.map(t => ({
+        ...t, _id: undefined,
+        organization: t.organization_id ? (orgById[t.organization_id] ? { id: orgById[t.organization_id].id, name: orgById[t.organization_id].name, main_email: orgById[t.organization_id].main_email } : null) : null,
+        access_url: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${t.token}`,
+        is_revoked: Boolean(t.revoked_at),
+        is_expired: t.expires_at ? new Date(t.expires_at) < new Date() : false,
+      })));
+    }
+
     // ---- Push notifications : VAPID public key ----
     if (route === 'push/vapid-key') {
       return json({ public_key: getVapidPublicKey(), configured: isPushConfigured() });
@@ -886,12 +901,56 @@ export async function POST(request, { params }) {
     if (route === 'auth/login') {
       const { email, password } = body;
       const user = await db.collection('users').findOne({ email: (email || '').toLowerCase().trim() });
-      if (!user) return err('Email inconnu. Avez-vous initialisé les données ?', 401);
-      if (user.password !== password) return err('Mot de passe incorrect (demo: demo)', 401);
+      if (!user) return err('Email inconnu', 401);
+      if (user.password !== password) return err('Mot de passe incorrect', 401);
+      // Only ARACOM admins login by password — exposants & pacific use access tokens
+      if (user.role_code !== 'aracom_admin') {
+        return err("Pour les exposants et Pacific Centers, l'accès se fait uniquement par lien envoyé par ARACOM.", 403);
+      }
       let organization = null;
       if (user.organization_id) organization = await db.collection('organizations').findOne({ id: user.organization_id });
       delete user.password; delete user._id; if (organization) delete organization._id;
       return json({ user, organization });
+    }
+
+    // ============ ACCESS TOKENS (lien magique) ============
+    // Consume a token: opens a session for the bound user (exposant or pacific)
+    if (route === 'auth/consume-token') {
+      const { token } = body;
+      if (!token) return err('token requis', 400);
+      const tk = await db.collection('access_tokens').findOne({ token });
+      if (!tk) return err('Lien invalide', 404);
+      if (tk.revoked_at) return err('Lien révoqué par ARACOM', 410);
+      if (tk.expires_at && new Date(tk.expires_at) < new Date()) return err('Lien expiré', 410);
+
+      // Mark used (track only first use date if not set)
+      await db.collection('access_tokens').updateOne(
+        { id: tk.id },
+        { $set: { last_used_at: new Date(), updated_at: new Date() }, $inc: { use_count: 1 }, $setOnInsert: {} }
+      );
+
+      // Look up user
+      let user = null;
+      let organization = null;
+      if (tk.purpose === 'inscription_exposant') {
+        // Special case: token bound to a future inscription. We don't have a user yet.
+        // Return a placeholder user object that the inscription page understands.
+        return json({
+          user: { id: 'guest-' + tk.id, email: tk.email || '', role_code: 'exposant_guest', full_name: 'Inscription en cours', organization_id: null },
+          organization: null,
+          token_info: { id: tk.id, purpose: tk.purpose, email: tk.email },
+        });
+      }
+      if (tk.user_id) {
+        user = await db.collection('users').findOne({ id: tk.user_id });
+      }
+      if (!user && tk.email) {
+        user = await db.collection('users').findOne({ email: tk.email.toLowerCase() });
+      }
+      if (!user) return err('Compte associé introuvable', 404);
+      if (user.organization_id) organization = await db.collection('organizations').findOne({ id: user.organization_id });
+      delete user.password; delete user._id; if (organization) delete organization._id;
+      return json({ user, organization, token_info: { id: tk.id, purpose: tk.purpose } });
     }
 
     // Check-in
@@ -1747,6 +1806,92 @@ export async function POST(request, { params }) {
         tag: 'aracom-test',
       }, { role: 'aracom_admin' });
       return json(r);
+    }
+
+    // ============ ACCESS TOKENS (lien magique) — ARACOM management ============
+    if (route === 'access-tokens') {
+      const { organization_id, email, purpose = 'access', send_email = true, label = '' } = body;
+      if (!['access', 'inscription_exposant', 'pacific_centers'].includes(purpose)) return err('purpose invalide', 400);
+      // Resolve user/email
+      let resolvedEmail = (email || '').toLowerCase().trim();
+      let resolvedUserId = null;
+      let org = null;
+      if (organization_id) {
+        org = await db.collection('organizations').findOne({ id: organization_id });
+        if (!org) return err('Organisation introuvable', 404);
+        if (!resolvedEmail) resolvedEmail = (org.main_email || '').toLowerCase();
+        // find user attached
+        const u = await db.collection('users').findOne({ organization_id });
+        if (u) resolvedUserId = u.id;
+      }
+      if (purpose === 'access' && !resolvedUserId && !resolvedEmail) {
+        return err('Pour un lien d\'accès, organization_id ou email requis', 400);
+      }
+      // Generate cryptographically random token (32 hex chars)
+      const tokenStr = uuid().replace(/-/g, '') + uuid().replace(/-/g, '').slice(0, 16);
+      const tokenId = uuid();
+      await db.collection('access_tokens').insertOne({
+        id: tokenId,
+        token: tokenStr,
+        purpose,
+        organization_id: organization_id || null,
+        user_id: resolvedUserId,
+        email: resolvedEmail || null,
+        label: label || (org?.name || resolvedEmail || 'Lien'),
+        expires_at: null, // null = à vie jusqu'à révocation
+        revoked_at: null,
+        last_used_at: null,
+        use_count: 0,
+        created_at: new Date(),
+        updated_at: new Date(),
+        created_by: ctx.userId || 'admin',
+      });
+      const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tokenStr}`;
+
+      // Optional: send email
+      if (send_email && resolvedEmail) {
+        const orgName = org?.name || 'Forum de la Rentrée 2026';
+        const subj = purpose === 'inscription_exposant'
+          ? "Votre lien d'inscription au Forum de la Rentrée 2026"
+          : purpose === 'pacific_centers'
+            ? 'Votre accès Pacific Centers — Forum de la Rentrée 2026'
+            : `Votre espace exposant — ${orgName}`;
+        const html = purpose === 'inscription_exposant' ? `<p>Bonjour,</p>
+<p>ARACOM vous invite à inscrire votre structure au <b>Forum de la Rentrée 2026</b> (vendredi 14 & samedi 15 août 2026).</p>
+<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Démarrer mon inscription</a></p>
+<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent</b> jusqu'à révocation : conservez-le pour accéder à votre espace dès que vous voulez.</p>
+<p>L'équipe ARACOM</p>` : `<p>Bonjour ${org?.contact_name || ''},</p>
+<p>Voici votre lien personnel d'accès à votre espace ${purpose === 'pacific_centers' ? 'Pacific Centers' : 'exposant'} pour le <b>Forum de la Rentrée 2026</b>.</p>
+<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace</a></p>
+<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent et personnel</b>. Conservez-le précieusement (favoris). Aucun mot de passe à retenir.</p>
+<p>L'équipe ARACOM</p>`;
+        sendMail({ to: resolvedEmail, subject: subj, html }).catch(e => console.error('[mail token]', e?.message));
+      }
+
+      return json({ ok: true, id: tokenId, token: tokenStr, access_url: accessUrl });
+    }
+
+    if (route.match(/^access-tokens\/[^/]+\/revoke$/)) {
+      const id = p[1];
+      await db.collection('access_tokens').updateOne({ id }, { $set: { revoked_at: new Date(), updated_at: new Date() } });
+      return json({ ok: true });
+    }
+
+    if (route.match(/^access-tokens\/[^/]+\/resend$/)) {
+      const id = p[1];
+      const tk = await db.collection('access_tokens').findOne({ id });
+      if (!tk) return err('Lien introuvable', 404);
+      if (tk.revoked_at) return err('Lien révoqué — créez-en un nouveau', 400);
+      if (!tk.email) return err('Aucun email associé à ce lien', 400);
+      const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tk.token}`;
+      const orgName = tk.label || 'Forum de la Rentrée 2026';
+      sendMail({
+        to: tk.email,
+        subject: `Rappel : votre lien d'accès — ${orgName}`,
+        html: `<p>Bonjour,</p><p>Voici à nouveau votre lien personnel d'accès :</p><p><a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace</a></p><p style="font-size:12px;color:#64748b">Lien permanent jusqu'à révocation.</p><p>L'équipe ARACOM</p>`,
+      }).catch(e => console.error('[mail resend]', e?.message));
+      await db.collection('access_tokens').updateOne({ id }, { $set: { last_resent_at: new Date(), updated_at: new Date() } });
+      return json({ ok: true });
     }
 
     // ============ VALIDATION REQUESTS (workflow lock) ============
