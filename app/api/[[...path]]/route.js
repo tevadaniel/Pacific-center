@@ -3296,13 +3296,15 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
     }
 
     if (route === 'auth/change-password') {
-      const { current_password, new_password, target_user_id } = body;
+      const { current_password, new_password, target_user_id, target_email } = body;
       if (!new_password) return err('Nouveau mot de passe requis', 400);
-      // Admin resets without needing current password
-      if (ctx.role === 'aracom_admin' && target_user_id) {
-        await db.collection('users').updateOne({ id: target_user_id }, { $set: { password: new_password, password_changed: false, updated_at: new Date() } });
-        await logActivity(db, ctx.userId, 'user', target_user_id, 'password_reset_by_admin', null, null);
-        return json({ ok: true });
+      // Admin resets without needing current password (by id OR email)
+      if (ctx.role === 'aracom_admin' && (target_user_id || target_email)) {
+        const q = target_user_id ? { id: target_user_id } : { email: target_email };
+        const r = await db.collection('users').updateOne(q, { $set: { password: new_password, password_changed: false, updated_at: new Date() } });
+        if (r.matchedCount === 0) return err('Utilisateur cible introuvable', 404);
+        await logActivity(db, ctx.userId, 'user', target_user_id || target_email, 'password_reset_by_admin', null, null);
+        return json({ ok: true, matched: r.matchedCount, modified: r.modifiedCount });
       }
       if (!ctx.userId) return err('Non authentifié', 401);
       const user = await db.collection('users').findOne({ id: ctx.userId });
