@@ -2311,12 +2311,83 @@ export async function POST(request, { params }) {
     };
 
     if (route === 'access-tokens') {
-      const { organization_id, email, purpose = 'access', send_email = true, label = '', force = false } = body;
+      const { organization_id, email, purpose = 'access', send_email = true, label = '', force = false, new_exposant } = body;
       if (!['access', 'inscription_exposant', 'pacific_centers'].includes(purpose)) return err('purpose invalide', 400);
       // Resolve user/email
       let resolvedEmail = (email || '').toLowerCase().trim();
       let resolvedUserId = null;
       let org = null;
+      let resolvedOrganizationId = organization_id;
+
+      // ============ NEW : Create org + user on the fly ============
+      // When ARACOM provides new_exposant: { name, email, phone?, discipline?, contact_name? }
+      // we create the org, the exposant user (passwordless) and link them, then issue an access token.
+      if (purpose === 'access' && !organization_id && new_exposant && new_exposant.email && new_exposant.name) {
+        const newEmail = String(new_exposant.email).toLowerCase().trim();
+        // Reject if email is already taken by a different user
+        const existingUser = await db.collection('users').findOne({ email: newEmail });
+        if (existingUser) {
+          return err(`Cet email est déjà utilisé par "${existingUser.full_name || existingUser.email}". Choisissez "Lien d'accès exposant existant" pour cet exposant.`, 409);
+        }
+        const orgId = `org-${uuid()}`;
+        await db.collection('organizations').insertOne({
+          id: orgId,
+          edition_id: EDITION_ID,
+          name: new_exposant.name,
+          discipline: new_exposant.discipline || null,
+          main_email: newEmail,
+          main_phone: new_exposant.phone || null,
+          contact_name: new_exposant.contact_name || null,
+          priority_level: 'prospect',
+          status: 'invited',
+          notes: null,
+          source_origin: 'aracom_invited',
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+        const userId = `u-exp-${orgId}`;
+        await db.collection('users').insertOne({
+          id: userId,
+          email: newEmail,
+          full_name: new_exposant.contact_name || new_exposant.name,
+          phone: new_exposant.phone || null,
+          role_id: 'role-exposant',
+          role_code: 'exposant',
+          password: null,
+          organization_id: orgId,
+          is_active: true,
+          password_changed: false,
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+        // Create the registration shell (so the exposant can edit when he logs in)
+        const regId = `reg-${orgId}`;
+        await db.collection('registrations').insertOne({
+          id: regId, edition_id: EDITION_ID, organization_id: orgId,
+          venue_id: null, status: 'invited',
+          animation_type: null, friday_slot_label: null, saturday_slot_label: null,
+          stand_needed: true, stand_code: null, completion_percent: 5,
+          is_convention_signed: false, is_deposit_required: true, is_deposit_received: false,
+          is_insurance_uploaded: false, is_guide_sent: false,
+          planned_arrival_time: '10:30', planned_departure_time: '17:00',
+          post_event_status: 'en_attente', internal_notes: null, exposant_notes: null,
+          created_at: new Date(), updated_at: new Date(),
+        });
+        // Initial deposit transaction (default 20 000 XPF)
+        await db.collection('deposit_transactions').insertOne({
+          id: uuid(), registration_id: regId, amount_xpf: 20000,
+          status: 'non_demandee', expected_return_date: '2026-08-30',
+          retained_amount_xpf: 0, recommended_return_amount_xpf: 20000,
+          post_event_review_status: 'non_revu',
+          created_at: new Date(), updated_at: new Date(),
+        });
+        await logActivity(db, ctx.userId, 'organization', orgId, 'create_invited_exposant', null, { name: new_exposant.name, email: newEmail });
+        resolvedOrganizationId = orgId;
+        resolvedUserId = userId;
+        resolvedEmail = newEmail;
+        org = { id: orgId, name: new_exposant.name, main_email: newEmail };
+      }
+
       if (organization_id) {
         org = await db.collection('organizations').findOne({ id: organization_id });
         if (!org) return err('Organisation introuvable', 404);
@@ -2332,7 +2403,7 @@ export async function POST(request, { params }) {
       // ============ IDEMPOTENCY : reuse existing active token ============
       // Check if an active (non-revoked, non-expired) token already exists for this target.
       const existingQuery = { revoked_at: null, purpose };
-      if (organization_id) existingQuery.organization_id = organization_id;
+      if (resolvedOrganizationId) existingQuery.organization_id = resolvedOrganizationId;
       else if (resolvedEmail) existingQuery.email = resolvedEmail;
       const existingTokens = await db.collection('access_tokens').find(existingQuery).sort({ created_at: -1 }).toArray();
       const existing = existingTokens.find(t => !t.expires_at || new Date(t.expires_at) > new Date());

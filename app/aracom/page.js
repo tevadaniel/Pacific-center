@@ -2343,8 +2343,8 @@ function AccessTokensView() {
             <b>Comment ça marche :</b> Chaque exposant et chaque Pacific Centers reçoit par email un <i>lien personnel permanent</i> qui ouvre directement son espace, sans mot de passe. Vous pouvez aussi générer un <i>lien d&apos;inscription</i> pour démarcher un nouveau prospect (formulaire vierge).
           </div>
           <div className="flex gap-2 shrink-0 flex-wrap">
-            <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5"><Send className="w-4 h-4" /> Lien d&apos;accès</Button>
-            <Button size="sm" onClick={() => setShowCreate('inscription')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Plus className="w-4 h-4" /> Lien d&apos;inscription</Button>
+            <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5"><Send className="w-4 h-4" /> Lien d&apos;accès exposant</Button>
+            <Button size="sm" onClick={() => setShowCreate('new_exposant')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Plus className="w-4 h-4" /> Créer & inviter exposant</Button>
             <Button size="sm" onClick={() => setShowCreate('pacific')} className="bg-cyan-600 hover:bg-cyan-700 gap-1.5"><Eye className="w-4 h-4" /> Lien Pacific Centers</Button>
           </div>
         </CardContent>
@@ -2411,13 +2411,16 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
     email: mode === 'pacific' ? 'pacific@centers.pf' : '',
     send_email: true,
     label: '',
+    new_name: '',
+    new_phone: '',
+    new_discipline: '',
+    new_contact_name: '',
   });
   const [created, setCreated] = useState(null);
 
   useEffect(() => {
     if (mode === 'access') {
       api('/api/registrations').then(regs => {
-        // Build a list of orgs from registrations (with their main_email)
         const seen = new Set();
         const list = [];
         regs.forEach(r => {
@@ -2434,15 +2437,27 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
 
   const submit = async () => {
     if (mode === 'access' && !form.organization_id) { toast.error('Choisissez un exposant'); return; }
-    if (mode === 'inscription' && !form.email) { toast.error('Email requis'); return; }
+    if (mode === 'new_exposant' && (!form.email || !form.new_name)) { toast.error('Email et nom de la structure sont requis'); return; }
     if (mode === 'pacific' && !form.email) { toast.error('Email requis'); return; }
     setBusy(true);
     try {
       let body;
       if (mode === 'access') {
         body = { purpose: 'access', organization_id: form.organization_id, send_email: form.send_email };
-      } else if (mode === 'inscription') {
-        body = { purpose: 'inscription_exposant', email: form.email, label: form.label || null, send_email: form.send_email };
+      } else if (mode === 'new_exposant') {
+        // Create org + user + access token in one call (handled by backend)
+        body = {
+          purpose: 'access',
+          send_email: form.send_email,
+          new_exposant: {
+            name: form.new_name,
+            email: form.email,
+            phone: form.new_phone || null,
+            discipline: form.new_discipline || null,
+            contact_name: form.new_contact_name || null,
+          },
+          label: form.label || form.new_name,
+        };
       } else {
         // pacific
         body = { purpose: 'pacific_centers', email: form.email, label: form.label || 'Pacific Centers', send_email: form.send_email };
@@ -2460,18 +2475,18 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
   };
 
   const titleNode = mode === 'access'
-    ? <><Send className="w-5 h-5 text-blue-600" /> Lien d&apos;accès exposant</>
-    : mode === 'inscription'
-      ? <><Plus className="w-5 h-5 text-violet-600" /> Lien d&apos;inscription nouveau prospect</>
+    ? <><Send className="w-5 h-5 text-blue-600" /> Lien d&apos;accès exposant existant</>
+    : mode === 'new_exposant'
+      ? <><Plus className="w-5 h-5 text-violet-600" /> Créer un nouvel exposant + envoyer le lien</>
       : <><Eye className="w-5 h-5 text-cyan-600" /> Lien Pacific Centers (lecture seule)</>;
   const subtitleNode = mode === 'access'
     ? "L'exposant recevra un email avec son lien personnel permanent. Aucun mot de passe à retenir."
-    : mode === 'inscription'
-      ? "Créez un lien que vous pouvez envoyer à un nouveau prospect pour qu'il s'inscrive lui-même au Forum."
+    : mode === 'new_exposant'
+      ? "ARACOM saisit l'exposant ici. Il recevra automatiquement un lien pour compléter son profil. Aucune inscription libre — vous gardez la main."
       : "Génère un lien magique pour le portail Pacific Centers (vue consolidée en lecture seule). Le destinataire accède sans mot de passe.";
   const submitClass = mode === 'access'
     ? 'bg-blue-600 hover:bg-blue-700 gap-2'
-    : mode === 'inscription'
+    : mode === 'new_exposant'
       ? 'bg-violet-600 hover:bg-violet-700 gap-2'
       : 'bg-cyan-600 hover:bg-cyan-700 gap-2';
 
@@ -2493,15 +2508,29 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
                 </select>
               </div>
             )}
-            {mode === 'inscription' && (
+            {mode === 'new_exposant' && (
               <>
                 <div>
-                  <Label>Email du prospect</Label>
-                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="contact@nouvelleassoc.pf" />
+                  <Label>Nom de la structure / association *</Label>
+                  <Input value={form.new_name} onChange={(e) => setForm({ ...form, new_name: e.target.value })} placeholder="Ex: Tahiti Iti Natation" />
                 </div>
                 <div>
-                  <Label>Nom de la structure (facultatif)</Label>
-                  <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Nouvelle Association" />
+                  <Label>Email principal *</Label>
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="contact@asso.pf" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Téléphone</Label>
+                    <Input value={form.new_phone} onChange={(e) => setForm({ ...form, new_phone: e.target.value })} placeholder="87xxxxxx" />
+                  </div>
+                  <div>
+                    <Label>Contact (nom)</Label>
+                    <Input value={form.new_contact_name} onChange={(e) => setForm({ ...form, new_contact_name: e.target.value })} placeholder="Jean Dupont" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Discipline / activité</Label>
+                  <Input value={form.new_discipline} onChange={(e) => setForm({ ...form, new_discipline: e.target.value })} placeholder="Ex: Natation, Judo, Danse…" />
                 </div>
               </>
             )}
