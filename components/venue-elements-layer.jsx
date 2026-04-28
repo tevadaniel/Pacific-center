@@ -8,12 +8,13 @@ import { Trash2, Save, Square, ArrowRight, Coffee, ShoppingBag, Zap, Layers, Rot
 import { api } from '@/lib/auth-client';
 import { toast } from 'sonner';
 
-// 6 types d'éléments avec leur configuration par défaut
+// 7 types d'éléments avec leur configuration par défaut
 const ELEMENT_TYPES = {
   stand_zone:    { label: 'Zone stand exposant', icon: Square,       defaultColor: '#3b82f6', defaultW: 8, defaultH: 5, shape: 'rectangle' },
   demo_zone:     { label: 'Zone démonstration',  icon: Layers,       defaultColor: '#a855f7', defaultW: 14, defaultH: 8, shape: 'rectangle' },
-  kiosque:       { label: 'Kiosque',             icon: Coffee,       defaultColor: '#92400e', defaultW: 6, defaultH: 6, shape: 'rectangle' },
-  commerce:      { label: 'Commerce',            icon: ShoppingBag,  defaultColor: '#f97316', defaultW: 8, defaultH: 5, shape: 'rectangle' },
+  kiosque:       { label: 'Kiosque',             icon: Coffee,       defaultColor: '#7c2d12', defaultW: 6, defaultH: 6, shape: 'rectangle' },
+  commerce:      { label: 'Commerce',            icon: ShoppingBag,  defaultColor: '#0a0a0a', defaultW: 18, defaultH: 8, shape: 'rectangle' },
+  carrefour:     { label: 'Carrefour',           icon: ShoppingBag,  defaultColor: '#0a0a0a', defaultW: 30, defaultH: 6, shape: 'rectangle' },
   flow_arrow:    { label: 'Sens circulation',    icon: ArrowRight,   defaultColor: '#10b981', defaultW: 10, defaultH: 4, shape: 'arrow' },
   electric_outlet: { label: 'Prise électrique',  icon: Zap,          defaultColor: '#fbbf24', defaultW: 3, defaultH: 3, shape: 'circle' },
 };
