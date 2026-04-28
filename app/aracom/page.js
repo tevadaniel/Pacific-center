@@ -38,6 +38,7 @@ const TABS = [
   { key: 'anomalies', label: 'Anomalies', href: '/aracom?tab=anomalies' },
   { key: 'bilans', label: 'Bilans', href: '/aracom?tab=bilans' },
   { key: 'satisfaction', label: 'Satisfaction', href: '/aracom?tab=satisfaction' },
+  { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
 ];
 
 export default function AracomPage() {
@@ -77,6 +78,7 @@ export default function AracomPage() {
       {activeTab === 'anomalies' && <AnomaliesView />}
       {activeTab === 'bilans' && <BilansView />}
       {activeTab === 'satisfaction' && <SatisfactionAdminView />}
+      {activeTab === 'backup' && <BackupView />}
     </Shell>
   );
 }
@@ -2409,6 +2411,192 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
             <Button onClick={onCreated} className="ml-auto">Fermer</Button>
           )}
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// BACKUP — Sauvegarde complète de la base vers Google Drive
+// =====================================================================
+function BackupView() {
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [driveInfo, setDriveInfo] = useState(null);
+  const [lastBackup, setLastBackup] = useState(null);
+
+  const loadHistory = async () => {
+    setLoading(true);
+    try {
+      const [items, info] = await Promise.all([
+        api('/api/backups'),
+        api('/api/drive/info').catch(() => null),
+      ]);
+      setHistory(items);
+      setDriveInfo(info);
+    } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { loadHistory(); }, []);
+
+  const runBackup = async () => {
+    if (busy) return;
+    if (!confirm('Lancer une sauvegarde complète de la base et l\'uploader dans votre Google Drive (dossier "Sauvegardes") ?\n\nCette opération peut prendre 10–30 secondes.')) return;
+    setBusy(true);
+    const toastId = toast.loading('Sauvegarde en cours — export de toutes les collections puis upload Drive…');
+    try {
+      const res = await api('/api/backup/export', { method: 'POST', body: '{}' });
+      toast.dismiss(toastId);
+      toast.success('✅ Sauvegarde réussie : ' + res.backup.file_name);
+      setLastBackup(res.backup);
+      await loadHistory();
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error('Erreur : ' + e.message);
+    } finally { setBusy(false); }
+  };
+
+  const formatSize = (b) => {
+    if (b < 1024) return b + ' o';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' Ko';
+    return (b / 1024 / 1024).toFixed(2) + ' Mo';
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Intro + Drive info */}
+      <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50">
+        <CardContent className="p-5 flex items-start gap-4 flex-wrap">
+          <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+            <Download className="w-8 h-8 text-emerald-600" />
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <h2 className="font-bold text-emerald-900 text-lg">Sauvegarde complète sur Google Drive</h2>
+            <p className="text-sm text-emerald-800 mt-1">
+              Exportez l&apos;intégralité des données de la plateforme (exposants, stands, cautions, animations, documents, mailing, etc.) dans un seul fichier JSON, stocké automatiquement dans votre Google Drive connecté, dossier <b>Sauvegardes/</b>.
+            </p>
+            {driveInfo?.configured && driveInfo?.ok && (
+              <div className="mt-2 text-[11px] text-emerald-700 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Drive connecté — dossier racine : <b>{driveInfo.folder_name}</b>
+              </div>
+            )}
+            {driveInfo && !driveInfo.configured && (
+              <div className="mt-2 text-[11px] text-rose-700 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" /> Drive non configuré — la sauvegarde ne fonctionnera pas.
+              </div>
+            )}
+          </div>
+          <Button
+            size="lg"
+            onClick={runBackup}
+            disabled={busy || !driveInfo?.configured}
+            className="bg-emerald-600 hover:bg-emerald-700 gap-2 shadow-md"
+          >
+            {busy ? <><RefreshCw className="w-5 h-5 animate-spin" /> Sauvegarde en cours…</> : <><Download className="w-5 h-5" /> Sauvegarder maintenant</>}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Last success highlight */}
+      {lastBackup && (
+        <Card className="border-2 border-emerald-300 bg-emerald-50">
+          <CardContent className="p-4 flex items-start gap-3">
+            <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="font-bold text-emerald-900">Dernière sauvegarde créée avec succès ✨</div>
+              <div className="text-sm text-emerald-800 mt-1">
+                <b>{lastBackup.file_name}</b> · {formatSize(lastBackup.size_bytes)} · {lastBackup.documents_total} documents sur {lastBackup.collections_count} collections
+              </div>
+              <div className="mt-2 flex gap-2 flex-wrap">
+                {lastBackup.drive_view_link && (
+                  <a href={lastBackup.drive_view_link} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="outline" className="gap-1.5 border-emerald-400 text-emerald-700 hover:bg-emerald-100">
+                      <Eye className="w-3.5 h-3.5" /> Ouvrir dans Drive
+                    </Button>
+                  </a>
+                )}
+                {lastBackup.drive_download_link && (
+                  <a href={lastBackup.drive_download_link} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="outline" className="gap-1.5 border-emerald-400 text-emerald-700 hover:bg-emerald-100">
+                      <Download className="w-3.5 h-3.5" /> Télécharger JSON
+                    </Button>
+                  </a>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Sauvegardes totales" value={history.length} accent="emerald" icon={Download} />
+        <KpiCard label="Dernière sauvegarde" value={history[0] ? new Date(history[0].created_at).toLocaleDateString('fr-FR') : '—'} accent="blue" />
+        <KpiCard label="Volume total" value={formatSize(history.reduce((s, h) => s + (h.size_bytes || 0), 0))} accent="violet" />
+        <KpiCard label="Docs. dernière sauv." value={history[0]?.documents_total || 0} accent="orange" />
+      </div>
+
+      {/* History */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="w-4 h-4 text-emerald-600" /> Historique des sauvegardes
+          </CardTitle>
+          <p className="text-xs text-slate-500">Toutes les sauvegardes sont stockées dans votre Google Drive sous <code>Sauvegardes/</code>. La liste ci-dessous affiche les 50 plus récentes.</p>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="py-8 text-center text-slate-500">Chargement…</div>
+          ) : history.length === 0 ? (
+            <div className="py-8 text-center text-slate-500">Aucune sauvegarde pour l&apos;instant. Cliquez sur <b>Sauvegarder maintenant</b> pour créer la première.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-y text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="py-2 px-4">Fichier</th>
+                  <th>Date</th>
+                  <th>Collections</th>
+                  <th>Documents</th>
+                  <th>Taille</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {history.map(h => (
+                  <tr key={h.id}>
+                    <td className="py-2 px-4 font-mono text-xs break-all">{h.file_name}</td>
+                    <td className="text-xs text-slate-600">{new Date(h.created_at).toLocaleString('fr-FR')}</td>
+                    <td className="text-center"><Badge variant="secondary">{h.collections_count}</Badge></td>
+                    <td className="text-center"><Badge variant="secondary">{h.documents_total}</Badge></td>
+                    <td className="text-xs text-slate-600">{formatSize(h.size_bytes)}</td>
+                    <td className="space-x-1.5 py-2 pr-4">
+                      {h.drive_view_link && (
+                        <a href={h.drive_view_link} target="_blank" rel="noopener noreferrer">
+                          <Button size="sm" variant="outline" className="gap-1 h-7"><Eye className="w-3 h-3" /> Drive</Button>
+                        </a>
+                      )}
+                      {h.drive_download_link && (
+                        <a href={h.drive_download_link} target="_blank" rel="noopener noreferrer">
+                          <Button size="sm" variant="outline" className="gap-1 h-7"><Download className="w-3 h-3" /> JSON</Button>
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-amber-50 border-amber-200">
+        <CardContent className="p-4 flex items-start gap-3 text-sm">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-amber-900">
+            <b>À propos du format :</b> la sauvegarde est un fichier <b>JSON lisible</b> contenant toutes les collections MongoDB (exposants, stands, validations, cautions, mailing, documents, etc.). Pour restaurer, importez ce fichier manuellement via l&apos;équipe technique ARACOM. Les fichiers lourds (photos/vidéos Jour J) restent dans Drive, cette sauvegarde ne contient que leurs métadonnées et liens.
+          </div>
+        </CardContent>
       </Card>
     </div>
   );

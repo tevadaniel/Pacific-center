@@ -837,6 +837,12 @@ export async function GET(request, { params }) {
       }
     }
 
+    // ---- Backups history : list all past backup exports (most recent first) ----
+    if (route === 'backups') {
+      const items = await db.collection('backups').find({}).sort({ created_at: -1 }).limit(50).toArray();
+      return json(items.map(({ _id, ...rest }) => rest));
+    }
+
     // ---- Push notifications : VAPID public key ----
     if (route === 'push/vapid-key') {
       return json({ public_key: getVapidPublicKey(), configured: isPushConfigured() });
@@ -1918,6 +1924,75 @@ export async function POST(request, { params }) {
         { $set: { password: '__disabled_use_access_token__', updated_at: new Date() } }
       );
       return json({ ok: true, venues_updated: updatedVenues, users_password_disabled: r.modifiedCount });
+    }
+
+    // ============ BACKUP — Export complet vers Google Drive ============
+    // POST /api/backup/export : dump all MongoDB collections as a single JSON file
+    // and upload it to the connected Google Drive inside a "Sauvegardes" sub-folder.
+    if (route === 'backup/export') {
+      if (!isDriveConfigured()) return err('Google Drive non configuré (GOOGLE_SERVICE_ACCOUNT_JSON + GOOGLE_DRIVE_ROOT_FOLDER_ID requis)', 500);
+      try {
+        const mongo = await db.collections();
+        const collectionNames = mongo.map(c => c.collectionName).filter(n => !n.startsWith('system.'));
+        const dump = {
+          exported_at: new Date().toISOString(),
+          edition_id: EDITION_ID,
+          db_name: db.databaseName,
+          app: 'Forum de la Rentrée 2026',
+          version: '1.0',
+          collections: {},
+        };
+        const stats = {};
+        for (const name of collectionNames) {
+          const docs = await db.collection(name).find({}).toArray();
+          // strip _id to avoid ObjectId serialization issues
+          const clean = docs.map(d => { const { _id, ...rest } = d; return rest; });
+          dump.collections[name] = clean;
+          stats[name] = clean.length;
+        }
+
+        const json_str = JSON.stringify(dump, null, 2);
+        const buffer = Buffer.from(json_str, 'utf-8');
+        const size_bytes = buffer.length;
+
+        // Build filename : backup-forum-rentree-2026-YYYY-MM-DD_HH-MM-SS.json (Pacific timezone friendly)
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+        const fileName = `backup-forum-rentree-2026_${ts}.json`;
+
+        // Ensure folder "Sauvegardes" exists at the root of the connected Drive
+        const folderId = await ensureFolderPath(['Sauvegardes']);
+        const uploaded = await driveUploadFile({
+          folderId,
+          fileName,
+          mimeType: 'application/json',
+          buffer,
+        });
+
+        // Record the backup metadata in a "backups" collection for history
+        const backupRecord = {
+          id: uuid(),
+          file_name: fileName,
+          drive_file_id: uploaded.id,
+          drive_view_link: uploaded.webViewLink || null,
+          drive_download_link: uploaded.webContentLink || null,
+          size_bytes,
+          collections_count: collectionNames.length,
+          documents_total: Object.values(stats).reduce((a, b) => a + b, 0),
+          stats,
+          created_at: new Date(),
+          created_by: ctx.userId || 'u-admin',
+        };
+        await db.collection('backups').insertOne(backupRecord);
+        await logActivity(db, ctx.userId, 'backup', backupRecord.id, 'export_drive', null, { file_name: fileName, size_bytes });
+
+        const { _id, ...rec } = backupRecord;
+        return json({ ok: true, backup: rec });
+      } catch (e) {
+        console.error('[backup/export]', e);
+        return err('Erreur lors de la sauvegarde: ' + (e?.message || e), 500);
+      }
     }
 
     // ============ ACCESS TOKENS (lien magique) — ARACOM management ============
