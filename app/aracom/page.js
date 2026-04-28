@@ -2507,19 +2507,34 @@ function BackupView() {
               <div className="font-bold text-emerald-900">Dernière sauvegarde créée avec succès ✨</div>
               <div className="text-sm text-emerald-800 mt-1">
                 <b>{lastBackup.file_name}</b> · {formatSize(lastBackup.size_bytes)} · {lastBackup.documents_total} documents sur {lastBackup.collections_count} collections
+                {lastBackup.zip && <> · <b>+ ZIP documents</b> ({lastBackup.zip.documents_count} fichiers, {formatSize(lastBackup.zip.size_bytes)})</>}
               </div>
               <div className="mt-2 flex gap-2 flex-wrap">
                 {lastBackup.drive_view_link && (
                   <a href={lastBackup.drive_view_link} target="_blank" rel="noopener noreferrer">
                     <Button size="sm" variant="outline" className="gap-1.5 border-emerald-400 text-emerald-700 hover:bg-emerald-100">
-                      <Eye className="w-3.5 h-3.5" /> Ouvrir dans Drive
+                      <Eye className="w-3.5 h-3.5" /> Ouvrir JSON
                     </Button>
                   </a>
                 )}
                 {lastBackup.drive_download_link && (
                   <a href={lastBackup.drive_download_link} target="_blank" rel="noopener noreferrer">
                     <Button size="sm" variant="outline" className="gap-1.5 border-emerald-400 text-emerald-700 hover:bg-emerald-100">
-                      <Download className="w-3.5 h-3.5" /> Télécharger JSON
+                      <Download className="w-3.5 h-3.5" /> JSON
+                    </Button>
+                  </a>
+                )}
+                {lastBackup.zip?.drive_view_link && (
+                  <a href={lastBackup.zip.drive_view_link} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="outline" className="gap-1.5 border-violet-400 text-violet-700 hover:bg-violet-100">
+                      <FileText className="w-3.5 h-3.5" /> Ouvrir ZIP docs
+                    </Button>
+                  </a>
+                )}
+                {lastBackup.zip?.drive_download_link && (
+                  <a href={lastBackup.zip.drive_download_link} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="outline" className="gap-1.5 border-violet-400 text-violet-700 hover:bg-violet-100">
+                      <Download className="w-3.5 h-3.5" /> ZIP
                     </Button>
                   </a>
                 )}
@@ -2581,6 +2596,11 @@ function BackupView() {
                           <Button size="sm" variant="outline" className="gap-1 h-7"><Download className="w-3 h-3" /> JSON</Button>
                         </a>
                       )}
+                      {h.zip?.drive_download_link && (
+                        <a href={h.zip.drive_download_link} target="_blank" rel="noopener noreferrer">
+                          <Button size="sm" variant="outline" className="gap-1 h-7 border-violet-300 text-violet-700"><FileText className="w-3 h-3" /> ZIP ({h.zip.documents_count})</Button>
+                        </a>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2594,7 +2614,12 @@ function BackupView() {
         <CardContent className="p-4 flex items-start gap-3 text-sm">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-amber-900">
-            <b>À propos du format :</b> la sauvegarde est un fichier <b>JSON lisible</b> contenant toutes les collections MongoDB (exposants, stands, validations, cautions, mailing, documents, etc.). Pour restaurer, importez ce fichier manuellement via l&apos;équipe technique ARACOM. Les fichiers lourds (photos/vidéos Jour J) restent dans Drive, cette sauvegarde ne contient que leurs métadonnées et liens.
+            <b>À propos du format :</b> chaque sauvegarde produit <b>2 fichiers</b> dans votre Drive (dossier <code>Sauvegardes/</code>) :
+            <ul className="list-disc pl-5 mt-1 space-y-0.5">
+              <li><b>.json</b> → toutes les collections MongoDB (exposants, stands, cautions, mailing, etc.) — lisible tel quel, idéal pour restauration ou audit.</li>
+              <li><b>.zip</b> → tous les documents PDF/reçus (cautions, conventions…) regroupés par type, pour consultation rapide sans décoder le base64. Contient aussi une copie du JSON pour archive unique.</li>
+            </ul>
+            <div className="mt-2">Les photos/vidéos Jour J restent dans leur dossier Drive dédié — la sauvegarde contient leurs métadonnées et liens uniquement.</div>
           </div>
         </CardContent>
       </Card>

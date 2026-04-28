@@ -6,6 +6,7 @@ import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
 import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, uploadFile as driveUploadFile, makeAnyoneReader, getServiceAccountEmail, safeName as driveSafeName } from '@/lib/drive';
+import JSZip from 'jszip';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
 
 // ===== Tracking helpers =====
@@ -1970,6 +1971,62 @@ export async function POST(request, { params }) {
           buffer,
         });
 
+        // ========== ZIP des documents (PDF/HTML/reçus) ==========
+        // Consolide tous les fichiers base64 des collections `documents` et `registration_documents`
+        // dans une archive ZIP lisible directement, sans passer par la restauration du JSON.
+        let zipMeta = null;
+        try {
+          const zip = new JSZip();
+          let zipFileCount = 0;
+
+          const addBase64 = (subfolder, doc, b64Field, nameField, mimeField) => {
+            const content = doc[b64Field];
+            if (!content) return;
+            // Strip data URL prefix if present
+            const pure = String(content).replace(/^data:[^;]+;base64,/, '');
+            let buf;
+            try { buf = Buffer.from(pure, 'base64'); } catch { return; }
+            if (!buf.length) return;
+            const fname = driveSafeName(doc[nameField] || (doc.id + '_' + (doc.document_type || 'fichier')));
+            // Group by document_type if possible
+            const subdir = driveSafeName(doc.document_type || subfolder);
+            zip.folder(`${subfolder}/${subdir}`).file(fname, buf);
+            zipFileCount++;
+          };
+
+          for (const d of dump.collections.documents || []) {
+            addBase64('documents', d, 'file_data_base64', 'file_name', 'file_type');
+          }
+          for (const d of dump.collections.registration_documents || []) {
+            addBase64('registration_documents', d, 'file_data', 'file_name', 'mime_type');
+          }
+
+          // Always add the JSON dump inside the ZIP as well (one-stop archive)
+          zip.file('backup.json', json_str);
+
+          if (zipFileCount > 0) {
+            const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+            const zipName = `backup-forum-rentree-2026_${ts}.zip`;
+            const uploadedZip = await driveUploadFile({
+              folderId,
+              fileName: zipName,
+              mimeType: 'application/zip',
+              buffer: zipBuffer,
+            });
+            zipMeta = {
+              file_name: zipName,
+              drive_file_id: uploadedZip.id,
+              drive_view_link: uploadedZip.webViewLink || null,
+              drive_download_link: uploadedZip.webContentLink || null,
+              size_bytes: zipBuffer.length,
+              documents_count: zipFileCount,
+            };
+          }
+        } catch (zipErr) {
+          console.error('[backup/export zip]', zipErr);
+          // ZIP failure must NOT break the main backup → just log
+        }
+
         // Record the backup metadata in a "backups" collection for history
         const backupRecord = {
           id: uuid(),
@@ -1981,6 +2038,7 @@ export async function POST(request, { params }) {
           collections_count: collectionNames.length,
           documents_total: Object.values(stats).reduce((a, b) => a + b, 0),
           stats,
+          zip: zipMeta, // may be null if no file-bearing docs
           created_at: new Date(),
           created_by: ctx.userId || 'u-admin',
         };
