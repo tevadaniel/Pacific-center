@@ -713,15 +713,8 @@ export async function GET(request, { params }) {
       if (!m) return err('Media introuvable', 404);
       // Prefer Drive direct view link
       if (m.drive_file_id) {
-        // Try to stream from Drive (needs auth) — easier: redirect to Drive direct download via proxy
         try {
-          const { google } = await import('googleapis');
-          const { GoogleAuth } = google.auth;
-          const auth = new GoogleAuth({
-            credentials: JSON.parse(require('fs').readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_FILE, 'utf-8')),
-            scopes: ['https://www.googleapis.com/auth/drive.readonly'],
-          });
-          const drive = google.drive({ version: 'v3', auth: await auth.getClient() });
+          const drive = await (await import('@/lib/drive')).getDriveClient();
           const r = await drive.files.get({ fileId: m.drive_file_id, alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' });
           return new Response(Buffer.from(r.data), { status: 200, headers: { 'Content-Type': m.mime_type || 'image/jpeg', 'Cache-Control': 'private, max-age=300' } });
         } catch (e) {
