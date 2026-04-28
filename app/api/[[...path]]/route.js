@@ -1913,8 +1913,32 @@ export async function POST(request, { params }) {
     }
 
     // ============ ACCESS TOKENS (lien magique) — ARACOM management ============
+    // Helper : envoi de l'email de lien d'accès
+    const sendAccessTokenEmail = async ({ purpose, accessUrl, recipientEmail, org }) => {
+      const orgName = org?.name || 'Forum de la Rentrée 2026';
+      const subj = purpose === 'inscription_exposant'
+        ? "Votre lien d'inscription au Forum de la Rentrée 2026"
+        : purpose === 'pacific_centers'
+          ? 'Votre accès Pacific Centers — Forum de la Rentrée 2026'
+          : `Votre espace exposant — ${orgName}`;
+      const html = purpose === 'inscription_exposant' ? `<p>Bonjour,</p>
+<p>ARACOM vous invite à inscrire votre structure au <b>Forum de la Rentrée 2026</b> (vendredi 14 &amp; samedi 15 août 2026).</p>
+<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Démarrer mon inscription</a></p>
+<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent</b> jusqu'à révocation : conservez-le pour accéder à votre espace dès que vous voulez.</p>
+<p>L'équipe ARACOM</p>` : `<p>Bonjour ${org?.contact_name || ''},</p>
+<p>Voici votre lien personnel d'accès à votre espace ${purpose === 'pacific_centers' ? 'Pacific Centers' : 'exposant'} pour le <b>Forum de la Rentrée 2026</b>.</p>
+<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace</a></p>
+<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent et personnel</b>. Conservez-le précieusement (favoris). Aucun mot de passe à retenir.</p>
+<p>L'équipe ARACOM</p>`;
+      try {
+        const r = await sendMail({ to: recipientEmail, subject: subj, html });
+        if (!r.ok) console.error('[mail token]', r.error);
+        return r;
+      } catch (e) { console.error('[mail token]', e?.message); return { ok: false, error: e?.message }; }
+    };
+
     if (route === 'access-tokens') {
-      const { organization_id, email, purpose = 'access', send_email = true, label = '' } = body;
+      const { organization_id, email, purpose = 'access', send_email = true, label = '', force = false } = body;
       if (!['access', 'inscription_exposant', 'pacific_centers'].includes(purpose)) return err('purpose invalide', 400);
       // Resolve user/email
       let resolvedEmail = (email || '').toLowerCase().trim();
@@ -1931,6 +1955,41 @@ export async function POST(request, { params }) {
       if (purpose === 'access' && !resolvedUserId && !resolvedEmail) {
         return err('Pour un lien d\'accès, organization_id ou email requis', 400);
       }
+
+      // ============ IDEMPOTENCY : reuse existing active token ============
+      // Check if an active (non-revoked, non-expired) token already exists for this target.
+      const existingQuery = { revoked_at: null, purpose };
+      if (organization_id) existingQuery.organization_id = organization_id;
+      else if (resolvedEmail) existingQuery.email = resolvedEmail;
+      const existingTokens = await db.collection('access_tokens').find(existingQuery).sort({ created_at: -1 }).toArray();
+      const existing = existingTokens.find(t => !t.expires_at || new Date(t.expires_at) > new Date());
+
+      if (existing && !force) {
+        // Reuse existing token. Send email ONLY if explicitly asked AND not already sent recently (cooldown 1h).
+        const lastSent = existing.last_email_sent_at ? new Date(existing.last_email_sent_at) : null;
+        const cooldownMs = 60 * 60 * 1000; // 1 hour
+        const canSend = send_email && (!lastSent || (Date.now() - lastSent.getTime()) > cooldownMs);
+        const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${existing.token}`;
+        if (canSend && resolvedEmail) {
+          await sendAccessTokenEmail({ purpose, accessUrl, recipientEmail: resolvedEmail, org });
+          await db.collection('access_tokens').updateOne({ id: existing.id }, { $set: { last_email_sent_at: new Date(), updated_at: new Date() } });
+        }
+        return json({
+          ok: true,
+          id: existing.id,
+          token: existing.token,
+          access_url: accessUrl,
+          reused: true,
+          email_sent: canSend,
+          message: canSend ? 'Lien réutilisé et email renvoyé' : (existing.last_email_sent_at ? 'Lien existant — email récemment envoyé, pas de renvoi (cooldown 1h)' : 'Lien existant réutilisé (aucun email envoyé)'),
+        });
+      }
+
+      // If force=true and existing token, revoke it first
+      if (force && existing) {
+        await db.collection('access_tokens').updateOne({ id: existing.id }, { $set: { revoked_at: new Date(), updated_at: new Date() } });
+      }
+
       // Generate cryptographically random token (32 hex chars)
       const tokenStr = uuid().replace(/-/g, '') + uuid().replace(/-/g, '').slice(0, 16);
       const tokenId = uuid();
@@ -1942,9 +2001,10 @@ export async function POST(request, { params }) {
         user_id: resolvedUserId,
         email: resolvedEmail || null,
         label: label || (org?.name || resolvedEmail || 'Lien'),
-        expires_at: null, // null = à vie jusqu'à révocation
+        expires_at: null,
         revoked_at: null,
         last_used_at: null,
+        last_email_sent_at: null,
         use_count: 0,
         created_at: new Date(),
         updated_at: new Date(),
@@ -1952,27 +2012,13 @@ export async function POST(request, { params }) {
       });
       const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tokenStr}`;
 
-      // Optional: send email
+      // Send email on first creation
       if (send_email && resolvedEmail) {
-        const orgName = org?.name || 'Forum de la Rentrée 2026';
-        const subj = purpose === 'inscription_exposant'
-          ? "Votre lien d'inscription au Forum de la Rentrée 2026"
-          : purpose === 'pacific_centers'
-            ? 'Votre accès Pacific Centers — Forum de la Rentrée 2026'
-            : `Votre espace exposant — ${orgName}`;
-        const html = purpose === 'inscription_exposant' ? `<p>Bonjour,</p>
-<p>ARACOM vous invite à inscrire votre structure au <b>Forum de la Rentrée 2026</b> (vendredi 14 & samedi 15 août 2026).</p>
-<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Démarrer mon inscription</a></p>
-<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent</b> jusqu'à révocation : conservez-le pour accéder à votre espace dès que vous voulez.</p>
-<p>L'équipe ARACOM</p>` : `<p>Bonjour ${org?.contact_name || ''},</p>
-<p>Voici votre lien personnel d'accès à votre espace ${purpose === 'pacific_centers' ? 'Pacific Centers' : 'exposant'} pour le <b>Forum de la Rentrée 2026</b>.</p>
-<p>👉 <a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace</a></p>
-<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent et personnel</b>. Conservez-le précieusement (favoris). Aucun mot de passe à retenir.</p>
-<p>L'équipe ARACOM</p>`;
-        sendMail({ to: resolvedEmail, subject: subj, html }).catch(e => console.error('[mail token]', e?.message));
+        await sendAccessTokenEmail({ purpose, accessUrl, recipientEmail: resolvedEmail, org });
+        await db.collection('access_tokens').updateOne({ id: tokenId }, { $set: { last_email_sent_at: new Date() } });
       }
 
-      return json({ ok: true, id: tokenId, token: tokenStr, access_url: accessUrl });
+      return json({ ok: true, id: tokenId, token: tokenStr, access_url: accessUrl, reused: false, email_sent: Boolean(send_email && resolvedEmail) });
     }
 
     if (route.match(/^access-tokens\/[^/]+\/revoke$/)) {

@@ -2293,7 +2293,13 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
         ? { purpose: 'access', organization_id: form.organization_id, send_email: form.send_email }
         : { purpose: 'inscription_exposant', email: form.email, label: form.label || null, send_email: form.send_email };
       const res = await api('/api/access-tokens', { method: 'POST', body: JSON.stringify(body) });
-      toast.success(form.send_email ? 'Lien créé et envoyé par email' : 'Lien créé');
+      if (res.reused) {
+        toast.info(res.message || 'Lien existant réutilisé (pas de nouveau lien créé)');
+      } else if (res.email_sent) {
+        toast.success('Lien créé et envoyé par email ✉️');
+      } else {
+        toast.success('Lien créé');
+      }
       setCreated(res);
     } catch (e) { toast.error(e.message); setBusy(false); }
   };
@@ -2339,9 +2345,10 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
           </CardContent>
         ) : (
           <CardContent className="space-y-3">
-            <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-emerald-900">
-              <div className="font-bold flex items-center gap-2"><CheckCircle2 className="w-5 h-5" /> Lien créé !</div>
-              {form.send_email && <div className="text-sm mt-1">📧 L&apos;email vient d&apos;être envoyé.</div>}
+            <div className={`rounded-md border p-3 ${created.reused ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
+              <div className="font-bold flex items-center gap-2"><CheckCircle2 className="w-5 h-5" /> {created.reused ? '🔄 Lien existant réutilisé' : '✨ Nouveau lien créé !'}</div>
+              {created.message && <div className="text-sm mt-1">{created.message}</div>}
+              {!created.reused && form.send_email && <div className="text-sm mt-1">📧 L&apos;email vient d&apos;être envoyé.</div>}
             </div>
             <div>
               <Label className="text-xs">URL personnelle</Label>
