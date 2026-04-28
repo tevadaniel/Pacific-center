@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Upload, Camera, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const MAX_SIZE = 6 * 1024 * 1024; // 6 MB
+const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB par défaut (images / docs)
+const VIDEO_MAX_SIZE = 80 * 1024 * 1024; // 80 MB pour les vidéos
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -20,19 +21,28 @@ function fileToBase64(file) {
   });
 }
 
-export function FileUploadButton({ onUpload, accept = 'image/*,application/pdf', capture = false, label = 'Ajouter un fichier', icon, variant = 'outline', className = '' }) {
+export function FileUploadButton({ onUpload, accept = 'image/*,application/pdf', capture = false, label = 'Ajouter un fichier', icon, variant = 'outline', className = '', maxSize = null }) {
   const ref = useRef(null);
   const [busy, setBusy] = useState(false);
   const handle = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > MAX_SIZE) { toast.error('Fichier trop volumineux (max 6 Mo)'); return; }
+    const isVideo = (f.type || '').startsWith('video/');
+    const limit = maxSize || (isVideo ? VIDEO_MAX_SIZE : DEFAULT_MAX_SIZE);
+    if (f.size > limit) {
+      const limitMb = Math.round(limit / (1024 * 1024));
+      const fileMb = (f.size / (1024 * 1024)).toFixed(1);
+      toast.error(`Fichier trop volumineux : ${fileMb} Mo (max ${limitMb} Mo)`);
+      return;
+    }
     setBusy(true);
+    const t = toast.loading(isVideo ? `Upload vidéo (${(f.size / (1024 * 1024)).toFixed(1)} Mo)…` : 'Upload en cours…');
     try {
       const base64 = await fileToBase64(f);
       await onUpload({ file_data: base64, file_name: f.name, mime_type: f.type, size_bytes: f.size });
+      toast.success('Fichier uploadé', { id: t });
     } catch (err) {
-      toast.error('Erreur upload : ' + err.message);
+      toast.error('Erreur upload : ' + err.message, { id: t });
     }
     setBusy(false);
     if (ref.current) ref.current.value = '';

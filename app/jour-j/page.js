@@ -14,7 +14,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChevronLeft, CheckCircle2, XCircle, Clock, AlertTriangle, Users, MapPin, Zap, TrendingUp, Camera, MessageSquare, Sparkles, Search, ImageIcon, Trash2 } from 'lucide-react';
+import { ChevronLeft, CheckCircle2, XCircle, Clock, AlertTriangle, Users, MapPin, Zap, TrendingUp, Camera, Video, MessageSquare, Sparkles, Search, ImageIcon, Trash2, FileText, ExternalLink } from 'lucide-react';
 import { PRESENCE_STATUS_LABEL, PRESENCE_STATUS_COLOR, ANOMALY_TYPES, ANOMALY_TYPE_LABEL, SEVERITY_LEVELS, SEVERITY_COLOR } from '@/lib/constants';
 import { FileUploadButton, MediaThumb } from '@/components/file-upload';
 
@@ -387,39 +387,53 @@ function FicheTerrain({ session, eventDate, onClose }) {
 
 
 const MEDIA_TYPES = [
-  { key: 'photo_arrivee', label: 'Photo stand à l’arrivée', color: 'bg-emerald-50 border-emerald-200' },
-  { key: 'photo_depart', label: 'Photo stand au départ', color: 'bg-blue-50 border-blue-200' },
-  { key: 'preuve_incident', label: 'Preuve d’incident', color: 'bg-red-50 border-red-200' },
-  { key: 'document_terrain', label: 'Document terrain', color: 'bg-slate-50 border-slate-200' },
+  { key: 'photo_arrivee', label: '📍 Stand à l\'arrivée', color: 'bg-emerald-50 border-emerald-200', accept: 'image/*', icon: Camera },
+  { key: 'photo_depart', label: '🚪 Stand au départ', color: 'bg-blue-50 border-blue-200', accept: 'image/*', icon: Camera },
+  { key: 'photo_animation', label: '🎭 Photo animation (preuve)', color: 'bg-violet-50 border-violet-200', accept: 'image/*', icon: Camera },
+  { key: 'video_animation', label: '🎬 Vidéo animation (preuve)', color: 'bg-fuchsia-50 border-fuchsia-200', accept: 'video/*', icon: Video },
+  { key: 'photo_ambiance', label: '✨ Photo d\'ambiance', color: 'bg-amber-50 border-amber-200', accept: 'image/*', icon: Camera },
+  { key: 'preuve_incident', label: '⚠️ Preuve incident', color: 'bg-red-50 border-red-200', accept: 'image/*,video/*', icon: AlertTriangle },
+  { key: 'document_terrain', label: '📄 Document terrain', color: 'bg-slate-50 border-slate-200', accept: 'image/*,application/pdf', icon: FileText },
 ];
 
 function PhotoUploader({ registrationId, attendanceSessionId, media = [], onRefresh }) {
   const upload = async (type, payload) => {
     try {
       await api('/api/field-media', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, attendance_session_id: attendanceSessionId, media_type: type, ...payload }) });
-      toast.success('Photo ajoutée'); onRefresh();
+      toast.success('✅ Média ajouté — uploadé sur Drive'); onRefresh();
     } catch (e) { toast.error(e.message); }
   };
   const del = async (id) => {
     if (!confirm('Supprimer ce média ?')) return;
     await api(`/api/field-media/${id}`, { method: 'DELETE' }); toast.success('Supprimé'); onRefresh();
   };
+  const isVideo = (m) => (m.mime_type || '').startsWith('video/');
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {MEDIA_TYPES.map(t => (
-          <FileUploadButton key={t.key} capture accept="image/*" icon={Camera} onUpload={(p) => upload(t.key, p)} label={t.label} className="h-auto py-3 text-xs whitespace-normal" />
+          <FileUploadButton key={t.key} capture={t.accept?.startsWith('image/') || t.accept?.startsWith('video/')} accept={t.accept} icon={t.icon} onUpload={(p) => upload(t.key, p)} label={t.label} className="h-auto py-3 text-[11px] whitespace-normal" />
         ))}
       </div>
-      {media.length === 0 ? <p className="text-slate-500 text-sm py-3">Aucune photo ni média pour cet exposant.</p> : (
+      {media.length === 0 ? <p className="text-slate-500 text-sm py-3">Aucun média pour cet exposant.</p> : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {media.map(m => (
-            <div key={m.id} className={`relative group rounded-md border overflow-hidden ${MEDIA_TYPES.find(x => x.key === m.media_type)?.color || 'bg-slate-50'}`}>
-              <img src={`/api/field-media/${m.id}/view`} alt={m.file_name} className="w-full h-28 object-cover" />
-              <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] px-1.5 py-1 truncate">{m.media_type}</div>
-              <button onClick={() => del(m.id)} className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"><Trash2 className="w-3 h-3 text-red-600" /></button>
-            </div>
-          ))}
+          {media.map(m => {
+            const cfg = MEDIA_TYPES.find(x => x.key === m.media_type);
+            return (
+              <div key={m.id} className={`relative group rounded-md border overflow-hidden ${cfg?.color || 'bg-slate-50'}`}>
+                {isVideo(m) ? (
+                  <video src={`/api/field-media/${m.id}/view`} controls className="w-full h-28 object-cover bg-black" />
+                ) : (
+                  <img src={`/api/field-media/${m.id}/view`} alt={m.file_name} className="w-full h-28 object-cover" />
+                )}
+                <div className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[10px] px-1.5 py-1 truncate">{cfg?.label || m.media_type}</div>
+                {m.drive_view_link && (
+                  <a href={m.drive_view_link} target="_blank" rel="noreferrer" className="absolute top-1 left-1 bg-white/90 hover:bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition" title="Ouvrir dans Drive"><ExternalLink className="w-3 h-3 text-blue-600" /></a>
+                )}
+                <button onClick={() => del(m.id)} className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"><Trash2 className="w-3 h-3 text-red-600" /></button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
