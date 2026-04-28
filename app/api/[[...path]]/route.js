@@ -2458,7 +2458,7 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
       let parsed;
       try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
-      return json({ ok: true, mail_type, subject: parsed.subject, body_html: parsed.body_html, target_count: regs.length, usage: result.usage });
+      return json({ ok: true, mail_type, subject: parsed.subject, body_html: parsed.body_html, target_count: regs.length, usage: result.usage, llm_source: result.source || 'unknown' });
     }
 
     // ---- Send a composed email to selected registrations (Gmail SMTP if configured, else mocked) ----
