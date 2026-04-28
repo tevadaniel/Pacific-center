@@ -14,6 +14,8 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -29,6 +31,7 @@ const TABS = [
   { key: 'exposants', label: 'Exposants', href: '/aracom?tab=exposants' },
   { key: 'sites', label: 'Sites & stands', href: '/aracom?tab=sites' },
   { key: 'validations', label: 'Validations', href: '/aracom?tab=validations' },
+  { key: 'access', label: 'Liens d\'accès', href: '/aracom?tab=access' },
   { key: 'cautions', label: 'Cautions', href: '/aracom?tab=cautions' },
   { key: 'mailing', label: 'Mailing', href: '/aracom?tab=mailing' },
   { key: 'relances', label: 'Relances', href: '/aracom?tab=relances' },
@@ -67,6 +70,7 @@ export default function AracomPage() {
       {activeTab === 'exposants' && <ExposantsView />}
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'validations' && <ValidationsView />}
+      {activeTab === 'access' && <AccessTokensView />}
       {activeTab === 'cautions' && <CautionsView />}
       {activeTab === 'mailing' && <MailingView />}
       {activeTab === 'relances' && <RelancesView />}
@@ -785,11 +789,46 @@ function SitesView() {
     toast.success('Stand libéré'); setEditStand(null); reload();
   };
 
+  const toggleAvailability = async (v) => {
+    const newVal = !(v.is_available_2026 !== false);
+    if (!confirm(`${newVal ? 'ACTIVER' : 'DÉSACTIVER'} le site « ${v.name} » pour l'édition 2026 ?\n\n${newVal ? 'Les exposants pourront le sélectionner.' : 'Les exposants ne pourront plus le voir ni le sélectionner. Les inscriptions déjà placées sur ce site restent intactes.'}`)) return;
+    try {
+      await api(`/api/venues/${v.id}/set-availability`, { method: 'POST', body: JSON.stringify({ is_available_2026: newVal }) });
+      toast.success(`Site ${v.name} ${newVal ? 'activé ✅' : 'désactivé 🔒'}`);
+      api('/api/venues').then(setVenues);
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <div className="space-y-4">
+      <Card className="border-blue-200 bg-blue-50/40">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3 mb-2">
+            <MapPin className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="font-bold text-blue-900">Sites disponibles pour l&apos;édition 2026</h3>
+              <p className="text-xs text-blue-800">Activez ou désactivez chaque site. Les sites désactivés ne sont plus visibles côté exposant.</p>
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {venues.map(v => {
+              const active = v.is_available_2026 !== false;
+              return (
+                <div key={v.id} className={`flex items-center justify-between p-2 rounded-md border ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">{v.name}</span>
+                    <Badge variant="secondary" className="text-[10px]">{v.code}</Badge>
+                  </div>
+                  <Switch checked={active} onCheckedChange={() => toggleAvailability(v)} />
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-2">
-        {venues.map(v => {
-          const vStands = selected === v.id ? stands.length : v.capacity_stands;
+        {venues.filter(v => v.is_available_2026 !== false).map(v => {
           return (
             <Button key={v.id} variant={selected === v.id ? 'default' : 'outline'} onClick={() => setSelected(v.id)}>
               <MapPin className="w-4 h-4 mr-2" /> {v.name}
@@ -2105,6 +2144,228 @@ function NewExposantDialog({ venues, onClose, onCreated }) {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// =====================================================================
+// ACCESS TOKENS — ARACOM gestion des liens d'accès magiques
+// =====================================================================
+function AccessTokensView() {
+  const [tokens, setTokens] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('actifs');
+  const [showCreate, setShowCreate] = useState(null); // 'access' | 'inscription' | null
+
+  const load = async () => {
+    setLoading(true);
+    try { setTokens(await api('/api/access-tokens')); }
+    catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const revoke = async (t) => {
+    if (!confirm(`Révoquer le lien de ${t.organization?.name || t.email} ?\nL'utilisateur ne pourra plus accéder à son espace.`)) return;
+    try { await api(`/api/access-tokens/${t.id}/revoke`, { method: 'POST', body: '{}' }); toast.success('Lien révoqué'); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+  const resend = async (t) => {
+    try { await api(`/api/access-tokens/${t.id}/resend`, { method: 'POST', body: '{}' }); toast.success('Email renvoyé à ' + t.email); }
+    catch (e) { toast.error(e.message); }
+  };
+  const copyLink = async (t) => {
+    try { await navigator.clipboard.writeText(t.access_url); toast.success('Lien copié dans le presse-papiers'); }
+    catch { toast.info(t.access_url); }
+  };
+
+  const visibleTokens = tokens.filter(t => {
+    if (filter === 'actifs') return !t.is_revoked && !t.is_expired;
+    if (filter === 'revoques') return t.is_revoked;
+    if (filter === 'inscriptions') return t.purpose === 'inscription_exposant';
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Liens actifs" value={tokens.filter(t => !t.is_revoked).length} accent="emerald" />
+        <KpiCard label="Liens utilisés" value={tokens.filter(t => t.use_count > 0).length} accent="blue" />
+        <KpiCard label="Inscriptions ouvertes" value={tokens.filter(t => t.purpose === 'inscription_exposant' && !t.is_revoked).length} accent="violet" />
+        <KpiCard label="Liens révoqués" value={tokens.filter(t => t.is_revoked).length} accent="slate" />
+      </div>
+
+      <Card className="border-violet-200 bg-violet-50/30">
+        <CardContent className="p-4 text-sm text-violet-900 flex items-start gap-3">
+          <KeyRound className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <b>Comment ça marche :</b> Chaque exposant et chaque Pacific Centers reçoit par email un <i>lien personnel permanent</i> qui ouvre directement son espace, sans mot de passe. Vous pouvez aussi générer un <i>lien d&apos;inscription</i> pour démarcher un nouveau prospect (formulaire vierge).
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5"><Send className="w-4 h-4" /> Lien d&apos;accès</Button>
+            <Button size="sm" onClick={() => setShowCreate('inscription')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Plus className="w-4 h-4" /> Lien d&apos;inscription</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Tabs value={filter} onValueChange={setFilter}>
+        <TabsList>
+          <TabsTrigger value="actifs">Actifs</TabsTrigger>
+          <TabsTrigger value="inscriptions">Inscriptions</TabsTrigger>
+          <TabsTrigger value="revoques">Révoqués</TabsTrigger>
+          <TabsTrigger value="tous">Tous</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {loading ? <div className="py-8 text-center text-slate-500">Chargement…</div> : visibleTokens.length === 0 ? (
+        <Card><CardContent className="py-8 text-center text-slate-500">Aucun lien dans cette catégorie.</CardContent></Card>
+      ) : (
+        <div className="space-y-2">
+          {visibleTokens.map(t => (
+            <Card key={t.id} className={t.is_revoked ? 'border-slate-200 bg-slate-50' : 'border-slate-200'}>
+              <CardContent className="p-3 flex items-start gap-3">
+                <div className="text-2xl shrink-0">
+                  {t.purpose === 'inscription_exposant' ? '📝' : t.purpose === 'pacific_centers' ? '👁️' : '🔗'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <b className="text-sm">{t.organization?.name || t.email || t.label || '—'}</b>
+                    <Badge variant="secondary" className="text-[10px]">{t.purpose === 'inscription_exposant' ? 'Inscription' : t.purpose === 'pacific_centers' ? 'Pacific' : 'Accès'}</Badge>
+                    {t.is_revoked && <Badge className="bg-slate-500 text-white text-[10px]">Révoqué</Badge>}
+                    {!t.is_revoked && t.use_count > 0 && <Badge className="bg-emerald-500 text-white text-[10px]">Utilisé {t.use_count}×</Badge>}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">{t.email || '—'}</div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate mt-1" title={t.access_url}>{t.access_url}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    Créé {new Date(t.created_at).toLocaleDateString('fr-FR')}
+                    {t.last_used_at && <> · Dernier accès {new Date(t.last_used_at).toLocaleString('fr-FR')}</>}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  {!t.is_revoked && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => copyLink(t)} className="gap-1.5"><FileText className="w-3 h-3" /> Copier le lien</Button>
+                      {t.email && <Button size="sm" variant="outline" onClick={() => resend(t)} className="gap-1.5"><Send className="w-3 h-3" /> Renvoyer email</Button>}
+                      <Button size="sm" variant="outline" onClick={() => revoke(t)} className="gap-1.5 text-rose-600 border-rose-200"><XCircle className="w-3 h-3" /> Révoquer</Button>
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {showCreate && <CreateAccessTokenModal mode={showCreate} onClose={() => setShowCreate(null)} onCreated={() => { setShowCreate(null); load(); }} />}
+    </div>
+  );
+}
+
+function CreateAccessTokenModal({ mode, onClose, onCreated }) {
+  const [busy, setBusy] = useState(false);
+  const [orgs, setOrgs] = useState([]);
+  const [form, setForm] = useState({ organization_id: '', email: '', send_email: true, label: '' });
+  const [created, setCreated] = useState(null);
+
+  useEffect(() => {
+    if (mode === 'access') {
+      api('/api/registrations').then(regs => {
+        // Build a list of orgs from registrations (with their main_email)
+        const seen = new Set();
+        const list = [];
+        regs.forEach(r => {
+          if (r.organization && !seen.has(r.organization.id)) {
+            seen.add(r.organization.id);
+            list.push(r.organization);
+          }
+        });
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setOrgs(list);
+      }).catch(() => {});
+    }
+  }, [mode]);
+
+  const submit = async () => {
+    if (mode === 'access' && !form.organization_id) { toast.error('Choisissez un exposant'); return; }
+    if (mode === 'inscription' && !form.email) { toast.error('Email requis'); return; }
+    setBusy(true);
+    try {
+      const body = mode === 'access'
+        ? { purpose: 'access', organization_id: form.organization_id, send_email: form.send_email }
+        : { purpose: 'inscription_exposant', email: form.email, label: form.label || null, send_email: form.send_email };
+      const res = await api('/api/access-tokens', { method: 'POST', body: JSON.stringify(body) });
+      toast.success(form.send_email ? 'Lien créé et envoyé par email' : 'Lien créé');
+      setCreated(res);
+    } catch (e) { toast.error(e.message); setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && !created && onClose()}>
+      <Card className="max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            {mode === 'access' ? <><Send className="w-5 h-5 text-blue-600" /> Lien d&apos;accès exposant</> : <><Plus className="w-5 h-5 text-violet-600" /> Lien d&apos;inscription nouveau prospect</>}
+          </CardTitle>
+          <p className="text-sm text-slate-600">
+            {mode === 'access' ? "L'exposant recevra un email avec son lien personnel permanent. Aucun mot de passe à retenir." : "Créez un lien que vous pouvez envoyer à un nouveau prospect pour qu'il s'inscrive lui-même au Forum."}
+          </p>
+        </CardHeader>
+        {!created ? (
+          <CardContent className="space-y-3">
+            {mode === 'access' && (
+              <div>
+                <Label>Exposant</Label>
+                <select className="w-full border rounded-md px-3 py-2 text-sm" value={form.organization_id} onChange={(e) => setForm({ ...form, organization_id: e.target.value })}>
+                  <option value="">— Sélectionner —</option>
+                  {orgs.map(o => <option key={o.id} value={o.id}>{o.name}{o.main_email ? ` (${o.main_email})` : ''}</option>)}
+                </select>
+              </div>
+            )}
+            {mode === 'inscription' && (
+              <>
+                <div>
+                  <Label>Email du prospect</Label>
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="contact@nouvelleassoc.pf" />
+                </div>
+                <div>
+                  <Label>Nom de la structure (facultatif)</Label>
+                  <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Nouvelle Association" />
+                </div>
+              </>
+            )}
+            <div className="flex items-center gap-2 bg-slate-50 border rounded-md p-2">
+              <Checkbox id="se" checked={form.send_email} onCheckedChange={(c) => setForm({ ...form, send_email: c })} />
+              <Label htmlFor="se" className="text-sm cursor-pointer">Envoyer le lien par email automatiquement</Label>
+            </div>
+          </CardContent>
+        ) : (
+          <CardContent className="space-y-3">
+            <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-emerald-900">
+              <div className="font-bold flex items-center gap-2"><CheckCircle2 className="w-5 h-5" /> Lien créé !</div>
+              {form.send_email && <div className="text-sm mt-1">📧 L&apos;email vient d&apos;être envoyé.</div>}
+            </div>
+            <div>
+              <Label className="text-xs">URL personnelle</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={created.access_url} className="font-mono text-xs" onClick={(e) => e.target.select()} />
+                <Button variant="outline" onClick={() => { navigator.clipboard.writeText(created.access_url); toast.success('Copié'); }}>Copier</Button>
+              </div>
+            </div>
+          </CardContent>
+        )}
+        <div className="flex gap-2 justify-end p-4 border-t">
+          {!created ? (
+            <>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
+              <Button onClick={submit} disabled={busy} className={mode === 'access' ? 'bg-blue-600 hover:bg-blue-700 gap-2' : 'bg-violet-600 hover:bg-violet-700 gap-2'}>
+                {busy ? 'Création…' : <><Send className="w-4 h-4" /> Créer le lien</>}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={onCreated} className="ml-auto">Fermer</Button>
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }
 

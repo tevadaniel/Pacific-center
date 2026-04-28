@@ -118,6 +118,18 @@ export default function ExposantPortal() {
           </CardContent>
         </Card>
 
+        {/* STEPPER — Process en 6 étapes */}
+        <ExposantStepper
+          checks={{
+            profile: !!o?.contact_name && !!o?.main_email && !!o?.main_phone,
+            site_stand: !!r.venue_id && !!r.stand_code,
+            animations: animationsCount > 0,
+            documents: docs.some(dd => dd.document_type === 'assurance') && (r.is_convention_signed || docs.some(dd => dd.document_type === 'convention')),
+            validation_requested: !!validationRequestId || isLocked,
+            locked: isLocked,
+          }}
+        />
+
         {isPreReserved && (
           <Card className="border-amber-300 bg-amber-50/40">
             <CardContent className="p-4 flex items-start gap-3">
@@ -250,6 +262,62 @@ export default function ExposantPortal() {
         </Tabs>
       </div>
     </Shell>
+  );
+}
+
+// =====================================================================
+// EXPOSANT STEPPER — 6 étapes visuelles du parcours d'inscription
+// =====================================================================
+const STEPS = [
+  { key: 'profile', n: 1, label: 'Compléter mon profil', desc: 'Contact, téléphone, description', tab: 'profil' },
+  { key: 'site_stand', n: 2, label: 'Choisir mon site & stand', desc: 'Pré-réservation', tab: 'sites' },
+  { key: 'animations', n: 3, label: 'Sélectionner mes animations', desc: '≥1 créneau par jour', tab: 'animations' },
+  { key: 'documents', n: 4, label: 'Déposer mes documents', desc: 'Assurance + convention', tab: 'documents' },
+  { key: 'validation_requested', n: 5, label: 'Demander la validation', desc: 'Caution chèque ou espèces', tab: 'profil' },
+  { key: 'locked', n: 6, label: 'Inscription verrouillée', desc: 'Confirmé par ARACOM', tab: 'profil' },
+];
+
+function ExposantStepper({ checks }) {
+  // Find the first incomplete step → "current"
+  const currentIdx = STEPS.findIndex(s => !checks[s.key]);
+  return (
+    <Card className="border-violet-200">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <ListChecks className="w-5 h-5 text-violet-600" />
+          <h3 className="font-bold text-slate-900">Mes étapes pour finaliser ma présence</h3>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 relative">
+          {STEPS.map((s, i) => {
+            const done = checks[s.key];
+            const isCurrent = i === currentIdx;
+            return (
+              <div key={s.key} className={`relative rounded-md p-3 border-2 text-center transition ${
+                done ? 'border-emerald-300 bg-emerald-50' :
+                isCurrent ? 'border-violet-400 bg-violet-50 shadow-md ring-2 ring-violet-200' :
+                'border-slate-200 bg-slate-50'
+              }`}>
+                <div className={`mx-auto mb-1 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
+                  done ? 'bg-emerald-500 text-white' :
+                  isCurrent ? 'bg-violet-500 text-white animate-pulse' :
+                  'bg-slate-300 text-slate-600'
+                }`}>
+                  {done ? '✓' : s.n}
+                </div>
+                <div className={`text-xs font-bold ${done ? 'text-emerald-900' : isCurrent ? 'text-violet-900' : 'text-slate-700'}`}>{s.label}</div>
+                <div className={`text-[10px] mt-0.5 ${done ? 'text-emerald-700' : 'text-slate-500'}`}>{s.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+        {currentIdx >= 0 && currentIdx < STEPS.length && (
+          <div className="mt-3 text-xs text-slate-600 bg-violet-50 rounded-md px-3 py-2 border border-violet-100 flex items-center gap-2">
+            <span className="text-violet-700 font-bold">→</span>
+            Prochaine étape : <b className="text-violet-900">{STEPS[currentIdx].label}</b>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

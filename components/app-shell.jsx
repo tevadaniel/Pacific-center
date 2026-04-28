@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { getSession, clearSession } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,11 +28,11 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-emerald-500 flex items-center justify-center shrink-0">
-              <MapPin className="w-4 h-4 text-white" />
+            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 relative p-1">
+              <Image src="/aracom-logo.png" alt="ARACOM" fill className="object-contain p-0.5" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-widest text-slate-500">Forum Rentrée 2026</div>
+              <div className="text-[11px] uppercase tracking-widest text-slate-500">ARACOM · Forum Rentrée 2026</div>
               <div className="font-semibold text-slate-900 truncate">{title}</div>
             </div>
           </div>

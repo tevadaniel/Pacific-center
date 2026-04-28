@@ -96,7 +96,9 @@ async function doSeed(force = false) {
     await db.collection('venues').insertOne({
       id: venueId, edition_id: EDITION_ID, name: v.name, code: v.code,
       capacity_stands: v.stand_count, address: `${v.name}, Polynésie française`,
-      is_active: true, created_at: new Date(), updated_at: new Date(),
+      is_active: true,
+      is_available_2026: v.is_available_2026 !== false,
+      created_at: new Date(), updated_at: new Date(),
     });
     const stands = [];
     for (let i = 1; i <= v.stand_count; i++) {
@@ -318,7 +320,10 @@ export async function GET(request, { params }) {
 
     if (route === 'venues') {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-      return json(venues.map(v => { delete v._id; return v; }));
+      const userRole = request.headers.get('x-user-role');
+      // Hide unavailable venues for non-admin roles
+      const visible = userRole === 'aracom_admin' ? venues : venues.filter(v => v.is_available_2026 !== false);
+      return json(visible.map(v => { delete v._id; return v; }));
     }
 
     if (route.startsWith('venues/') && !route.includes('/stands')) {
@@ -1884,6 +1889,34 @@ export async function POST(request, { params }) {
         tag: 'aracom-test',
       }, { role: 'aracom_admin' });
       return json(r);
+    }
+
+    // ARACOM toggle availability of a venue for current edition
+    if (route.match(/^venues\/[^/]+\/set-availability$/)) {
+      const id = p[1];
+      const { is_available_2026 } = body;
+      await db.collection('venues').updateOne({ id }, { $set: { is_available_2026: Boolean(is_available_2026), updated_at: new Date() } });
+      return json({ ok: true });
+    }
+
+    // One-time migration : set is_available_2026 + disable exposant/pacific passwords
+    if (route === 'tools/migrate-2026') {
+      // 1) Set is_available_2026 on venues based on name
+      const allVenues = await db.collection('venues').find({}).toArray();
+      let updatedVenues = 0;
+      for (const v of allVenues) {
+        if (v.is_available_2026 !== undefined) continue; // already set
+        const offSites = ['Mahina', 'Moorea'];
+        const isOff = offSites.some(n => v.name?.toLowerCase().includes(n.toLowerCase()));
+        await db.collection('venues').updateOne({ id: v.id }, { $set: { is_available_2026: !isOff, updated_at: new Date() } });
+        updatedVenues++;
+      }
+      // 2) Disable password login for non-admin users
+      const r = await db.collection('users').updateMany(
+        { role_code: { $ne: 'aracom_admin' } },
+        { $set: { password: '__disabled_use_access_token__', updated_at: new Date() } }
+      );
+      return json({ ok: true, venues_updated: updatedVenues, users_password_disabled: r.modifiedCount });
     }
 
     // ============ ACCESS TOKENS (lien magique) — ARACOM management ============

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { Shell, KpiCard } from '@/components/app-shell';
 import { api } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,18 +21,32 @@ export default function PacificCentersPage() {
       subtitle="Vue lecture seule consolidée — taux de remplissage, exposants confirmés, planning et reporting."
       allowedRoles={['pacific_centers_readonly']}
     >
-      <Tabs defaultValue="synthese">
-        <TabsList className="w-full grid grid-cols-4">
-          <TabsTrigger value="synthese">Synthèse</TabsTrigger>
-          <TabsTrigger value="sites">Sites & plan</TabsTrigger>
-          <TabsTrigger value="planning">Planning animations</TabsTrigger>
-          <TabsTrigger value="reporting">Reporting</TabsTrigger>
-        </TabsList>
-        <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
-        <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
-        <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
-        <TabsContent value="reporting" className="space-y-6 mt-4"><ReportingView /></TabsContent>
-      </Tabs>
+      <div className="space-y-4">
+        <Card className="border-2 border-cyan-200 bg-gradient-to-br from-cyan-50 to-teal-50">
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="w-20 h-20 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0 relative overflow-hidden">
+              <Image src="/pacific-logo.jpg" alt="Pacific Centers" fill className="object-cover" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-bold text-cyan-900 text-lg">Pacific Centers</h2>
+              <p className="text-sm text-cyan-800">Espace de consultation dédié — visualisation synthétique de l&apos;avancement du Forum de la Rentrée 2026, sites par sites.</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Tabs defaultValue="synthese">
+          <TabsList className="w-full grid grid-cols-4">
+            <TabsTrigger value="synthese">Synthèse</TabsTrigger>
+            <TabsTrigger value="sites">Sites & plan</TabsTrigger>
+            <TabsTrigger value="planning">Planning animations</TabsTrigger>
+            <TabsTrigger value="reporting">Reporting</TabsTrigger>
+          </TabsList>
+          <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
+          <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
+          <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
+          <TabsContent value="reporting" className="space-y-6 mt-4"><ReportingView /></TabsContent>
+        </Tabs>
+      </div>
     </Shell>
   );
 }

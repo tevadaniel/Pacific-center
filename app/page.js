@@ -2,24 +2,24 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Image from 'next/image';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Shield, Users, Eye, Sparkles, MapPin } from 'lucide-react';
+import { Loader2, Shield, Sparkles, MapPin, Mail, Info } from 'lucide-react';
 import { saveSession, getSession } from '@/lib/auth-client';
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('demo');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [bootChecked, setBootChecked] = useState(false);
-  const [stats, setStats] = useState({ sites: 6, associations: 66, stands: 67 });
+  const [stats, setStats] = useState({ sites: 4, associations: 66, stands: 53 });
 
   useEffect(() => {
     const s = getSession();
@@ -39,7 +39,7 @@ export default function LoginPage() {
     try {
       const res = await fetch('/api/seed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
       const data = await res.json();
-      if (data.seeded) toast.success(`Données initialisées : ${data.associations} associations, ${data.stands_planned} stands planifiés.`);
+      if (data.seeded) toast.success(`Données initialisées : ${data.associations} associations.`);
       else toast.info(data.message || 'Données déjà présentes');
     } catch (e) {
       toast.error('Erreur de seed: ' + e.message);
@@ -51,7 +51,7 @@ export default function LoginPage() {
     try {
       const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: em, password: pw }) });
       if (!res.ok) {
-        const t = await res.json();
+        const t = await res.json().catch(() => ({}));
         throw new Error(t.error || 'Erreur de connexion');
       }
       const data = await res.json();
@@ -72,12 +72,13 @@ export default function LoginPage() {
       <div className="w-full max-w-5xl grid md:grid-cols-2 gap-6">
         <div className="flex flex-col justify-center space-y-6 p-2">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-emerald-500 flex items-center justify-center shadow-lg">
-              <MapPin className="w-6 h-6 text-white" />
+            <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center shadow-lg p-2 ring-1 ring-slate-200 relative">
+              <Image src="/aracom-logo.png" alt="ARACOM" fill className="object-contain p-1.5" />
             </div>
             <div>
-              <p className="text-xs uppercase tracking-widest text-slate-500">ARACOM • Pacific Centers</p>
+              <p className="text-xs uppercase tracking-widest text-slate-500">ARACOM</p>
               <h1 className="text-xl font-bold text-slate-900">Forum de la Rentrée 2026</h1>
+              <p className="text-[11px] text-slate-500">Vendredi 14 &amp; samedi 15 août 2026</p>
             </div>
           </div>
           <div>
@@ -86,7 +87,7 @@ export default function LoginPage() {
               <span className="text-blue-600">de A à Z.</span>
             </h2>
             <p className="mt-4 text-slate-600 leading-relaxed">
-              La source de vérité pour les {stats.sites} sites, {stats.associations} associations et le suivi terrain du vendredi 14 &amp; samedi 15 août 2026. Exit Excel, mails et relances manuelles.
+              La source de vérité pour {stats.sites} sites, {stats.associations} associations et le suivi terrain du Forum.
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -98,7 +99,7 @@ export default function LoginPage() {
             ))}
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            {['Dashboard temps réel', 'Mode Jour J mobile', 'Check-in / Check-out', 'Anomalies équipées', 'Bilans auto', 'Portail exposant', 'Vue Pacific Centers'].map(f => (
+            {['Dashboard temps réel', 'Mode Jour J mobile', 'Validations & cautions', 'Anomalies équipées', 'Bilans auto', 'Mailing IA', 'Push temps réel'].map(f => (
               <Badge key={f} variant="secondary" className="bg-white border">{f}</Badge>
             ))}
           </div>
@@ -106,64 +107,42 @@ export default function LoginPage() {
 
         <Card className="shadow-xl border-slate-200">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Shield className="w-5 h-5 text-blue-600" /> Connexion</CardTitle>
-            <CardDescription>Accédez à votre portail selon votre rôle.</CardDescription>
+            <CardTitle className="flex items-center gap-2"><Shield className="w-5 h-5 text-blue-600" /> Connexion ARACOM</CardTitle>
+            <CardDescription>Espace réservé à l&apos;équipe ARACOM.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Accès rapide démo</div>
-              <div className="grid gap-2">
-                <Button variant="outline" disabled={loading} onClick={() => login('admin@aracom.pf', 'demo')} className="justify-start h-auto py-3">
-                  <Shield className="w-4 h-4 text-blue-600 mr-3" />
-                  <div className="text-left">
-                    <div className="font-semibold">ARACOM admin</div>
-                    <div className="text-xs text-slate-500">admin@aracom.pf — accès total</div>
-                  </div>
-                </Button>
-                <Button variant="outline" disabled={loading} onClick={() => login('swimua.tahiti@gmail.com', 'demo')} className="justify-start h-auto py-3">
-                  <Users className="w-4 h-4 text-emerald-600 mr-3" />
-                  <div className="text-left">
-                    <div className="font-semibold">Exposant (exemple : I Mua Papeete)</div>
-                    <div className="text-xs text-slate-500">Portail dossier exposant</div>
-                  </div>
-                </Button>
-                <Button variant="outline" disabled={loading} onClick={() => login('pacific@centers.pf', 'demo')} className="justify-start h-auto py-3">
-                  <Eye className="w-4 h-4 text-violet-600 mr-3" />
-                  <div className="text-left">
-                    <div className="font-semibold">Pacific Centers</div>
-                    <div className="text-xs text-slate-500">Lecture seule — synthèse</div>
-                  </div>
-                </Button>
-              </div>
-            </div>
-            <div className="rounded-md bg-emerald-50 border border-emerald-100 p-3 text-sm">
-              <div className="font-medium text-emerald-900 mb-1">Pas encore inscrit ?</div>
-              <Link href="/inscription"><Button variant="link" className="h-auto p-0 text-emerald-700">Créer un compte exposant (auto-inscription) →</Button></Link>
-            </div>
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
-              <div className="relative flex justify-center text-xs"><span className="bg-white px-2 text-slate-500">ou connexion manuelle</span></div>
-            </div>
             <form onSubmit={onSubmit} className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@aracom.pf" required />
+                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@aracom.pf" required autoFocus />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pw">Mot de passe</Label>
                 <Input id="pw" type="password" value={password} onChange={e => setPassword(e.target.value)} required />
-                <p className="text-[11px] text-slate-400">Mot de passe démo : <code className="bg-slate-100 px-1 rounded">demo</code></p>
               </div>
               <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={loading}>
                 {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connexion…</> : 'Se connecter'}
               </Button>
             </form>
+
+            <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm space-y-2">
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-blue-900">Vous êtes Exposant ou Pacific Centers ?</div>
+                  <div className="text-xs text-blue-800 mt-1">L&apos;accès se fait <b>uniquement</b> via le lien personnel envoyé par ARACOM par email. Aucun mot de passe à saisir, aucun compte à créer.</div>
+                  <div className="text-xs text-blue-800 mt-2 flex items-center gap-1.5">
+                    <Mail className="w-3 h-3" /> Pas reçu votre lien ? Contactez ARACOM : <a className="underline" href="mailto:agence@aracom-conseil.fr">agence@aracom-conseil.fr</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="pt-3 border-t">
-              <Button variant="ghost" className="w-full text-slate-600" onClick={runSeed} disabled={seeding}>
+              <Button variant="ghost" className="w-full text-slate-600 text-xs" onClick={runSeed} disabled={seeding}>
                 {seeding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                Initialiser / réinitialiser les données démo
+                Initialiser les données (admin)
               </Button>
-              <p className="text-[11px] text-slate-400 mt-1 text-center">Crée les {stats.sites} sites, {stats.associations} associations, {stats.stands} stands et les utilisateurs démo.</p>
             </div>
           </CardContent>
         </Card>
