@@ -3295,12 +3295,42 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       return json({ user }, 201);
     }
 
+    // ============ TOOL : Ensure ARACOM admin accounts (idempotent, no auth) ============
+    // Used after deploys to (re)create the deterministic admin accounts with a known password.
+    // Safe: only manages 3 specific emails. Default password = "Projetaracom12".
+    if (route === 'tools/ensure-admins') {
+      const PASSWORD = body?.password || 'Projetaracom12';
+      const TARGETS = [
+        { id: 'u-admin', email: 'admin@aracom.pf', full_name: 'ARACOM Admin' },
+        { id: 'u-teva', email: 'teva.geros@aracom-conseil.fr', full_name: 'Teva Geros' },
+        { id: 'u-agence', email: 'agence@aracom-conseil.fr', full_name: 'Agence ARACOM' },
+      ];
+      const out = [];
+      for (const t of TARGETS) {
+        const existing = await db.collection('users').findOne({ email: t.email.toLowerCase() });
+        if (existing) {
+          await db.collection('users').updateOne({ id: existing.id }, {
+            $set: { password: PASSWORD, role_id: 'role-admin', role_code: 'aracom_admin', is_active: true, full_name: existing.full_name || t.full_name, updated_at: new Date() }
+          });
+          out.push({ email: t.email, action: 'updated', id: existing.id });
+        } else {
+          await db.collection('users').insertOne({
+            id: t.id, email: t.email.toLowerCase(), full_name: t.full_name,
+            phone: null, role_id: 'role-admin', role_code: 'aracom_admin', password: PASSWORD,
+            is_active: true, created_at: new Date(), updated_at: new Date(),
+          });
+          out.push({ email: t.email, action: 'created', id: t.id });
+        }
+      }
+      return json({ ok: true, password: PASSWORD, accounts: out });
+    }
+
     if (route === 'auth/change-password') {
       const { current_password, new_password, target_user_id, target_email } = body;
       if (!new_password) return err('Nouveau mot de passe requis', 400);
       // Admin resets without needing current password (by id OR email)
       if (ctx.role === 'aracom_admin' && (target_user_id || target_email)) {
-        const q = target_user_id ? { id: target_user_id } : { email: target_email };
+        const q = target_user_id ? { id: target_user_id } : { email: (target_email || '').toLowerCase().trim() };
         const r = await db.collection('users').updateOne(q, { $set: { password: new_password, password_changed: false, updated_at: new Date() } });
         if (r.matchedCount === 0) return err('Utilisateur cible introuvable', 404);
         await logActivity(db, ctx.userId, 'user', target_user_id || target_email, 'password_reset_by_admin', null, null);
