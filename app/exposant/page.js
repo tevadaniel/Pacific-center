@@ -95,7 +95,7 @@ export default function ExposantPortal() {
       title={`Dossier — ${o?.name || 'Mon exposant'}`}
       subtitle="Votre espace personnel pour le Forum de la Rentrée 2026."
       allowedRoles={['exposant']}
-      right={<PasswordButton user={user} onChanged={load} />}
+      right={null}
     >
       <div className="space-y-6">
         <Card className="bg-gradient-to-br from-blue-50 to-emerald-50 border-blue-100">
@@ -1332,7 +1332,7 @@ function GuideBlock() {
 // =====================================================================
 // PASSWORD CHANGE
 // =====================================================================
-function PasswordButton({ user, onChanged }) {
+function PasswordButton__deprecated__unused({ user, onChanged }) {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
