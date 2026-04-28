@@ -297,12 +297,17 @@ function ReportingView() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Rapports ARACOM disponibles</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="w-4 h-4 text-violet-600" /> Bilans & comptes-rendus partagés par ARACOM
+          </CardTitle>
+          <p className="text-xs text-slate-500 mt-1">Seuls les rapports explicitement partagés par ARACOM sont visibles ici. Pour toute demande de bilan supplémentaire, contactez agence@aracom-conseil.fr.</p>
+        </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-y text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Type</th><th>Portée</th><th>Statut</th><th>Date</th><th></th></tr></thead>
             <tbody className="divide-y">
-              {reports.length === 0 ? <tr><td colSpan="5" className="py-6 text-center text-slate-400">Aucun rapport généré pour l'instant.</td></tr> : reports.map(r => (
+              {reports.length === 0 ? <tr><td colSpan="5" className="py-8 text-center text-slate-400">📋 Aucun bilan partagé pour l&apos;instant.<br /><span className="text-xs">ARACOM partagera ici les comptes-rendus dès qu&apos;ils seront finalisés.</span></td></tr> : reports.map(r => (
                 <tr key={r.id}>
                   <td className="py-2 px-4 font-medium">{r.report_type}</td>
                   <td className="text-xs text-slate-600">{r.report_data_json?.site || r.report_data_json?.exposant || 'Global'}</td>

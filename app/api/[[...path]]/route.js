@@ -520,7 +520,12 @@ export async function GET(request, { params }) {
     }
 
     if (route === 'reports') {
-      const reports = await db.collection('post_event_reports').find({ edition_id: EDITION_ID }).sort({ generated_at: -1 }).toArray();
+      const baseQuery = { edition_id: EDITION_ID };
+      // Pacific Centers can only see reports explicitly shared with them
+      if (ctx.role === 'pacific_centers_readonly') {
+        baseQuery.shared_with_pacific = true;
+      }
+      const reports = await db.collection('post_event_reports').find(baseQuery).sort({ generated_at: -1 }).toArray();
       return json(reports.map(r => { delete r._id; return r; }));
     }
 
@@ -3503,9 +3508,13 @@ export async function PUT(request, { params }) {
 
     if (route.startsWith('reports/')) {
       const id = p[1];
-      const allowed = ['report_status','report_data_json','validated_at','validated_by'];
+      const allowed = ['report_status','report_data_json','validated_at','validated_by','shared_with_pacific','pacific_share_note'];
       const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
       if (upd.report_status === 'valide') { upd.validated_at = new Date(); upd.validated_by = ctx.userId || 'u-admin'; }
+      if ('shared_with_pacific' in upd) {
+        upd.shared_with_pacific_at = upd.shared_with_pacific ? new Date() : null;
+        upd.shared_with_pacific_by = upd.shared_with_pacific ? (ctx.userId || 'u-admin') : null;
+      }
       upd.updated_at = new Date();
       await db.collection('post_event_reports').updateOne({ id }, { $set: upd });
       const r = await db.collection('post_event_reports').findOne({ id }); delete r._id;

@@ -1884,7 +1884,7 @@ function BilansView() {
       </Card>
       <Card><CardContent className="p-0">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Type</th><th>Portée</th><th>Statut</th><th>Généré le</th><th></th></tr></thead>
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Type</th><th>Portée</th><th>Statut</th><th>Généré le</th><th>Partage Pacific</th><th></th></tr></thead>
           <tbody className="divide-y">
             {reports.map(r => (
               <tr key={r.id}>
@@ -1892,6 +1892,23 @@ function BilansView() {
                 <td className="text-xs text-slate-600">{r.report_data_json?.site || r.report_data_json?.exposant || 'Global'}</td>
                 <td><Badge variant={r.report_status === 'valide' ? 'default' : 'secondary'} className={r.report_status === 'valide' ? 'bg-emerald-600' : ''}>{r.report_status}</Badge></td>
                 <td className="text-xs text-slate-500">{new Date(r.generated_at).toLocaleString('fr-FR')}</td>
+                <td>
+                  <Button
+                    size="sm"
+                    variant={r.shared_with_pacific ? 'default' : 'outline'}
+                    className={r.shared_with_pacific ? 'bg-cyan-600 hover:bg-cyan-700 gap-1' : 'gap-1 border-cyan-300 text-cyan-700 hover:bg-cyan-50'}
+                    onClick={async () => {
+                      const newVal = !r.shared_with_pacific;
+                      try {
+                        await api(`/api/reports/${r.id}`, { method: 'PUT', body: JSON.stringify({ shared_with_pacific: newVal }) });
+                        toast.success(newVal ? '✅ Bilan partagé avec Pacific Centers' : '🔒 Bilan retiré du partage Pacific');
+                        load();
+                      } catch (e) { toast.error(e.message); }
+                    }}
+                  >
+                    {r.shared_with_pacific ? <><Eye className="w-3 h-3" /> Partagé</> : <><Eye className="w-3 h-3" /> Partager</>}
+                  </Button>
+                </td>
                 <td className="pr-4"><Button size="sm" variant="outline" onClick={() => openReport(r)}><FileText className="w-3 h-3 mr-1" /> Voir / PDF</Button></td>
               </tr>
             ))}
