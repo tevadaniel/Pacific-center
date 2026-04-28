@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
-import { api } from '@/lib/auth-client';
+import { api, getSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +39,7 @@ const TABS = [
   { key: 'bilans', label: 'Bilans', href: '/aracom?tab=bilans' },
   { key: 'satisfaction', label: 'Satisfaction', href: '/aracom?tab=satisfaction' },
   { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
+  { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
 
 export default function AracomPage() {
@@ -79,6 +80,7 @@ export default function AracomPage() {
       {activeTab === 'bilans' && <BilansView />}
       {activeTab === 'satisfaction' && <SatisfactionAdminView />}
       {activeTab === 'backup' && <BackupView />}
+      {activeTab === 'import' && <ImportExcelView />}
     </Shell>
   );
 }
@@ -601,6 +603,7 @@ function FicheExposant({ id, onClose }) {
                 <TabsTrigger value="terrain">Terrain</TabsTrigger>
                 <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="histo">Historique</TabsTrigger>
+                <TabsTrigger value="aracom" className="data-[state=active]:bg-amber-100 data-[state=active]:text-amber-900">🔒 ARACOM</TabsTrigger>
               </TabsList>
 
               <TabsContent value="resume" className="space-y-3">
@@ -754,6 +757,143 @@ function FicheExposant({ id, onClose }) {
                     </div>
                   ))}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="aracom" className="space-y-3">
+                <div className="rounded-md bg-amber-50 border-2 border-amber-200 p-3">
+                  <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                    <Lock className="w-4 h-4" /> Historique ARACOM — Zone privée
+                  </div>
+                  <div className="text-xs text-amber-700 mt-1">Ces informations sont réservées à l&apos;équipe ARACOM. Elles ne sont <b>jamais</b> affichées dans le portail exposant.</div>
+                </div>
+
+                {(() => {
+                  const priv = data.organization?.aracom_private || {};
+                  const ph = data.organization?.participation_history || {};
+                  const convHist = priv.convention_history || {};
+                  const cauHist = priv.caution_history || {};
+                  const animHist = priv.animation_history || {};
+                  const hasData = Object.keys(convHist).length || Object.keys(cauHist).length || Object.keys(animHist).length || priv.admin_remarks;
+
+                  if (!hasData && !ph.nb_editions) {
+                    return <div className="text-center text-slate-500 text-sm py-6 border-2 border-dashed rounded-md">Aucun historique ARACOM importé pour cet exposant.<br />Lancez l&apos;import Excel pour enrichir.</div>;
+                  }
+
+                  return (
+                    <>
+                      {/* Fidélité */}
+                      {ph.fidelity && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-white border-2 rounded-md p-2.5 text-center">
+                            <div className="text-[10px] uppercase text-slate-500">Fidélité</div>
+                            <div className="font-bold text-sm mt-0.5">
+                              {ph.fidelity === 'Fidèle' && '⭐ Fidèle'}
+                              {ph.fidelity === 'Régulier' && '📅 Régulier'}
+                              {ph.fidelity === 'Ponctuel' && '📆 Ponctuel'}
+                              {ph.fidelity === 'Nouveau' && '🆕 Nouveau'}
+                            </div>
+                          </div>
+                          <div className="bg-white border-2 rounded-md p-2.5 text-center">
+                            <div className="text-[10px] uppercase text-slate-500">Éditions</div>
+                            <div className="font-bold text-lg text-blue-700 mt-0.5">{ph.nb_editions || 0}</div>
+                          </div>
+                          <div className="bg-white border-2 rounded-md p-2.5 text-center col-span-2">
+                            <div className="text-[10px] uppercase text-slate-500">Présence par année</div>
+                            <div className="flex gap-1 justify-center mt-1">
+                              {['2019','2020','2023','2024','2025'].map(y => (
+                                <span key={y} className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${ph['y'+y] ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-100 text-slate-400'}`}>
+                                  {y.slice(-2)} {ph['y'+y] ? '✓' : '—'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Conventions par année */}
+                      <div className="bg-white border rounded-md p-3">
+                        <div className="font-medium text-sm mb-2 flex items-center gap-2">📄 Conventions par année</div>
+                        {Object.keys(convHist).length === 0 ? <div className="text-xs text-slate-400">—</div> : (
+                          <div className="space-y-1">
+                            {Object.entries(convHist).sort().map(([year, val]) => (
+                              <div key={year} className="flex items-center gap-2 text-sm">
+                                <Badge variant="outline" className="w-12 justify-center">{year}</Badge>
+                                <span className="text-slate-700">{val || '—'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Cautions par année */}
+                      <div className="bg-white border rounded-md p-3">
+                        <div className="font-medium text-sm mb-2 flex items-center gap-2">💰 Cautions par année</div>
+                        {Object.keys(cauHist).length === 0 ? <div className="text-xs text-slate-400">—</div> : (
+                          <div className="space-y-1">
+                            {Object.entries(cauHist).sort().map(([year, val]) => (
+                              <div key={year} className="flex items-center gap-2 text-sm">
+                                <Badge variant="outline" className="w-12 justify-center">{year}</Badge>
+                                <span className="text-slate-700">{val || '—'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Animations par année */}
+                      <div className="bg-white border rounded-md p-3">
+                        <div className="font-medium text-sm mb-2 flex items-center gap-2">🎭 Animations par année</div>
+                        {Object.keys(animHist).length === 0 ? <div className="text-xs text-slate-400">—</div> : (
+                          <div className="space-y-1">
+                            {Object.entries(animHist).sort().map(([year, val]) => (
+                              <div key={year} className="flex items-start gap-2 text-sm">
+                                <Badge variant="outline" className="w-12 justify-center shrink-0">{year}</Badge>
+                                <span className="text-slate-700 flex-1">{val || '—'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Contacts historiques */}
+                      {priv.historical_contact_names?.length > 0 && (
+                        <div className="bg-white border rounded-md p-3">
+                          <div className="font-medium text-sm mb-2">👤 Contacts historiques</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {priv.historical_contact_names.map((n, i) => <Badge key={i} variant="secondary">{n}</Badge>)}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Remarques admin (éditables) */}
+                      <div className="bg-white border-2 border-amber-200 rounded-md p-3">
+                        <Label className="flex items-center gap-2">📝 Remarques internes ARACOM</Label>
+                        <Textarea
+                          rows={4}
+                          defaultValue={priv.admin_remarks || ''}
+                          placeholder="Notes privées sur l'exposant (observations, incidents, rappels…) — invisible pour l'exposant"
+                          onBlur={async (e) => {
+                            const newVal = e.target.value.trim();
+                            if (newVal === (priv.admin_remarks || '').trim()) return;
+                            try {
+                              await api(`/api/organizations/${data.organization.id}`, {
+                                method: 'PUT',
+                                body: JSON.stringify({ aracom_private: { ...priv, admin_remarks: newVal } }),
+                              });
+                              toast.success('Remarques ARACOM enregistrées');
+                              load();
+                            } catch (err) { toast.error('Erreur : ' + err.message); }
+                          }}
+                        />
+                        {priv.last_imported_at && <div className="text-[10px] text-slate-400 mt-1">Dernier import : {new Date(priv.last_imported_at).toLocaleString('fr-FR')}</div>}
+                      </div>
+
+                      {priv.source_main_site && (
+                        <div className="text-xs text-slate-500">Site principal (source Excel) : <b>{priv.source_main_site}</b></div>
+                      )}
+                    </>
+                  );
+                })()}
               </TabsContent>
             </Tabs>
           </div>
@@ -2416,9 +2556,6 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
   );
 }
 
-// =====================================================================
-// BACKUP — Sauvegarde complète de la base vers Google Drive
-// =====================================================================
 function BackupView() {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]);
@@ -2626,6 +2763,129 @@ function BackupView() {
     </div>
   );
 }
+
+// =====================================================================
+// IMPORT EXCEL — Import des exposants depuis un fichier .xlsx
+// =====================================================================
+function ImportExcelView() {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const inputRef = useRef(null);
+
+  const runImport = async () => {
+    if (!file) { toast.error('Choisissez un fichier .xlsx'); return; }
+    if (!confirm(`Lancer l'import depuis "${file.name}" ?\n\nOpération :\n- Les exposants existants seront enrichis (contact, historique, conventions, cautions, animations, remarques)\n- Les nouveaux exposants historiques seront créés avec le statut "prospect"\n- Les contacts mailing seuls seront créés avec statut "mailing_only"\n\nContinuer ?`)) return;
+    setBusy(true);
+    const toastId = toast.loading('Import en cours… parsing du fichier puis écriture en base');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/import/exposants-excel', {
+        method: 'POST', body: fd,
+        headers: { 'x-user-id': (getSession()?.id || 'u-admin'), 'x-user-role': (getSession()?.role || 'aracom_admin') },
+      });
+      const data = await res.json();
+      toast.dismiss(toastId);
+      if (!res.ok) throw new Error(data.error || 'Erreur');
+      setResult(data);
+      toast.success('✅ Import terminé — ' + data.summary.matched_and_updated + ' enrichies, ' + data.summary.new_prospects_created + ' prospects créés');
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error('Erreur : ' + e.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+        <CardContent className="p-5 flex items-start gap-4 flex-wrap">
+          <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+            <FileText className="w-8 h-8 text-violet-600" />
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <h2 className="font-bold text-violet-900 text-lg">Import exposants depuis Excel</h2>
+            <p className="text-sm text-violet-800 mt-1">
+              Uploadez un fichier <b>.xlsx</b> pour enrichir la base avec les historiques (présences par année, conventions, cautions, animations, remarques ARACOM) et créer les nouveaux prospects.
+            </p>
+            <ul className="text-[12px] text-violet-700 mt-2 list-disc pl-5 space-y-0.5">
+              <li>Les historiques privés sont visibles uniquement par ARACOM (jamais par les exposants).</li>
+              <li>Les exposants sont matchés automatiquement par nom (algorithme flou, strict ≥ 75% de similarité).</li>
+              <li>Les doublons détectés gardent la ligne la plus riche (nb d&apos;éditions max).</li>
+              <li>Formats supportés : colonnes nommées &quot;Exposant&quot;, &quot;Activité&quot;, &quot;Email&quot;, &quot;Téléphone&quot;, &quot;Contact&quot;, &quot;2019/2020/2023/2024/2025&quot;, &quot;Fidélité&quot;, &quot;Convention 2025&quot;, &quot;Caution 2025&quot;, &quot;Animation 2024/2025&quot;, &quot;Remarques&quot;.</li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-5">
+          <Label>Sélectionner un fichier Excel (.xlsx)</Label>
+          <div className="flex gap-2 mt-2 flex-wrap">
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); }}
+              className="flex-1 min-w-[240px] text-sm border rounded-md px-3 py-2"
+            />
+            <Button onClick={runImport} disabled={busy || !file} className="bg-violet-600 hover:bg-violet-700 gap-2">
+              {busy ? <><RefreshCw className="w-4 h-4 animate-spin" /> Import…</> : <><Download className="w-4 h-4 rotate-180" /> Lancer l&apos;import</>}
+            </Button>
+          </div>
+          {file && <div className="text-xs text-slate-600 mt-2">📎 {file.name} · {(file.size / 1024).toFixed(1)} Ko</div>}
+        </CardContent>
+      </Card>
+
+      {result && (
+        <>
+          <Card className="border-2 border-emerald-300 bg-emerald-50">
+            <CardContent className="p-4">
+              <div className="font-bold text-emerald-900 flex items-center gap-2"><CheckCircle2 className="w-5 h-5" /> Import terminé</div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3">
+                <div className="bg-white rounded-md p-2 border"><div className="text-[10px] uppercase text-slate-500">Lignes lues</div><div className="font-bold text-xl text-slate-900">{result.summary.total_rows}</div></div>
+                <div className="bg-white rounded-md p-2 border border-emerald-300"><div className="text-[10px] uppercase text-emerald-600">Enrichies</div><div className="font-bold text-xl text-emerald-700">{result.summary.matched_and_updated}</div></div>
+                <div className="bg-white rounded-md p-2 border border-blue-300"><div className="text-[10px] uppercase text-blue-600">Prospects créés</div><div className="font-bold text-xl text-blue-700">{result.summary.new_prospects_created}</div></div>
+                <div className="bg-white rounded-md p-2 border border-violet-300"><div className="text-[10px] uppercase text-violet-600">Mailing-only</div><div className="font-bold text-xl text-violet-700">{result.summary.new_mailing_contacts_created}</div></div>
+                <div className="bg-white rounded-md p-2 border"><div className="text-[10px] uppercase text-slate-500">Ignorées</div><div className="font-bold text-xl text-slate-600">{result.summary.skipped_rows}</div></div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Détail des actions ({result.report?.length || 0})</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 max-h-[500px] overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-y text-left text-xs uppercase text-slate-500 sticky top-0">
+                  <tr><th className="py-2 px-3">Action</th><th>Excel</th><th>DB</th><th>Fidélité</th><th>Éd.</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  {(result.report || []).map((r, i) => (
+                    <tr key={i}>
+                      <td className="px-3 py-1.5">
+                        {r.action === 'updated' && <Badge className="bg-emerald-100 text-emerald-800">Enrichie</Badge>}
+                        {r.action === 'created' && <Badge className="bg-blue-100 text-blue-800">{r.is_mailing_only ? 'Mailing' : 'Prospect'}</Badge>}
+                        {r.action === 'skipped_duplicate_match' && <Badge className="bg-amber-100 text-amber-800">Doublon ignoré</Badge>}
+                      </td>
+                      <td className="text-xs">{r.excel || r.name}</td>
+                      <td className="text-xs text-slate-500">{r.db || '—'}</td>
+                      <td className="text-xs">{r.fidelity || '—'}</td>
+                      <td className="text-xs text-center">{r.nb_editions ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 
 function PendingValidationsCard({ onGoto }) {
   const [items, setItems] = useState(null);

@@ -7,6 +7,7 @@ import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
 import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, uploadFile as driveUploadFile, makeAnyoneReader, getServiceAccountEmail, safeName as driveSafeName } from '@/lib/drive';
 import JSZip from 'jszip';
+import * as XLSX from 'xlsx';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
 
 // ===== Tracking helpers =====
@@ -414,6 +415,10 @@ export async function GET(request, { params }) {
       const sessions = await db.collection('attendance_sessions').find({ registration_id: id }).toArray();
       const media = await db.collection('field_media').find({ registration_id: id }, { projection: { file_data: 0 } }).sort({ captured_at: -1 }).toArray();
       [reg, org, venue, deposit].forEach(x => { if (x) delete x._id; });
+      // Strip ARACOM-private data for non-admins (exposants and pacific centers)
+      if (org && ctx.role !== 'aracom_admin') {
+        delete org.aracom_private;
+      }
       return json({
         registration: reg,
         organization: org,
@@ -934,7 +939,10 @@ export async function POST(request, { params }) {
     const p = params.path || [];
     const route = p.join('/');
     const ctx = getUserContext(request);
-    let body = {}; try { body = await request.json(); } catch {}
+    const contentType = request.headers.get('content-type') || '';
+    const isMultipart = contentType.includes('multipart/form-data');
+    let body = {};
+    if (!isMultipart) { try { body = await request.json(); } catch {} }
 
     if (route === 'seed') {
       const result = await doSeed(body?.force || false);
@@ -1925,6 +1933,230 @@ export async function POST(request, { params }) {
         { $set: { password: '__disabled_use_access_token__', updated_at: new Date() } }
       );
       return json({ ok: true, venues_updated: updatedVenues, users_password_disabled: r.modifiedCount });
+    }
+
+    // ============ IMPORT EXPOSANTS EXCEL ============
+    // POST /api/import/exposants-excel
+    // Body: multipart/form-data with "file" = .xlsx file
+    // Parses the first sheet, auto-detects columns, updates/creates organizations with:
+    //   - Contact info (email, phone, contact_name)
+    //   - participation_history (years + fidelity + nb_editions)
+    //   - aracom_private (convention_history, caution_history, animation_history, admin_remarks) [ADMIN ONLY]
+    // New rows without existing match are created with status='prospect' (not linked to a registration).
+    if (route === 'import/exposants-excel') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      try {
+        const formData = await request.formData();
+        const file = formData.get('file');
+        if (!file) return err('Fichier manquant', 400);
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const wb = XLSX.read(buffer, { type: 'buffer' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rowsRaw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+
+        // Clean helper: treat placeholder dashes/em-dashes as empty
+        const cleanVal = (v) => {
+          const s = String(v || '').trim();
+          if (!s) return '';
+          if (['-', '–', '—', 'n/a', 'N/A', '?'].includes(s)) return '';
+          return s;
+        };
+
+        const asBool = (v) => {
+          if (v === true || v === 'true') return true;
+          const s = String(v || '').trim();
+          return s === '✓' || s === '1' || s === 'oui' || s === 'Oui' || s === 'OUI' || s === 'x' || s === 'X' || s === 'yes';
+        };
+        const pick = (r, ...keys) => {
+          for (const k of keys) {
+            for (const rk of Object.keys(r)) {
+              if (rk.toLowerCase().replace(/[^a-z0-9]/g, '').includes(k.toLowerCase().replace(/[^a-z0-9]/g, ''))) {
+                const v = cleanVal(r[rk]);
+                if (v) return v;
+              }
+            }
+          }
+          return '';
+        };
+        const pickBool = (r, ...keys) => {
+          for (const k of keys) {
+            for (const rk of Object.keys(r)) {
+              if (rk.toLowerCase().replace(/[^a-z0-9]/g, '').includes(k.toLowerCase().replace(/[^a-z0-9]/g, ''))) {
+                if (r[rk] !== '' && r[rk] !== undefined) return asBool(r[rk]);
+              }
+            }
+          }
+          return false;
+        };
+
+        // Normalize name for matching — keep words with length >= 4 (so short noise words get removed)
+        const norm = (s) => String(s || '').toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/\(.*?\)/g, ' ')
+          .replace(/\b(19|20)\d{2}\b/g, ' ')
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim().split(/\s+/).filter(w => w.length >= 3).join(' ');
+
+        const orgs = await db.collection('organizations').find({}).toArray();
+        const orgByNorm = new Map();
+        orgs.forEach(o => {
+          const n = norm(o.name);
+          if (!orgByNorm.has(n)) orgByNorm.set(n, []);
+          orgByNorm.get(n).push(o);
+        });
+        // Fuzzy matcher — stricter than before, requires a real overlap
+        const findMatch = (excelName) => {
+          const n = norm(excelName);
+          if (!n || n.length < 4) return null;
+          if (orgByNorm.has(n)) return orgByNorm.get(n)[0];
+          const nw = n.split(' ');
+          if (nw.length < 2) return null; // single-word matches are unsafe (e.g. "judo")
+          let best = null, bestScore = 0;
+          for (const o of orgs) {
+            const oN = norm(o.name);
+            if (!oN) continue;
+            const ow = oN.split(' ');
+            // Jaccard-ish with 2-word minimum on shortest side
+            const [short, longSet] = nw.length <= ow.length ? [nw, new Set(ow)] : [ow, new Set(nw)];
+            if (short.length < 2) continue;
+            const hits = short.filter(w => longSet.has(w)).length;
+            const score = hits / short.length;
+            // Require ≥ 75% word overlap AND at least 2 distinct word matches
+            if (score >= 0.75 && hits >= 2 && score > bestScore) {
+              best = o; bestScore = score;
+            }
+          }
+          return best;
+        };
+
+        let matched = 0, updated = 0, created = 0, prospects = 0, mailingOnly = 0, skipped = 0;
+        const report = [];
+        const alreadyMatchedOrgIds = new Set(); // prevent overwriting a rich match with a poor one
+
+        // Pre-compute nb_editions to sort rows by richness DESC (so best data wins in case of multiple matches)
+        const rowsEnriched = rowsRaw.map(r => {
+          const y2019 = pickBool(r, '2019');
+          const y2020 = pickBool(r, '2020');
+          const y2023 = pickBool(r, '2023');
+          const y2024 = pickBool(r, '2024');
+          const y2025 = pickBool(r, '2025');
+          const nb = [y2019, y2020, y2023, y2024, y2025].filter(Boolean).length;
+          return { r, nb };
+        }).sort((a, b) => b.nb - a.nb);
+        const rows = rowsEnriched.map(x => x.r);
+
+        for (const r of rows) {
+          const name = pick(r, 'exposant', 'contact', 'nom', 'structure', 'organisation');
+          if (!name || name.length < 2 || /^(site|taravao|arue|faa|punaauia|mahina|multi|légende|color|fidel|total)/i.test(name)) { skipped++; continue; }
+
+          const activity = pick(r, 'activit', 'discipline');
+          const main_site = pick(r, 'site principal', 'site');
+          const email = pick(r, 'email', 'courriel', 'mail').toLowerCase().trim();
+          const phone = pick(r, 'tel', 'phon');
+          const contact_name = pick(r, 'contact(nom', 'nomcontact', 'contactnom');
+
+          const y2019 = pickBool(r, '2019');
+          const y2020 = pickBool(r, '2020');
+          const y2023 = pickBool(r, '2023');
+          const y2024 = pickBool(r, '2024');
+          const y2025 = pickBool(r, '2025');
+          const nbComputed = [y2019, y2020, y2023, y2024, y2025].filter(Boolean).length;
+          const nbExcel = parseInt(pick(r, 'nbedit', 'editions') || '0', 10);
+          const nb_editions = nbExcel || nbComputed;
+
+          let fidelity = pick(r, 'fidelit');
+          fidelity = fidelity.replace(/⭐|[\u2b50]/g, '').trim();
+          if (!fidelity) {
+            if (nb_editions >= 3) fidelity = 'Fidèle';
+            else if (nb_editions === 2) fidelity = 'Régulier';
+            else if (nb_editions === 1) fidelity = 'Ponctuel';
+            else fidelity = 'Nouveau';
+          }
+
+          const convention_2025 = pick(r, 'convention 2025', 'convention2025', 'convention');
+          const caution_2025 = pick(r, 'caution 2025', 'caution2025', 'caution');
+          const animation_2024 = pick(r, 'animation 2024', 'animation2024');
+          const animation_2025 = pick(r, 'animation 2025', 'animation2025');
+          const remarks = pick(r, 'remarque', 'source', 'note');
+
+          // Heuristic: contact-only (mailing list) row = no activity + no site + no editions
+          const isContactOnly = !activity && !main_site && nb_editions === 0;
+
+          const participation_history = { y2019, y2020, y2023, y2024, y2025, nb_editions, fidelity };
+          const aracom_private = {
+            convention_history: { '2025': convention_2025 },
+            caution_history: { '2025': caution_2025 },
+            animation_history: { '2024': animation_2024, '2025': animation_2025 },
+            admin_remarks: remarks,
+            historical_contact_names: contact_name ? [contact_name] : [],
+            source_main_site: main_site,
+            last_imported_at: new Date().toISOString(),
+          };
+
+          const match = findMatch(name);
+          if (match && alreadyMatchedOrgIds.has(match.id)) {
+            // An richer row already updated this org → skip (but log)
+            report.push({ action: 'skipped_duplicate_match', excel: name, db: match.name });
+            continue;
+          }
+          if (match) {
+            alreadyMatchedOrgIds.add(match.id);
+            const patch = {
+              participation_history,
+              aracom_private: { ...(match.aracom_private || {}), ...aracom_private },
+              source_activity: activity || match.source_activity || null,
+              updated_at: new Date(),
+            };
+            if (email && !match.main_email) patch.main_email = email;
+            if (phone && !match.main_phone) patch.main_phone = phone;
+            if (contact_name && !match.contact_name) patch.contact_name = contact_name;
+            await db.collection('organizations').updateOne({ id: match.id }, { $set: patch });
+            matched++; updated++;
+            report.push({ action: 'updated', excel: name, db: match.name, fidelity, nb_editions });
+          } else {
+            // Create new org as prospect
+            const newOrg = {
+              id: uuid(),
+              edition_id: EDITION_ID,
+              name,
+              discipline: activity || null,
+              main_email: email || null,
+              main_phone: phone || null,
+              contact_name: contact_name || null,
+              priority_level: isContactOnly ? 'prospect_mailing' : 'prospect_historique',
+              status: 'prospect',
+              participation_history,
+              aracom_private,
+              source_activity: activity || null,
+              is_mailing_only: isContactOnly,
+              created_at: new Date(),
+              updated_at: new Date(),
+            };
+            await db.collection('organizations').insertOne(newOrg);
+            created++;
+            if (isContactOnly) mailingOnly++;
+            else prospects++;
+            report.push({ action: 'created', name, status: 'prospect', is_mailing_only: isContactOnly, fidelity, nb_editions });
+          }
+        }
+
+        await logActivity(db, ctx.userId, 'import', null, 'import_exposants_excel', null, { rows: rows.length, matched, created, skipped });
+
+        return json({
+          ok: true,
+          summary: {
+            total_rows: rows.length,
+            matched_and_updated: updated,
+            new_prospects_created: prospects,
+            new_mailing_contacts_created: mailingOnly,
+            skipped_rows: skipped,
+          },
+          report,
+        });
+      } catch (e) {
+        console.error('[import/exposants-excel]', e);
+        return err('Erreur parsing Excel: ' + (e?.message || e), 500);
+      }
     }
 
     // ============ BACKUP — Export complet vers Google Drive ============
@@ -3094,6 +3326,22 @@ export async function PUT(request, { params }) {
     const route = p.join('/');
     const ctx = getUserContext(request);
     let body = {}; try { body = await request.json(); } catch {}
+
+    if (route.startsWith('organizations/')) {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const orgId = p[1];
+      const oldOrg = await db.collection('organizations').findOne({ id: orgId });
+      if (!oldOrg) return err('Organisation introuvable', 404);
+      const orgAllowed = ['name', 'discipline', 'main_email', 'main_phone', 'contact_name', 'notes', 'priority_level', 'status', 'is_mailing_only', 'aracom_private', 'participation_history', 'source_activity'];
+      const orgUpd = {};
+      for (const k of orgAllowed) if (k in body) orgUpd[k] = body[k];
+      orgUpd.updated_at = new Date();
+      await db.collection('organizations').updateOne({ id: orgId }, { $set: orgUpd });
+      await logActivity(db, ctx.userId, 'organization', orgId, 'update', oldOrg, orgUpd);
+      const fresh = await db.collection('organizations').findOne({ id: orgId });
+      if (fresh) delete fresh._id;
+      return json(fresh);
+    }
 
     if (route.startsWith('registrations/')) {
       const id = p[1];
