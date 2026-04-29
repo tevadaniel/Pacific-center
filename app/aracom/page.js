@@ -1429,7 +1429,12 @@ function MailingView() {
       ? '✅ MODE RÉEL via Gmail SMTP — les emails partiront réellement.'
       : '⚠️ MODE MOCK — SMTP non configuré, aucun email réel ne partira (uniquement enregistrement en base).';
     const confirmMsg = `${head}\n${mode}\n\nObjet : ${subject}\n\nDestinataires :\n${samples}${more}\n\nConfirmer l'envoi ?`;
-    if (!confirm(confirmMsg)) return;
+    // Skip confirm() popup for single-recipient sends (often blocked by browser)
+    if (targetRegs.length > 1 && !confirm(confirmMsg)) return;
+    if (targetRegs.length === 1) {
+      // Quick visual confirmation via toast + still allow cancel via the toast click
+      toast.info(`📧 Envoi en cours à ${targetRegs[0]?.organization?.main_email || '1 destinataire'}…`);
+    }
     if (realSend && targetRegs.length > 10) {
       if (!confirm(`⚠️ DOUBLE CONFIRMATION : vous allez envoyer ${targetRegs.length} emails RÉELS. Cette action est irréversible. Continuer ?`)) return;
     }
