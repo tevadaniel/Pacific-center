@@ -3203,6 +3203,19 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       return json({ ok: true, updated: count });
     }
 
+    // ---- 🗑️ Effacer toutes les positions des stands d'un site (repartir de zéro) ----
+    if (route === 'venue-stands/clear-positions') {
+      const { venue_id } = body;
+      if (!venue_id) return err('venue_id requis', 400);
+      const r = await db.collection('venue_stands').updateMany(
+        { venue_id },
+        { $unset: { pos_x: '', pos_y: '' }, $set: { updated_at: new Date() } }
+      );
+      // Also clear all decorative elements (zones, kiosques, commerces, flèches…) for that venue
+      const r2 = await db.collection('venue_elements').deleteMany({ venue_id });
+      return json({ ok: true, stands_cleared: r.modifiedCount, elements_deleted: r2.deletedCount });
+    }
+
     // ---- Exposant : édition de son profil (org info + reg info) ----
     if (route.match(/^registrations\/[^/]+\/profile$/)) {
       const regId = p[1];

@@ -9,43 +9,23 @@ import { api } from '@/lib/auth-client';
 import { toast } from 'sonner';
 import VenueElementsLayer from '@/components/venue-elements-layer';
 
-// Map venue.code -> PNG file
+// 🎨 Fond vierge — l'admin construit son plan en plaçant manuellement les éléments
+// (stands, kiosques, commerces, démos, flèches d'entrée) via l'éditeur intégré.
+// Le PNG d'arrière-plan a été retiré pour permettre une création libre.
 const BG_BY_VENUE = {
-  FAAA: '/plans/faaa_bg.png',
-  PUN: '/plans/punaauia_bg.png',
-  ARU: '/plans/arue_bg.png',
-  TAR: '/plans/taravao.png', // utilise le plan complet (le bg cropé n'avait pas tous les stands)
+  // FAAA: '/plans/faaa_bg.png',  // ⛔ retiré
+  // PUN: '/plans/punaauia_bg.png', // ⛔ retiré
+  // ARU: '/plans/arue_bg.png',   // ⛔ retiré
+  // TAR: '/plans/taravao.png',    // ⛔ retiré
 };
 
+// Fond beige uni (sable clair) utilisé quand aucune image PNG n'est définie
+const BLANK_BG_COLOR = '#d6c4a8';
+
 // Default layout positions (percentages). Used when stand has no saved position.
-// These coordinates have been detected automatically from the PNG plans
-// and then refined manually. Admin can drag them and save if needed.
+// 🆕 Vidé pour partir d'un layout vierge — l'admin place tous les stands manuellement.
 const DEFAULT_POSITIONS = {
-  ARU: { // 12 stands : 8 à gauche + DEMO + 4 à droite + Kiosque
-    'A-C01': { x: 20.2, y: 26.3 }, 'A-C02': { x: 23.3, y: 26.3 }, 'A-C03': { x: 26.6, y: 26.3 }, 'A-C04': { x: 29.9, y: 26.3 },
-    'A-C05': { x: 33.2, y: 26.2 }, 'A-C06': { x: 36.4, y: 26.2 }, 'A-C07': { x: 39.8, y: 25.8 }, 'A-C08': { x: 43.0, y: 25.6 },
-    'A-C09': { x: 64.1, y: 24.7 }, 'A-C10': { x: 67.4, y: 24.7 }, 'A-C11': { x: 70.9, y: 24.7 }, 'A-C12': { x: 74.1, y: 24.7 },
-  },
-  TAR: { // 12 stands : plan Taravao officiel — répartis sur 2 rangées (Côte intervenant / Côte client)
-    'T-D01': { x: 21, y: 23 }, 'T-D02': { x: 26, y: 23 }, 'T-D03': { x: 31, y: 23 },
-    'T-D04': { x: 36, y: 23 }, 'T-D05': { x: 41, y: 23 }, 'T-D06': { x: 46, y: 23 },
-    'T-D07': { x: 19, y: 32 }, 'T-D08': { x: 24, y: 32 }, 'T-D09': { x: 29, y: 32 },
-    'T-D10': { x: 34, y: 32 }, 'T-D11': { x: 39, y: 32 }, 'T-D12': { x: 44, y: 32 },
-  },
-  FAAA: { // 16 stands : 3 groupes séparés par 2 Kiosques
-    'F-A01': { x: 19.5, y: 48 }, 'F-A02': { x: 21.9, y: 48 }, 'F-A03': { x: 24.3, y: 48 }, 'F-A04': { x: 26.8, y: 48 },
-    'F-A05': { x: 30.8, y: 48 }, 'F-A06': { x: 33.3, y: 48 }, 'F-A07': { x: 35.7, y: 48 },
-    'F-A08': { x: 38.7, y: 48.1 }, 'F-A09': { x: 40.9, y: 48.1 }, 'F-A10': { x: 43.2, y: 48.1 },
-    'F-A11': { x: 51.0, y: 48.1 }, 'F-A12': { x: 53.2, y: 48.1 }, 'F-A13': { x: 55.5, y: 48.1 },
-    'F-A14': { x: 61.7, y: 49 }, 'F-A15': { x: 64.0, y: 49 }, 'F-A16': { x: 66.3, y: 49 },
-  },
-  PUN: { // 13 stands : Kiosque + 3 + DEMO + 9 + Kiosque
-    'P-B01': { x: 23.3, y: 32.5 }, 'P-B02': { x: 26.3, y: 32.5 }, 'P-B03': { x: 29.0, y: 32.5 },
-    'P-B04': { x: 50.9, y: 32.5 }, 'P-B05': { x: 53.9, y: 32.5 }, 'P-B06': { x: 56.6, y: 32.5 },
-    'P-B07': { x: 59.2, y: 33 }, 'P-B08': { x: 62.2, y: 33 }, 'P-B09': { x: 64.9, y: 33 },
-    'P-B10': { x: 67.6, y: 33 }, 'P-B11': { x: 70.6, y: 33 }, 'P-B12': { x: 73.3, y: 33 },
-    'P-B13': { x: 76.0, y: 33 },
-  },
+  // ARU: {...}, TAR: {...}, FAAA: {...}, PUN: {...}  // ⛔ retirés
 };
 
 const STATUS_COLORS = {
@@ -79,7 +59,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     setDirty(false);
   }, [stands, venueCode]);
 
-  if (!bgUrl) return null;
+  if (!bgUrl && !venueCode) return null;
 
   const onDragStart = (e, code) => {
     if (!editMode) return;
@@ -117,6 +97,20 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     stands.forEach(s => { map[s.stand_code] = defaults[s.stand_code] || { x: 50, y: 50 }; });
     setPositions(map);
     setDirty(true);
+  };
+
+  const clearAllPositions = async () => {
+    if (!confirm(`⚠️ Effacer DÉFINITIVEMENT toutes les positions des ${stands.length} stands ET tous les éléments décoratifs (kiosques, démos, commerces, flèches) du site ${venue?.name} ?\n\nVous repartirez d'un fond vierge.`)) return;
+    try {
+      const r = await api('/api/venue-stands/clear-positions', {
+        method: 'POST',
+        body: JSON.stringify({ venue_id: venue.id }),
+      });
+      toast.success(`✅ Plan vidé — ${r.stands_cleared} positions effacées, ${r.elements_deleted} éléments supprimés`);
+      onStandsReload && onStandsReload();
+      // Force le rechargement des éléments décoratifs
+      window.location.reload();
+    } catch (e) { toast.error(e.message); }
   };
 
   const addStand = async () => {
@@ -169,6 +163,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
               <>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={addStand}><Plus className="w-3.5 h-3.5" /> Ajouter</Button>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPositions}><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
+                <Button variant="outline" size="sm" className="gap-1.5 text-red-600 border-red-300 hover:bg-red-50" onClick={clearAllPositions}><Trash2 className="w-3.5 h-3.5" /> Tout effacer</Button>
                 <Button variant="default" size="sm" className="gap-1.5" disabled={!dirty} onClick={savePositions}><Save className="w-3.5 h-3.5" /> Sauver</Button>
               </>
             )}
@@ -187,7 +182,12 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         onDragOver={(e) => editMode && e.preventDefault()}
         onDrop={onDragEnd}
         className="relative rounded-xl overflow-hidden border bg-black shadow-lg"
-        style={{ aspectRatio: '1600 / 556', backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+        style={{
+          aspectRatio: '1600 / 556',
+          ...(bgUrl
+            ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+            : { backgroundColor: BLANK_BG_COLOR }),
+        }}
       >
         {/* Couche d'éléments décoratifs (zones, kiosques, commerces, flèches, prises) */}
         <VenueElementsLayer venueId={venue?.id} editable={editable} containerRef={containerRef} />
