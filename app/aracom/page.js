@@ -17,8 +17,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye } from 'lucide-react';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp } from 'lucide-react';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, CartesianGrid } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
@@ -108,12 +108,18 @@ function DashboardView({ onGoto }) {
   const [kpis, setKpis] = useState(null);
   const [sites, setSites] = useState([]);
   const [extended, setExtended] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const load = async () => {
     setLoading(true);
     try {
-      const [k, s, e] = await Promise.all([api('/api/dashboard/kpis'), api('/api/dashboard/by-site'), api('/api/dashboard/extended').catch(() => null)]);
-      setKpis(k); setSites(s); setExtended(e);
+      const [k, s, e, a] = await Promise.all([
+        api('/api/dashboard/kpis'),
+        api('/api/dashboard/by-site'),
+        api('/api/dashboard/extended').catch(() => null),
+        api('/api/dashboard/analytics').catch(() => null),
+      ]);
+      setKpis(k); setSites(s); setExtended(e); setAnalytics(a);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
@@ -335,6 +341,99 @@ function DashboardView({ onGoto }) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Graphiques avancés (analytics) */}
+      {analytics && (
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-600" /> Évolution historique 2019 → 2026</CardTitle>
+              <p className="text-[11px] text-slate-500 mt-0.5">Nombre d&apos;associations participantes par édition</p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={analytics.historic}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="count" stroke="#10b981" fill="#10b98155" strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Activity className="w-4 h-4 text-violet-600" /> Top disciplines</CardTitle>
+              <p className="text-[11px] text-slate-500 mt-0.5">Répartition des associations par activité</p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={analytics.disciplines} layout="vertical" margin={{ left: 30 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-blue-600" /> Avancement des dossiers</CardTitle>
+              <p className="text-[11px] text-slate-500 mt-0.5">Distribution du % de complétion des inscriptions</p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={analytics.completion}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    {analytics.completion.map((d, i) => (
+                      <Cell key={i} fill={['#ef4444', '#f97316', '#f59e0b', '#10b981', '#059669'][i] || '#94a3b8'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-orange-600" /> Inscriptions sur 30 jours</CardTitle>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                J-{analytics.days_to_event} avant le Forum • {analytics.total_registrations} inscriptions au total
+              </p>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={analytics.registrations_timeline}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={d => {
+                      const dt = new Date(d);
+                      return `${dt.getDate()}/${dt.getMonth() + 1}`;
+                    }}
+                    interval={4}
+                  />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip
+                    labelFormatter={d => new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  />
+                  <Line type="monotone" dataKey="count" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Outils ARACOM */}
       <Card className="border-violet-200 bg-gradient-to-br from-violet-50/40 to-white">
@@ -1249,6 +1348,83 @@ function CautionsView() {
   );
 }
 
+// 🛡️ Toggle Mail TEST/PRODUCTION mode — exige mot de passe admin pour passer en PROD
+function ToggleMailModeButton({ currentMode, onToggled }) {
+  const [open, setOpen] = useState(false);
+  const [pwd, setPwd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const targetMode = currentMode === 'test' ? 'production' : 'test';
+  const isDangerous = targetMode === 'production'; // Production = envoi RÉEL
+
+  const submit = async () => {
+    if (!pwd) { toast.error('Mot de passe requis'); return; }
+    setBusy(true);
+    try {
+      const r = await api('/api/mailing/toggle-test-mode', {
+        method: 'POST',
+        body: JSON.stringify({ mode: targetMode, confirm_password: pwd }),
+      });
+      toast.success(r.message, { duration: 6000 });
+      setOpen(false);
+      setPwd('');
+      onToggled?.();
+    } catch (e) {
+      toast.error(e.message);
+    } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant={isDangerous ? 'destructive' : 'outline'}
+        onClick={() => setOpen(true)}
+        className={`h-7 text-[11px] gap-1 ${isDangerous ? '' : 'border-emerald-600 text-emerald-700 hover:bg-emerald-50'}`}
+      >
+        {isDangerous
+          ? '⚠️ Passer en mode PRODUCTION (envoi RÉEL)'
+          : '🛡️ Repasser en mode TEST'}
+      </Button>
+    );
+  }
+  return (
+    <div className={`rounded-md border-2 ${isDangerous ? 'border-red-600 bg-red-50' : 'border-emerald-600 bg-emerald-50'} p-3 flex flex-col gap-2 max-w-md`}>
+      <div className="text-xs font-bold">
+        {isDangerous
+          ? '⚠️ DOUBLE CONFIRMATION : passer en mode PRODUCTION'
+          : '🛡️ Repasser en mode TEST'}
+      </div>
+      {isDangerous && (
+        <div className="text-[11px] text-red-800 leading-relaxed">
+          Tous les emails partiront <b>RÉELLEMENT</b> aux destinataires. Cette action est tracée dans le journal d&apos;audit. Saisissez votre mot de passe ARACOM pour confirmer.
+        </div>
+      )}
+      <Input
+        type="password"
+        value={pwd}
+        onChange={e => setPwd(e.target.value)}
+        placeholder="Votre mot de passe ARACOM"
+        className="h-8 text-xs"
+        autoFocus
+        onKeyDown={e => e.key === 'Enter' && submit()}
+      />
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setPwd(''); }} disabled={busy} className="h-7 text-[11px]">Annuler</Button>
+        <Button
+          size="sm"
+          variant={isDangerous ? 'destructive' : 'default'}
+          onClick={submit}
+          disabled={busy || !pwd}
+          className="h-7 text-[11px] flex-1"
+        >
+          {busy ? 'Application…' : (isDangerous ? 'Confirmer le passage en PRODUCTION' : 'Confirmer le retour en TEST')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+
 const MAIL_TYPES = [
   { value: 'relance_caution', label: 'Relance caution (20 000 XPF)', icon: '💰' },
   { value: 'relance_convention', label: 'Relance convention non signée', icon: '📝' },
@@ -1571,19 +1747,32 @@ function MailingView() {
                   </div>
                 )}
               </div>
-              <div className="text-xs text-red-700 mt-2 italic">
-                Pour passer en mode production réel : positionner <code className="bg-white px-1 rounded border border-red-300">MAIL_TEST_MODE=false</code> dans les variables d&apos;environnement (.env), puis redémarrer le service.
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <ToggleMailModeButton currentMode="test" onToggled={loadMailStatus} />
+                {mailStatus.updated_at && (
+                  <span className="text-[11px] text-red-600">
+                    Dernière modification : {new Date(mailStatus.updated_at).toLocaleString('fr-FR')} par {mailStatus.updated_by}
+                  </span>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
       {!mailStatus.test_mode_active && smtp.ok && (
-        <div className="rounded-lg border-2 border-emerald-500 bg-emerald-50 p-3 shadow-sm flex items-center gap-2">
-          <div className="text-2xl">📨</div>
-          <div className="text-sm text-emerald-900">
-            <b>MODE PRODUCTION — Envoi RÉEL aux contacts.</b> Vos destinataires recevront effectivement les emails. Soyez vigilant.
+        <div className="rounded-lg border-2 border-emerald-500 bg-emerald-50 p-3 shadow-sm">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-2xl">📨</div>
+            <div className="text-sm text-emerald-900 flex-1 min-w-0">
+              <b>MODE PRODUCTION — Envoi RÉEL aux contacts.</b> Vos destinataires recevront effectivement les emails. Soyez vigilant.
+            </div>
+            <ToggleMailModeButton currentMode="production" onToggled={loadMailStatus} />
           </div>
+          {mailStatus.updated_at && (
+            <div className="text-[11px] text-emerald-700 mt-1.5 ml-9">
+              Activé le {new Date(mailStatus.updated_at).toLocaleString('fr-FR')} par {mailStatus.updated_by}
+            </div>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
 import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
+import { getMailConfig, invalidateMailConfigCache } from '@/lib/mail-config';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
 import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, uploadFile as driveUploadFile, makeAnyoneReader, getServiceAccountEmail, safeName as driveSafeName } from '@/lib/drive';
@@ -620,14 +621,119 @@ export async function GET(request, { params }) {
 
     // ---- Mailing status (TEST MODE indicator for UI) ----
     if (route === 'mailing/status') {
-      const testMode = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
-      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
-      const allowList = (process.env.MAIL_ALLOWED_RECIPIENTS || '').split(',').map(s => s.trim()).filter(Boolean);
+      const cfg = await getMailConfig(db);
       return json({
-        test_mode_active: testMode,
-        redirect_to: redirectTo,
-        allowed_recipients: allowList,
+        test_mode_active: cfg.test_mode,
+        redirect_to: cfg.redirect_to,
+        allowed_recipients: cfg.allow_list,
         smtp_configured: isSmtpConfigured(),
+        config_source: cfg.source, // 'database' | 'env'
+        updated_at: cfg.updated_at,
+        updated_by: cfg.updated_by,
+      });
+    }
+
+    // ---- Dashboard Analytics (graphs : historic, disciplines, completion, cautions, mailing) ----
+    if (route === 'dashboard/analytics') {
+      const [orgs, regs, deposits, emails, campaigns] = await Promise.all([
+        db.collection('organizations').find({}).toArray(),
+        db.collection('registrations').find({ edition_id: EDITION_ID }).toArray(),
+        db.collection('deposit_transactions').find({}).toArray(),
+        db.collection('email_messages').find({}).toArray(),
+        db.collection('email_campaigns').find({}).toArray(),
+      ]);
+
+      // 1. Historic participation — count per year from participation_history
+      const historicYears = ['2019', '2020', '2021', '2022', '2023', '2024', '2025'];
+      const historicCounts = {};
+      historicYears.forEach(y => { historicCounts[y] = 0; });
+      orgs.forEach(o => {
+        const h = o.participation_history;
+        if (!h) return;
+        if (Array.isArray(h)) {
+          h.forEach(y => { const ys = String(y); if (historicCounts[ys] !== undefined) historicCounts[ys]++; });
+        } else if (typeof h === 'object') {
+          Object.keys(h).forEach(y => { if (historicCounts[y] !== undefined && h[y]) historicCounts[y]++; });
+        }
+      });
+      historicCounts['2026'] = regs.length;
+      const historic = Object.entries(historicCounts).map(([year, count]) => ({ year, count }));
+
+      // 2. Top disciplines (top 10)
+      const discCounts = {};
+      orgs.forEach(o => {
+        const d = o.discipline || 'Autre';
+        discCounts[d] = (discCounts[d] || 0) + 1;
+      });
+      const disciplines = Object.entries(discCounts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      // 3. Completion distribution (histogram)
+      const buckets = { '0–25%': 0, '26–50%': 0, '51–75%': 0, '76–99%': 0, '100%': 0 };
+      regs.forEach(r => {
+        const c = r.completion_percent || 0;
+        if (c >= 100) buckets['100%']++;
+        else if (c >= 76) buckets['76–99%']++;
+        else if (c >= 51) buckets['51–75%']++;
+        else if (c >= 26) buckets['26–50%']++;
+        else buckets['0–25%']++;
+      });
+      const completion = Object.entries(buckets).map(([range, count]) => ({ range, count }));
+
+      // 4. Cautions status
+      const cautionsStatus = { recues: 0, en_attente: 0, en_retard: 0, non_demandees: 0 };
+      const today = new Date();
+      const eventDate = new Date('2026-08-14');
+      const J7 = new Date(eventDate); J7.setDate(J7.getDate() - 7);
+      deposits.forEach(d => {
+        if (d.status === 'recue' || d.status === 'verrouille') cautionsStatus.recues++;
+        else if (d.status === 'en_attente') {
+          if (today > J7) cautionsStatus.en_retard++;
+          else cautionsStatus.en_attente++;
+        } else cautionsStatus.non_demandees++;
+      });
+
+      // 5. Mailing funnel
+      const mailingFunnel = {
+        sent: emails.length,
+        opened: emails.filter(e => e.opened_at).length,
+        clicked: emails.filter(e => e.clicked_at).length,
+        failed: emails.filter(e => e.send_status === 'echec').length,
+      };
+      mailingFunnel.open_rate_pct = mailingFunnel.sent ? Math.round((mailingFunnel.opened / mailingFunnel.sent) * 100) : 0;
+      mailingFunnel.click_rate_pct = mailingFunnel.sent ? Math.round((mailingFunnel.clicked / mailingFunnel.sent) * 100) : 0;
+
+      // 6. Daily registration timeline (last 30 days)
+      const timeline = {};
+      const days = 30;
+      for (let i = days; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
+        timeline[d.toISOString().slice(0,10)] = 0;
+      }
+      regs.forEach(r => {
+        const cd = r.created_at ? new Date(r.created_at) : null;
+        if (!cd) return;
+        const key = cd.toISOString().slice(0, 10);
+        if (timeline[key] !== undefined) timeline[key]++;
+      });
+      const registrations_timeline = Object.entries(timeline).map(([date, count]) => ({ date, count }));
+
+      // 7. Days to event
+      const daysToEvent = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
+
+      return json({
+        historic,
+        disciplines,
+        completion,
+        cautions_status: cautionsStatus,
+        mailing_funnel: mailingFunnel,
+        registrations_timeline,
+        days_to_event: daysToEvent,
+        total_organizations: orgs.length,
+        total_registrations: regs.length,
+        total_campaigns: campaigns.length,
       });
     }
 
@@ -3194,6 +3300,7 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       if (!registration_ids?.length) return err('registration_ids requis', 400);
       // 🛡️ Always sanitize mailto links before sending (replaces hallucinated addresses by agence@aracom-conseil.fr)
       const sanitizedBodyHtml = sanitizeEmailHtml(body_html);
+      const mailCfg = await getMailConfig(db);
       const regs = await db.collection('registrations').find({ id: { $in: registration_ids } }).toArray();
       const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
       const venues = await db.collection('venues').find({ id: { $in: regs.map(r => r.venue_id) } }).toArray();
@@ -3244,6 +3351,9 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
             to: o.main_email,
             subject: personalizedSubject,
             html: trackedBody,
+            testModeOverride: mailCfg.test_mode,
+            redirectToOverride: mailCfg.redirect_to,
+            allowListOverride: mailCfg.allow_list,
           });
           if (r2.ok) {
             providerId = r2.messageId || providerId;
@@ -3271,8 +3381,6 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         if (sendStatus === 'envoye') sent++;
       }
       await db.collection('email_campaigns').updateOne({ id: campaignId }, { $set: { sent_count: sent, updated_at: new Date() } });
-      const testModeActive = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
-      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
       return json({
         ok: true,
         sent,
@@ -3280,8 +3388,8 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         smtp_used: smtpReady,
         errors: errors.slice(0, 5),
         campaign_id: campaignId,
-        test_mode_active: testModeActive,
-        redirect_to: testModeActive ? redirectTo : null,
+        test_mode_active: mailCfg.test_mode,
+        redirect_to: mailCfg.test_mode ? mailCfg.redirect_to : null,
         redirected_count,
         redirected_originals: redirected_originals.slice(0, 10),
       });
@@ -3305,19 +3413,68 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       const { to } = body;
       if (!to) return err('to requis', 400);
       if (!isSmtpConfigured()) return err('SMTP non configuré : ajoutez SMTP_PASSWORD (App Password Gmail)', 400);
+      const mailCfg = await getMailConfig(db);
       const result = await sendMail({
         to,
         subject: '✅ Test SMTP — Forum de la Rentrée 2026',
         html: `<p>Bonjour,</p><p>Ceci est un email de test envoyé depuis l'application <b>Forum de la Rentrée 2026</b>.</p><p>Si vous recevez ce message, la configuration Gmail SMTP fonctionne parfaitement. 🎉</p><p>Bien cordialement,<br>L'équipe ARACOM</p>`,
+        testModeOverride: mailCfg.test_mode,
+        redirectToOverride: mailCfg.redirect_to,
+        allowListOverride: mailCfg.allow_list,
       });
-      const testModeActive = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
-      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
       return json({
         ...result,
-        test_mode_active: testModeActive,
-        redirect_to: testModeActive ? redirectTo : null,
+        test_mode_active: mailCfg.test_mode,
+        redirect_to: mailCfg.test_mode ? mailCfg.redirect_to : null,
         intended_recipient: to,
       }, result.ok ? 200 : 500);
+    }
+
+    // ---- 🛡️ Toggle MAIL TEST MODE (DB-backed, requires admin password) ----
+    if (route === 'mailing/toggle-test-mode') {
+      const { mode, confirm_password } = body;
+      if (!['test', 'production'].includes(mode)) return err('mode requis : "test" ou "production"', 400);
+      if (!confirm_password) return err('Mot de passe administrateur requis pour confirmer', 400);
+      const ctx = getUserContext(request);
+      if (!ctx?.userId) return err('Session admin requise', 401);
+      const user = await db.collection('users').findOne({ id: ctx.userId });
+      if (!user) return err('Utilisateur introuvable', 404);
+      if (user.role_code !== 'aracom_admin') return err('Réservé aux administrateurs ARACOM', 403);
+      if (String(user.password) !== String(confirm_password)) return err('Mot de passe incorrect', 401);
+      const newTestMode = mode === 'test';
+      const cfg = await getMailConfig(db);
+      await db.collection('app_settings').updateOne(
+        { key: 'mail_config' },
+        {
+          $set: {
+            key: 'mail_config',
+            test_mode: newTestMode,
+            redirect_to: cfg.redirect_to,
+            allow_list: cfg.allow_list,
+            updated_at: new Date(),
+            updated_by: user.email,
+          },
+        },
+        { upsert: true }
+      );
+      invalidateMailConfigCache();
+      // Audit log
+      await db.collection('audit_logs').insertOne({
+        id: uuid(),
+        action: 'mail_test_mode_toggle',
+        actor_email: user.email,
+        details: { from_mode: cfg.test_mode ? 'test' : 'production', to_mode: mode },
+        created_at: new Date(),
+      });
+      return json({
+        ok: true,
+        test_mode_active: newTestMode,
+        message: newTestMode
+          ? '🛡️ Mode TEST activé — Tous les emails sont à nouveau interceptés.'
+          : '⚠️ Mode PRODUCTION activé — Les emails partiront RÉELLEMENT vers les destinataires.',
+        updated_by: user.email,
+        updated_at: new Date(),
+      });
     }
 
     // ---- Send satisfaction survey invitation campaign (mocked) ----
