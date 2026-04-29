@@ -37,12 +37,14 @@ export default function LoginPage() {
   const runSeed = async () => {
     setSeeding(true);
     try {
-      const res = await fetch('/api/seed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+      // 🛡️ SAFE MODE : force=false → idempotent, ne wipe JAMAIS la DB existante.
+      // Pour réinitialiser, il faut explicitement passer par /api/tools/reset-db (protégé par confirmation stricte).
+      const res = await fetch('/api/seed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: false }) });
       const data = await res.json();
-      if (data.seeded) toast.success(`Données initialisées : ${data.associations} associations.`);
-      else toast.info(data.message || 'Données déjà présentes');
+      if (data.seeded) toast.success(`✅ Base initialisée : ${data.associations} associations créées.`);
+      else toast.info('✅ Base déjà peuplée — aucune modification effectuée.');
     } catch (e) {
-      toast.error('Erreur de seed: ' + e.message);
+      toast.error('Erreur de vérification : ' + e.message);
     } finally { setSeeding(false); }
   };
 
@@ -141,7 +143,7 @@ export default function LoginPage() {
             <div className="pt-3 border-t">
               <Button variant="ghost" className="w-full text-slate-600 text-xs" onClick={runSeed} disabled={seeding}>
                 {seeding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                Initialiser les données (admin)
+                Vérifier les données initiales (idempotent)
               </Button>
             </div>
           </CardContent>

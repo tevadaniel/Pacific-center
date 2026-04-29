@@ -3449,6 +3449,12 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
     }
 
     if (route === 'auth/register') {
+      // 🛡️ DÉSACTIVÉ depuis avril 2026 — l'auto-inscription a été supprimée pour
+      // garantir un suivi strict des dossiers. Seul ARACOM peut créer un compte
+      // exposant via le portail admin (1-clic "Créer & inviter exposant").
+      return err('Inscription publique désactivée. Contactez ARACOM à agence@aracom-conseil.fr pour rejoindre le Forum.', 403);
+    }
+    if (route === 'auth/register__deprecated_unreachable') {
       // Self-service exposant registration (from landing page)
       const { email, password, name, discipline, phone, contact_name } = body;
       if (!email || !password || !name) return err('Email, mot de passe et nom requis', 400);
