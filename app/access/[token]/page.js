@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { saveSession } from '@/lib/auth-client';
@@ -10,7 +10,10 @@ import { Loader2, AlertTriangle } from 'lucide-react';
 export default function AccessTokenPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const token = params?.token;
+  // Propagate ?tab=docs / ?tab=logistique / etc. so we land directly on the right section
+  const requestedTab = searchParams?.get('tab') || null;
   const [status, setStatus] = useState('loading'); // loading | error
   const [error, setError] = useState('');
 
@@ -41,16 +44,17 @@ export default function AccessTokenPage() {
           token_purpose: data.token_info?.purpose || null,
           accessed_via_token: true,
         });
+        const tabSuffix = requestedTab ? `?tab=${encodeURIComponent(requestedTab)}` : '';
         // Redirect by role / purpose
         const purpose = data.token_info?.purpose;
         if (purpose === 'inscription_exposant') {
           router.replace('/inscription?token=' + encodeURIComponent(token));
         } else if (data.user.role_code === 'pacific_centers_readonly') {
-          router.replace('/pacific');
+          router.replace('/pacific' + tabSuffix);
         } else if (data.user.role_code === 'aracom_admin') {
-          router.replace('/aracom');
+          router.replace('/aracom' + tabSuffix);
         } else {
-          router.replace('/exposant');
+          router.replace('/exposant' + tabSuffix);
         }
       } catch (e) {
         if (!alive) return;

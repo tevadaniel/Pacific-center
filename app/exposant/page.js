@@ -45,6 +45,28 @@ export default function ExposantPortal() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('profil');
+
+  // Read ?tab= from URL on mount and when changed externally
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sync = () => {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      const valid = ['profil', 'sites', 'animation', 'docs', 'logistique', 'satisfaction', 'guide'];
+      if (t && valid.includes(t)) setActiveTab(t);
+    };
+    sync();
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+
+  const handleTabChange = (v) => {
+    setActiveTab(v);
+    if (typeof window !== 'undefined') {
+      const url = v === 'profil' ? '/exposant' : `/exposant?tab=${v}`;
+      window.history.replaceState({}, '', url);
+    }
+  };
 
   const load = async () => {
     try {
@@ -182,7 +204,7 @@ export default function ExposantPortal() {
           </Card>
         )}
 
-        <Tabs defaultValue="profil">
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="w-full grid grid-cols-3 md:grid-cols-7">
             <TabsTrigger value="profil">Profil</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>

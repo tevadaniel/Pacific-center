@@ -88,6 +88,57 @@ async function getOrCreateExposantAccessUrl(db, organizationId, email) {
 }
 
 /**
+ * Whitelist of action placeholders → corresponding tab in the exposant portal.
+ * The AI can ONLY use these placeholders. Anything else is rejected by the sanitizer.
+ */
+const EXPOSANT_ACTIONS = {
+  '[[MON_ESPACE]]':              { tab: null,           label: 'Accéder à mon espace' },
+  '[[MON_ESPACE_PROFIL]]':       { tab: 'profil',       label: 'Mettre à jour mon profil' },
+  '[[MON_ESPACE_SITES]]':        { tab: 'sites',        label: 'Confirmer mes sites' },
+  '[[MON_ESPACE_ANIMATION]]':    { tab: 'animation',    label: 'Détailler mon animation' },
+  '[[MON_ESPACE_DOCS]]':         { tab: 'docs',         label: 'Téléverser mes documents' },
+  '[[MON_ESPACE_ASSURANCE]]':    { tab: 'docs',         label: 'Téléverser mon attestation d\'assurance' },
+  '[[MON_ESPACE_CONVENTION]]':   { tab: 'docs',         label: 'Signer ma convention' },
+  '[[MON_ESPACE_CAUTION]]':      { tab: 'docs',         label: 'Régler ma caution' },
+  '[[MON_ESPACE_LOGISTIQUE]]':   { tab: 'logistique',   label: 'Compléter mes besoins logistiques' },
+  '[[MON_ESPACE_SATISFACTION]]': { tab: 'satisfaction', label: 'Donner mon avis' },
+  '[[MON_ESPACE_GUIDE]]':        { tab: 'guide',        label: 'Consulter le guide pratique' },
+};
+
+/** Map a mail_type to the most appropriate action placeholder. */
+function mailTypeToDefaultAction(mailType) {
+  const map = {
+    relance_caution: '[[MON_ESPACE_CAUTION]]',
+    relance_convention: '[[MON_ESPACE_CONVENTION]]',
+    relance_assurance: '[[MON_ESPACE_ASSURANCE]]',
+    relance_generale: '[[MON_ESPACE_DOCS]]',
+    confirmation: '[[MON_ESPACE]]',
+    invitation_inscription: '[[MON_ESPACE]]',
+    invitation_satisfaction: '[[MON_ESPACE_SATISFACTION]]',
+    remerciement: '[[MON_ESPACE_SATISFACTION]]',
+  };
+  return map[mailType] || '[[MON_ESPACE]]';
+}
+
+/**
+ * Replace all action placeholders [[MON_ESPACE_*]] with the corresponding URL
+ * (magic link + tab anchor when applicable).
+ */
+function expandActionPlaceholders(html, accessUrl) {
+  if (!html || !accessUrl) return html;
+  let out = html;
+  for (const [placeholder, def] of Object.entries(EXPOSANT_ACTIONS)) {
+    const url = def.tab ? `${accessUrl}?tab=${def.tab}` : accessUrl;
+    // escape brackets for regex
+    const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(escaped, 'g'), url);
+  }
+  // Backwards-compat
+  out = out.replaceAll('[[ACCESS_LINK]]', accessUrl);
+  return out;
+}
+
+/**
  * Replace mailto:agence@aracom-conseil.fr links in body_html with a real HTTP magic-link URL,
  * AND append a fallback contact footer at the bottom.
  *
@@ -100,8 +151,6 @@ function replaceContactWithAccessLink(html, accessUrl) {
   if (accessUrl) {
     // Replace href="mailto:agence@aracom-conseil.fr..." with href="ACCESS_URL"
     out = out.replace(/href=(["'])mailto:agence@aracom-conseil\.fr[^"']*\1/gi, `href=$1${accessUrl}$1`);
-    // Replace any [[MON_ESPACE]] or [[ACCESS_LINK]] placeholders the AI may use
-    out = out.replaceAll('[[MON_ESPACE]]', accessUrl).replaceAll('[[ACCESS_LINK]]', accessUrl);
     // Replace common French CTA labels inside <a>...<a> when they were mailto-bound
     out = out.replace(
       /(<a[^>]+href=["']mailto:agence@aracom-conseil\.fr[^"']*["'][^>]*>)([\s\S]*?)(<\/a>)/gi,
@@ -119,6 +168,49 @@ ${accessUrl ? `<br/>🔗 Ou copier-coller ce lien dans votre navigateur : <span 
 </p>`;
   }
   return out;
+}
+
+/**
+ * 🛡️ STRICT LINK GUARD — Reject any <a href> that doesn't match the strict whitelist.
+ *
+ * Allowed targets :
+ *   1. The exposant magic link (accessUrl) and its variants with ?tab=...
+ *   2. mailto: agence@aracom-conseil.fr
+ *   3. mailto: any address from MAIL_ALLOWED_RECIPIENTS
+ *   4. Any URL on our own production base (NEXT_PUBLIC_BASE_URL)
+ *
+ * For ANY other URL or mailto: → unwrap the <a> tag (keep the visible text, remove the link).
+ * This guarantees the AI cannot send users to fictional pages.
+ *
+ * Called AFTER expandActionPlaceholders so all legitimate placeholders have already been resolved.
+ */
+function guardLinks(html, accessUrl) {
+  if (!html) return html;
+  const baseUrl = getPublicBaseUrl();
+  const ALLOWED_MAILTO = new Set(['agence@aracom-conseil.fr', 'teva.geros@aracom-conseil.fr', 'admin@aracom.pf']);
+  const isAllowed = (href) => {
+    if (!href) return false;
+    if (accessUrl && href.startsWith(accessUrl)) return true;
+    if (baseUrl && href.startsWith(baseUrl)) return true;
+    if (href.startsWith(`${baseUrl}/api/track/`)) return true; // tracking wrapper safe
+    if (href.startsWith('mailto:')) {
+      const addr = href.slice(7).split('?')[0].toLowerCase();
+      return ALLOWED_MAILTO.has(addr);
+    }
+    return false;
+  };
+  // Unwrap any <a> whose href is not whitelisted (preserve inner content)
+  return html.replace(
+    /<a([^>]*?)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi,
+    (m, _pre, href, _post, inner) => {
+      if (isAllowed(href)) return m;
+      // Replace by the magic link if we have one (so the button still works), otherwise unwrap.
+      if (accessUrl) {
+        return `<a href="${accessUrl}" style="color:#2563eb;text-decoration:underline">${inner}</a>`;
+      }
+      return inner; // unwrap → just keep the text
+    }
+  );
 }
 
 const EDITION_ID = 'edition-2026';
@@ -3306,6 +3398,8 @@ Utilise [[NOM_EXPOSANT]], [[STAND]], [[SITE]] comme variables de personnalisatio
         annonce: 'Annonce ou information générale',
       };
       const typeLabel = MAIL_TYPES[mail_type] || mail_type;
+      const defaultAction = mailTypeToDefaultAction(mail_type);
+      const defaultActionLabel = EXPOSANT_ACTIONS[defaultAction]?.label || 'Accéder à mon espace';
 
       const systemPrompt = `Tu es un assistant rédactionnel expert pour ARACOM, l'organisateur du Forum de la Rentrée 2026 en Polynésie française.
 Ton rôle : rédiger des emails professionnels en français à destination d'associations sportives et culturelles (exposants du forum).
@@ -3318,13 +3412,34 @@ Contexte de l'événement :
 
 Ton style : ${tone}. Le français doit être soigné, chaleureux mais professionnel. Utilise le vouvoiement. Signe toujours "L'équipe ARACOM".
 Le HTML doit être propre et inline (email-compatible) : <p>, <b>, <a>, <ul>/<li>, pas de CSS externe.
-Tu peux utiliser des variables [[NOM_EXPOSANT]], [[DISCIPLINE]], [[STAND]], [[SITE]], [[CONTACT_NAME]], [[MON_ESPACE]] pour la personnalisation.
-RÈGLE CRITIQUE BOUTONS / LIENS :
-- Pour TOUT bouton d'action (Nous contacter, Compléter mon dossier, Confirmer, Accéder à mon espace, etc.), utilise OBLIGATOIREMENT cette URL exacte : [[MON_ESPACE]]
-- [[MON_ESPACE]] sera automatiquement remplacé au moment de l'envoi par le lien personnel (magic link) de chaque exposant vers son portail. Ce lien fonctionne SUR TOUS LES NAVIGATEURS sans dépendre d'un client mail.
-- N'utilise JAMAIS de mailto: dans les boutons (cela ouvre une page blanche sur certains clients comme iCloud/Safari).
-- N'invente JAMAIS d'URL https://aracom.pf ou autre site fictif.
-- Texte recommandé pour le bouton principal : "Accéder à mon espace exposant", "Compléter mon dossier", "Voir mon dossier".
+Tu peux utiliser des variables [[NOM_EXPOSANT]], [[DISCIPLINE]], [[STAND]], [[SITE]], [[CONTACT_NAME]] pour la personnalisation.
+
+🛡️ RÈGLE ABSOLUE — BOUTONS ET LIENS (NON NÉGOCIABLE) :
+Tu n'as le droit d'utiliser QUE les placeholders ci-dessous comme href. AUCUN AUTRE LIEN N'EST AUTORISÉ.
+Tout lien hors de cette liste sera SUPPRIMÉ automatiquement par le serveur (texte conservé seul, sans bouton).
+Tu n'as PAS le droit d'inventer une URL, un mailto, un domaine, un site, ou un bouton qui ne correspond à AUCUNE des actions ci-dessous.
+
+Liste exhaustive des href autorisés (chacun mène à la bonne page de l'espace exposant) :
+- href="[[MON_ESPACE]]"              → page d'accueil de l'espace exposant (général)
+- href="[[MON_ESPACE_PROFIL]]"       → onglet Profil de l'exposant
+- href="[[MON_ESPACE_SITES]]"        → onglet Choix des sites (Tahiti / Moorea / Bora-Bora…)
+- href="[[MON_ESPACE_ANIMATION]]"    → onglet Détail de l'animation proposée
+- href="[[MON_ESPACE_DOCS]]"         → onglet Documents (assurance, convention, caution, RIB)
+- href="[[MON_ESPACE_ASSURANCE]]"    → onglet Documents — focus attestation d'assurance
+- href="[[MON_ESPACE_CONVENTION]]"   → onglet Documents — focus convention signée
+- href="[[MON_ESPACE_CAUTION]]"      → onglet Documents — focus caution 20 000 XPF
+- href="[[MON_ESPACE_LOGISTIQUE]]"   → onglet Logistique (mobilier, électricité, parking, hébergement)
+- href="[[MON_ESPACE_SATISFACTION]]" → onglet Questionnaire satisfaction post-événement
+- href="[[MON_ESPACE_GUIDE]]"        → onglet Guide pratique du Forum
+
+INTERDICTIONS FORMELLES :
+❌ Pas de href="mailto:..." (sauf le footer auto qui est ajouté par le serveur, ne le mets pas toi-même).
+❌ Pas de href="https://aracom.pf" ou autre site externe inventé.
+❌ Pas de href="#" ou href="" (boutons vides).
+❌ Pas de bouton sans correspondance avec une action concrète. Si tu n'as pas d'action utile, n'ajoute PAS de bouton, écris simplement le texte.
+
+Choisis le placeholder selon le contexte du mail (par exemple : relance assurance → [[MON_ESPACE_ASSURANCE]] ; relance caution → [[MON_ESPACE_CAUTION]] ; satisfaction → [[MON_ESPACE_SATISFACTION]] ; mail générique → [[MON_ESPACE]]).
+
 Tu retournes UNIQUEMENT un JSON valide de la forme : {"subject": "...", "body_html": "..."}
 Pas de markdown, pas de backticks, pas d'explication, juste le JSON.`;
 
@@ -3337,10 +3452,11 @@ ${custom_instruction ? `Instructions spécifiques : ${custom_instruction}` : ''}
 
 Contraintes :
 - Objet (subject) : court et accrocheur, 60 caractères max.
-- Corps (body_html) : 3-5 paragraphes max, avec un bouton d'action en HTML.
-- Le bouton principal DOIT toujours utiliser href="[[MON_ESPACE]]" (PAS de mailto:). Cette variable sera remplacée automatiquement par le lien personnel de l'exposant.
-- Exemple de bouton : <a href="[[MON_ESPACE]]" style="display:inline-block;padding:12px 24px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace exposant</a>
-- Texte du bouton selon le contexte : "Accéder à mon espace", "Compléter mon dossier", "Voir mon dossier", "Confirmer ma participation".
+- Corps (body_html) : 3-5 paragraphes max.
+- Pour ce mail (type "${mail_type}"), si tu mets un bouton d'action, utilise OBLIGATOIREMENT le placeholder approprié de la liste autorisée (voir le rappel système). Pour ce type de mail, le placeholder le plus pertinent est : ${defaultAction}.
+- Exemple de bouton conforme : <a href="${defaultAction}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">${defaultActionLabel}</a>
+- Si aucune action ne correspond à ce mail, n'ajoute AUCUN bouton (juste le texte).
+- N'ajoute pas de footer "Nous contacter" : un footer est ajouté automatiquement par le serveur.
 - Termine par "Bien cordialement,<br>L'équipe ARACOM".
 
 Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
@@ -3413,9 +3529,13 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
           .replaceAll('[[STAND]]', r.stand_code || '')
           .replaceAll('[[SITE]]', v?.name || '')
           .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
+        // 🔗 Resolve action placeholders ([[MON_ESPACE]], [[MON_ESPACE_DOCS]], etc.) to real magic-link URLs
+        personalizedBody = expandActionPlaceholders(personalizedBody, accessUrl);
         // 🔗 Replace any remaining mailto:agence@aracom-conseil.fr with the personal access URL
         // and append a fallback footer (mailto + raw URL) so users can always reach us.
         personalizedBody = replaceContactWithAccessLink(personalizedBody, accessUrl);
+        // 🛡️ STRICT GUARD : reject any link the AI may have hallucinated outside our whitelist
+        personalizedBody = guardLinks(personalizedBody, accessUrl);
 
         const messageId = uuid();
         const trackedBody = injectTracking(personalizedBody, messageId);
