@@ -3435,6 +3435,10 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
     // KEEPS : venues, animation_slots templates, users admin/pacific, roles
     if (route === 'tools/reset-db') {
       if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      // 🛡️ Garde-fou supplémentaire : requiert une phrase de confirmation explicite
+      if (body?.confirm !== 'JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES') {
+        return err('Pour exécuter ce reset, envoyez { "confirm": "JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES" } dans le body. Cette protection évite les déclenchements accidentels.', 400);
+      }
       const KEEP_USERS = ['u-admin', 'u-teva', 'u-agence', 'u-pc'];
       const stats = {};
       const COLLECTIONS_TO_WIPE = [
