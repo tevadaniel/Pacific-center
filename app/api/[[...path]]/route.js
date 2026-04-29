@@ -3430,6 +3430,39 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       return json({ user }, 201);
     }
 
+    // ============ TOOL : Reset DB to clean test state (admin only) ============
+    // Wipes all "live" data (orgs, registrations, tokens, mailing, documents, validations…)
+    // KEEPS : venues, animation_slots templates, users admin/pacific, roles
+    if (route === 'tools/reset-db') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const KEEP_USERS = ['u-admin', 'u-teva', 'u-agence', 'u-pc'];
+      const stats = {};
+      const COLLECTIONS_TO_WIPE = [
+        'organizations', 'organization_contacts', 'organization_history', 'organization_preferences',
+        'registrations', 'stand_assignments', 'registration_documents', 'deposit_transactions',
+        'access_tokens', 'email_campaigns', 'email_messages', 'tasks_or_followups',
+        'attendance_sessions', 'attendance_events', 'registration_anomalies',
+        'field_comments', 'field_media', 'post_event_reports', 'activity_logs',
+        'validation_requests', 'push_subscriptions', 'satisfaction_surveys', 'satisfaction_responses',
+        'backups',
+      ];
+      for (const c of COLLECTIONS_TO_WIPE) {
+        const r = await db.collection(c).deleteMany({});
+        if (r.deletedCount > 0) stats[c] = r.deletedCount;
+      }
+      const u = await db.collection('users').deleteMany({ id: { $nin: KEEP_USERS }, role_code: { $ne: 'aracom_admin' } });
+      stats.users_removed = u.deletedCount;
+      const s = await db.collection('venue_stands').updateMany({}, {
+        $set: { status: 'libre', updated_at: new Date() },
+        $unset: { reserved_for: '', reserved_at: '', confirmed_for: '' },
+      });
+      stats.venue_stands_freed = s.modifiedCount;
+      const ve = await db.collection('venue_elements').deleteMany({});
+      stats.venue_elements_removed = ve.deletedCount;
+      await logActivity(db, ctx.userId, 'system', 'reset', 'reset_db', null, stats);
+      return json({ ok: true, message: 'Base de données réinitialisée — vous pouvez tester en mode propre', stats });
+    }
+
     // ============ TOOL : Ensure ARACOM admin accounts (idempotent, no auth) ============
     // Used after deploys to (re)create the deterministic admin accounts with a known password.
     // Safe: only manages 3 specific emails. Default password = "Projetaracom12".
