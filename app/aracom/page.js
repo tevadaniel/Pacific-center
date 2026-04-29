@@ -44,12 +44,16 @@ const TABS = [
 
 export default function AracomPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null });
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setActiveTab(params.get('tab') || 'dashboard');
     const onPop = () => setActiveTab(new URLSearchParams(window.location.search).get('tab') || 'dashboard');
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  useEffect(() => {
+    api('/api/mailing/status').then(setMailStatus).catch(() => {});
   }, []);
   const setTab = (k) => {
     setActiveTab(k);
@@ -66,7 +70,22 @@ export default function AracomPage() {
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
-      right={<div className="flex items-center gap-2"><PushToggle /><AlertsBadge /><Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link></div>}
+      right={
+        <div className="flex items-center gap-2">
+          {mailStatus.test_mode_active && (
+            <button
+              onClick={() => setTab('mailing')}
+              title={`Mode test mail actif — redirection vers ${mailStatus.redirect_to}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-2.5 py-1.5 shadow-sm border border-red-700 transition-colors animate-pulse"
+            >
+              🛡️ TEST MAIL
+            </button>
+          )}
+          <PushToggle />
+          <AlertsBadge />
+          <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
+        </div>
+      }
     >
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
       {activeTab === 'exposants' && <ExposantsView />}
@@ -1260,6 +1279,7 @@ function MailingView() {
   const [sending, setSending] = useState(false);
   const [lastUsage, setLastUsage] = useState(null);
   const [smtp, setSmtp] = useState({ ok: false, configured: false, host: null, user: null, error: 'Non testé' });
+  const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null, allowed_recipients: [] });
   const [testingSmtp, setTestingSmtp] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testRecipient, setTestRecipient] = useState('');
@@ -1277,7 +1297,15 @@ function MailingView() {
       setSmtp({ ok: false, configured: false, error: e.message });
     }
   };
-  useEffect(() => { load(); loadSmtp(); loadTemplates(); loadLists(); }, []);
+  const loadMailStatus = async () => {
+    try {
+      const r = await api('/api/mailing/status');
+      setMailStatus(r);
+    } catch (e) {
+      // Silent — banner just won't appear
+    }
+  };
+  useEffect(() => { load(); loadSmtp(); loadTemplates(); loadLists(); loadMailStatus(); }, []);
 
   // Save / load templates
   const saveTemplate = async () => {
@@ -1419,23 +1447,22 @@ function MailingView() {
     if (!subject || !body) { toast.error('Objet et corps requis'); return; }
     if (!targetRegs.length) { toast.error('Aucun destinataire sélectionné — cochez au moins une case'); return; }
     const realSend = smtp.ok;
-    const samples = targetRegs.slice(0, 5).map(r => `• ${r.organization?.name} <${r.organization?.main_email}>`).join('\n');
-    const more = targetRegs.length > 5 ? `\n... et ${targetRegs.length - 5} autre(s)` : '';
-    const isGroup = targetRegs.length > 1;
-    const head = isGroup
-      ? `📧 ENVOI GROUPÉ à ${targetRegs.length} destinataires`
-      : `📧 ENVOI INDIVIDUEL à 1 destinataire`;
-    const mode = realSend
-      ? '✅ MODE RÉEL via Gmail SMTP — les emails partiront réellement.'
-      : '⚠️ MODE MOCK — SMTP non configuré, aucun email réel ne partira (uniquement enregistrement en base).';
-    const confirmMsg = `${head}\n${mode}\n\nObjet : ${subject}\n\nDestinataires :\n${samples}${more}\n\nConfirmer l'envoi ?`;
-    // Skip confirm() popup for single-recipient sends (often blocked by browser)
-    if (targetRegs.length > 1 && !confirm(confirmMsg)) return;
-    if (targetRegs.length === 1) {
-      // Quick visual confirmation via toast + still allow cancel via the toast click
+    const testModeActive = mailStatus.test_mode_active;
+    // 🛡️ EN MODE TEST : aucune confirmation nécessaire (impossible d'envoyer aux vrais contacts)
+    if (!testModeActive && targetRegs.length > 1) {
+      const samples = targetRegs.slice(0, 5).map(r => `• ${r.organization?.name} <${r.organization?.main_email}>`).join('\n');
+      const more = targetRegs.length > 5 ? `\n... et ${targetRegs.length - 5} autre(s)` : '';
+      const mode = realSend
+        ? '✅ MODE RÉEL via Gmail SMTP — les emails partiront réellement.'
+        : '⚠️ MODE MOCK — SMTP non configuré, aucun email réel ne partira.';
+      if (!confirm(`📧 ENVOI GROUPÉ à ${targetRegs.length} destinataires\n${mode}\n\nObjet : ${subject}\n\nDestinataires :\n${samples}${more}\n\nConfirmer l'envoi ?`)) return;
+    }
+    if (testModeActive) {
+      toast.info(`🛡️ Mode TEST — Envoi intercepté, redirection vers ${mailStatus.redirect_to}…`);
+    } else if (targetRegs.length === 1) {
       toast.info(`📧 Envoi en cours à ${targetRegs[0]?.organization?.main_email || '1 destinataire'}…`);
     }
-    if (realSend && targetRegs.length > 10) {
+    if (!testModeActive && realSend && targetRegs.length > 10) {
       if (!confirm(`⚠️ DOUBLE CONFIRMATION : vous allez envoyer ${targetRegs.length} emails RÉELS. Cette action est irréversible. Continuer ?`)) return;
     }
     setSending(true);
@@ -1444,7 +1471,12 @@ function MailingView() {
         method: 'POST',
         body: JSON.stringify({ subject, body_html: body, registration_ids: targetRegs.map(r => r.id), mail_type: type }),
       });
-      if (res.smtp_used) {
+      if (res.test_mode_active && res.redirected_count > 0) {
+        toast.success(
+          `🛡️ MODE TEST — ${res.redirected_count} email(s) intercepté(s) → ${res.redirect_to}\nAucun email n'est parti vers vos contacts.`,
+          { duration: 8000 }
+        );
+      } else if (res.smtp_used) {
         toast.success(`📧 ${res.sent} email(s) envoyé(s) via Gmail${res.failed ? ` — ${res.failed} échec(s)` : ''}`);
       } else {
         toast.success(`✉️ ${res.sent} email(s) enregistrés (MOCK — SMTP non configuré)`);
@@ -1503,14 +1535,59 @@ function MailingView() {
     setSendingTest(true);
     try {
       const r = await api('/api/mailing/send-test', { method: 'POST', body: JSON.stringify({ to: testRecipient }) });
-      if (r.ok) toast.success(`📨 Email de test envoyé à ${testRecipient}`);
+      if (r.ok) {
+        if (r.test_mode_active && r.redirect_to && String(r.redirect_to).toLowerCase() !== String(testRecipient).toLowerCase()) {
+          toast.success(`🛡️ MODE TEST — Email intercepté → redirigé vers ${r.redirect_to} (au lieu de ${testRecipient})`, { duration: 8000 });
+        } else {
+          toast.success(`📨 Email de test envoyé à ${testRecipient}`);
+        }
+      }
       else toast.error(`❌ ${r.error}`);
     } catch (e) { toast.error(e.message); }
     finally { setSendingTest(false); }
   };
 
   return (
-    <div className="grid lg:grid-cols-3 gap-4">
+    <div className="space-y-4">
+      {/* 🛡️ TEST MODE — top-of-page sticky banner */}
+      {mailStatus.test_mode_active && (
+        <div className="rounded-lg border-2 border-red-500 bg-red-50 p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="text-3xl">🛡️</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-extrabold text-red-700 text-base flex items-center gap-2 flex-wrap">
+                MODE TEST ACTIVÉ — Aucun email ne part vers vos contacts
+                <Badge className="bg-red-600 text-white">Sécurité maximale</Badge>
+              </div>
+              <div className="text-sm text-red-800 mt-1.5 leading-relaxed">
+                Tous les emails sont <b>interceptés par le serveur</b> et redirigés vers&nbsp;
+                <code className="bg-white px-1.5 py-0.5 rounded border border-red-300 text-red-900 font-bold">
+                  {mailStatus.redirect_to}
+                </code>.
+                Le sujet est préfixé par <code className="bg-white px-1 rounded border border-red-300">[TEST→email.original]</code> pour vous indiquer le destinataire prévu.
+                {mailStatus.allowed_recipients?.length > 0 && (
+                  <div className="mt-1 text-xs text-red-700">
+                    Exceptions (envois directs autorisés) : {mailStatus.allowed_recipients.join(', ')}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-red-700 mt-2 italic">
+                Pour passer en mode production réel : positionner <code className="bg-white px-1 rounded border border-red-300">MAIL_TEST_MODE=false</code> dans les variables d&apos;environnement (.env), puis redémarrer le service.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {!mailStatus.test_mode_active && smtp.ok && (
+        <div className="rounded-lg border-2 border-emerald-500 bg-emerald-50 p-3 shadow-sm flex items-center gap-2">
+          <div className="text-2xl">📨</div>
+          <div className="text-sm text-emerald-900">
+            <b>MODE PRODUCTION — Envoi RÉEL aux contacts.</b> Vos destinataires recevront effectivement les emails. Soyez vigilant.
+          </div>
+        </div>
+      )}
+
+      <div className="grid lg:grid-cols-3 gap-4">
       {/* Colonne 1 : composition */}
       <div className="lg:col-span-2 space-y-4">
         {/* SMTP status banner */}
@@ -1626,9 +1703,25 @@ function MailingView() {
                 <div className="mt-1 rounded-md border bg-white p-4 text-sm max-h-[300px] overflow-y-auto" dangerouslySetInnerHTML={{ __html: body }} />
               </div>
             )}
-            <Button className="w-full gap-2" onClick={send} disabled={sending || !subject || !body}>
-              <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer à ${targetRegs.length} destinataire(s)`} {!smtp.ok && <Badge variant="secondary" className="ml-1">MOCK</Badge>}
+            <Button
+              className={`w-full gap-2 ${mailStatus.test_mode_active ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
+              onClick={send}
+              disabled={sending || !subject || !body}
+            >
+              <Send className="w-4 h-4" />
+              {sending
+                ? 'Envoi…'
+                : mailStatus.test_mode_active
+                  ? `🛡️ Tester l'envoi à ${targetRegs.length} dest. (intercepté → ${mailStatus.redirect_to})`
+                  : `Envoyer à ${targetRegs.length} destinataire(s)`}
+              {!smtp.ok && <Badge variant="secondary" className="ml-1">MOCK</Badge>}
             </Button>
+            {mailStatus.test_mode_active && (
+              <p className="text-xs text-amber-700 -mt-1 flex items-center gap-1.5">
+                <span>🔒</span>
+                <span>Mode test actif — l&apos;email partira uniquement vers <b>{mailStatus.redirect_to}</b>, jamais vers les vrais contacts.</span>
+              </p>
+            )}
 
             {/* Schedule for later */}
             <div className="pt-3 border-t">
@@ -1814,6 +1907,7 @@ function MailingView() {
             ))}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

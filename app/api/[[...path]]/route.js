@@ -601,6 +601,19 @@ export async function GET(request, { params }) {
       })));
     }
 
+    // ---- Mailing status (TEST MODE indicator for UI) ----
+    if (route === 'mailing/status') {
+      const testMode = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
+      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
+      const allowList = (process.env.MAIL_ALLOWED_RECIPIENTS || '').split(',').map(s => s.trim()).filter(Boolean);
+      return json({
+        test_mode_active: testMode,
+        redirect_to: redirectTo,
+        allowed_recipients: allowList,
+        smtp_configured: isSmtpConfigured(),
+      });
+    }
+
     // ---- Scheduled emails listing ----
     if (route === 'mailing/scheduled') {
       const list = await db.collection('email_campaigns').find({ status: 'programmee' }).sort({ scheduled_at: 1 }).toArray();
@@ -3174,6 +3187,8 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       });
       let sent = 0;
       let failed = 0;
+      let redirected_count = 0;
+      const redirected_originals = [];
       const errors = [];
       for (const r of regs) {
         const o = orgById[r.organization_id];
@@ -3206,6 +3221,10 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
           });
           if (r2.ok) {
             providerId = r2.messageId || providerId;
+            if (r2.redirected_from) {
+              redirected_count++;
+              if (redirected_originals.length < 50) redirected_originals.push(r2.redirected_from);
+            }
           } else {
             sendStatus = 'echec';
             errorMsg = r2.error;
@@ -3226,7 +3245,20 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         if (sendStatus === 'envoye') sent++;
       }
       await db.collection('email_campaigns').updateOne({ id: campaignId }, { $set: { sent_count: sent, updated_at: new Date() } });
-      return json({ ok: true, sent, failed, smtp_used: smtpReady, errors: errors.slice(0, 5), campaign_id: campaignId });
+      const testModeActive = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
+      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
+      return json({
+        ok: true,
+        sent,
+        failed,
+        smtp_used: smtpReady,
+        errors: errors.slice(0, 5),
+        campaign_id: campaignId,
+        test_mode_active: testModeActive,
+        redirect_to: testModeActive ? redirectTo : null,
+        redirected_count,
+        redirected_originals: redirected_originals.slice(0, 10),
+      });
     }
 
     // ---- SMTP test endpoint (verifies Gmail SMTP credentials) ----
@@ -3252,7 +3284,14 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         subject: '✅ Test SMTP — Forum de la Rentrée 2026',
         html: `<p>Bonjour,</p><p>Ceci est un email de test envoyé depuis l'application <b>Forum de la Rentrée 2026</b>.</p><p>Si vous recevez ce message, la configuration Gmail SMTP fonctionne parfaitement. 🎉</p><p>Bien cordialement,<br>L'équipe ARACOM</p>`,
       });
-      return json(result, result.ok ? 200 : 500);
+      const testModeActive = String(process.env.MAIL_TEST_MODE || '').toLowerCase() === 'true';
+      const redirectTo = process.env.MAIL_REDIRECT_TO || 'tevageros@me.com';
+      return json({
+        ...result,
+        test_mode_active: testModeActive,
+        redirect_to: testModeActive ? redirectTo : null,
+        intended_recipient: to,
+      }, result.ok ? 200 : 500);
     }
 
     // ---- Send satisfaction survey invitation campaign (mocked) ----

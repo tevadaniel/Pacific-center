@@ -503,10 +503,23 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Mailing TEST MODE — bannière UI + indicateur header + toast post-envoi"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+  - task: "Mailing TEST MODE — bannière UI + indicateur header + toast post-envoi"
+    implemented: true
+    working: true
+    file: "app/aracom/page.js, app/api/[[...path]]/route.js, lib/mailer.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Ajout endpoint GET /api/mailing/status qui retourne {test_mode_active, redirect_to, allowed_recipients, smtp_configured}. POST /api/mailing/send et /api/mailing/send-test renvoient désormais redirected_count/redirected_originals/redirect_to/test_mode_active. Frontend ARACOM enrichi : 1) bannière rouge ULTRA-visible en haut de l'onglet Mailing quand TEST MODE actif, 2) badge 🛡️ TEST MAIL clignotant dans le header global ARACOM (toujours visible peu importe l'onglet), 3) bouton d'envoi orange 'Tester l'envoi à X dest. (intercepté → tevageros@me.com)' avec message rassurant, 4) toast post-envoi explicite '🛡️ MODE TEST — X email(s) intercepté(s) → tevageros@me.com — Aucun email n'est parti vers vos contacts'. CONFIRM() POPUP retiré pour mode test (résout aussi le bug Safari qui bloquait les confirmations). Test backend OK : send-test à random.contact@example.com renvoie redirected_from/test_mode_active/redirect_to. Test visuel via screenshot OK."
 
   - task: "Parcours Inscription self-service (/inscription)"
     implemented: true
