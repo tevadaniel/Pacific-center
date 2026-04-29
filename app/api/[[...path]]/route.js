@@ -52,6 +52,75 @@ function sanitizeEmailHtml(html) {
   });
 }
 
+/**
+ * Get-or-create a permanent access magic link for an exposant.
+ * Returns the full URL (https://.../access/TOKEN).
+ * Reuses the most recent non-revoked token if it exists, otherwise creates one.
+ */
+async function getOrCreateExposantAccessUrl(db, organizationId, email) {
+  if (!organizationId && !email) return null;
+  const query = organizationId
+    ? { organization_id: organizationId, purpose: 'exposant', revoked_at: null }
+    : { email: String(email || '').toLowerCase().trim(), purpose: 'exposant', revoked_at: null };
+  let tk = await db.collection('access_tokens').findOne(query, { sort: { created_at: -1 } });
+  if (!tk) {
+    const tokenStr = uuid().replace(/-/g, '') + uuid().replace(/-/g, '').slice(0, 16);
+    const tokenId = uuid();
+    await db.collection('access_tokens').insertOne({
+      id: tokenId,
+      token: tokenStr,
+      purpose: 'exposant',
+      organization_id: organizationId || null,
+      email: email || null,
+      label: 'Espace exposant (auto, mailing)',
+      expires_at: null,
+      revoked_at: null,
+      last_used_at: null,
+      last_email_sent_at: null,
+      use_count: 0,
+      created_at: new Date(),
+      updated_at: new Date(),
+      created_by: 'mailing_auto',
+    });
+    tk = { token: tokenStr };
+  }
+  return `${getPublicBaseUrl()}/access/${tk.token}`;
+}
+
+/**
+ * Replace mailto:agence@aracom-conseil.fr links in body_html with a real HTTP magic-link URL,
+ * AND append a fallback contact footer at the bottom.
+ *
+ * This solves the “mailto: opens blank page” problem on iCloud / Safari without default mail client.
+ * Recipients now click → arrive in their personal exposant space → they can complete docs, reply, etc.
+ */
+function replaceContactWithAccessLink(html, accessUrl) {
+  if (!html) return html;
+  let out = html;
+  if (accessUrl) {
+    // Replace href="mailto:agence@aracom-conseil.fr..." with href="ACCESS_URL"
+    out = out.replace(/href=(["'])mailto:agence@aracom-conseil\.fr[^"']*\1/gi, `href=$1${accessUrl}$1`);
+    // Replace any [[MON_ESPACE]] or [[ACCESS_LINK]] placeholders the AI may use
+    out = out.replaceAll('[[MON_ESPACE]]', accessUrl).replaceAll('[[ACCESS_LINK]]', accessUrl);
+    // Replace common French CTA labels inside <a>...<a> when they were mailto-bound
+    out = out.replace(
+      /(<a[^>]+href=["']mailto:agence@aracom-conseil\.fr[^"']*["'][^>]*>)([\s\S]*?)(<\/a>)/gi,
+      (m, open, _inner, close) => `${open.replace(/href=["']mailto:[^"']+["']/i, `href="${accessUrl}"`)}Accéder à mon espace${close}`
+    );
+  }
+  // Append a fallback contact line if not already present
+  if (!/agence@aracom-conseil\.fr/.test(out) || !out.includes('💬')) {
+    out += `
+<hr style="margin:28px 0 12px;border:0;border-top:1px solid #e2e8f0" />
+<p style="font-size:11px;color:#64748b;line-height:1.6;margin:6px 0">
+💬 Si le bouton ne fonctionne pas, vous pouvez aussi nous écrire directement à
+<a href="mailto:agence@aracom-conseil.fr" style="color:#1d4ed8">agence@aracom-conseil.fr</a>
+${accessUrl ? `<br/>🔗 Ou copier-coller ce lien dans votre navigateur : <span style="word-break:break-all;color:#475569">${accessUrl}</span>` : ''}
+</p>`;
+  }
+  return out;
+}
+
 const EDITION_ID = 'edition-2026';
 
 const json = (data, status = 200) => NextResponse.json(data, { status });
@@ -3249,11 +3318,13 @@ Contexte de l'événement :
 
 Ton style : ${tone}. Le français doit être soigné, chaleureux mais professionnel. Utilise le vouvoiement. Signe toujours "L'équipe ARACOM".
 Le HTML doit être propre et inline (email-compatible) : <p>, <b>, <a>, <ul>/<li>, pas de CSS externe.
-Tu peux utiliser des variables [[NOM_EXPOSANT]], [[DISCIPLINE]], [[STAND]], [[SITE]], [[CONTACT_NAME]] pour la personnalisation si le mail est groupé.
+Tu peux utiliser des variables [[NOM_EXPOSANT]], [[DISCIPLINE]], [[STAND]], [[SITE]], [[CONTACT_NAME]], [[MON_ESPACE]] pour la personnalisation.
 RÈGLE CRITIQUE BOUTONS / LIENS :
-- Pour TOUT bouton de contact ou "Nous contacter", utilise OBLIGATOIREMENT cette URL exacte : mailto:agence@aracom-conseil.fr?subject=Forum%20de%20la%20Rentr%C3%A9e%202026%20-%20[[NOM_EXPOSANT]]
-- N'invente JAMAIS d'autre adresse email (pas de contact@aracom.pf, info@..., etc.). UNIQUEMENT agence@aracom-conseil.fr.
+- Pour TOUT bouton d'action (Nous contacter, Compléter mon dossier, Confirmer, Accéder à mon espace, etc.), utilise OBLIGATOIREMENT cette URL exacte : [[MON_ESPACE]]
+- [[MON_ESPACE]] sera automatiquement remplacé au moment de l'envoi par le lien personnel (magic link) de chaque exposant vers son portail. Ce lien fonctionne SUR TOUS LES NAVIGATEURS sans dépendre d'un client mail.
+- N'utilise JAMAIS de mailto: dans les boutons (cela ouvre une page blanche sur certains clients comme iCloud/Safari).
 - N'invente JAMAIS d'URL https://aracom.pf ou autre site fictif.
+- Texte recommandé pour le bouton principal : "Accéder à mon espace exposant", "Compléter mon dossier", "Voir mon dossier".
 Tu retournes UNIQUEMENT un JSON valide de la forme : {"subject": "...", "body_html": "..."}
 Pas de markdown, pas de backticks, pas d'explication, juste le JSON.`;
 
@@ -3266,9 +3337,10 @@ ${custom_instruction ? `Instructions spécifiques : ${custom_instruction}` : ''}
 
 Contraintes :
 - Objet (subject) : court et accrocheur, 60 caractères max.
-- Corps (body_html) : 3-5 paragraphes max, avec un bouton d'action en HTML si pertinent.
-- Si tu mets un bouton "Nous contacter" / "Contactez-nous" / etc., utilise OBLIGATOIREMENT ceci comme href (exactement) : mailto:agence@aracom-conseil.fr?subject=Forum%20de%20la%20Rentr%C3%A9e%202026%20-%20[[NOM_EXPOSANT]]
-- Exemple de bouton : <a href="mailto:agence@aracom-conseil.fr?subject=Forum%20de%20la%20Rentr%C3%A9e%202026%20-%20[[NOM_EXPOSANT]]" style="display:inline-block;padding:10px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:4px;font-weight:600">Nous contacter</a>
+- Corps (body_html) : 3-5 paragraphes max, avec un bouton d'action en HTML.
+- Le bouton principal DOIT toujours utiliser href="[[MON_ESPACE]]" (PAS de mailto:). Cette variable sera remplacée automatiquement par le lien personnel de l'exposant.
+- Exemple de bouton : <a href="[[MON_ESPACE]]" style="display:inline-block;padding:12px 24px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace exposant</a>
+- Texte du bouton selon le contexte : "Accéder à mon espace", "Compléter mon dossier", "Voir mon dossier", "Confirmer ma participation".
 - Termine par "Bien cordialement,<br>L'équipe ARACOM".
 
 Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
@@ -3327,18 +3399,23 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         const o = orgById[r.organization_id];
         const v = venueById[r.venue_id];
         if (!o?.main_email) continue;
+        // 🔗 Get-or-create permanent magic link to exposant's space (replaces mailto: which fails on Safari/iCloud)
+        const accessUrl = await getOrCreateExposantAccessUrl(db, o.id, o.main_email);
         const personalizedSubject = subject
           .replaceAll('[[NOM_EXPOSANT]]', o.name || '')
           .replaceAll('[[DISCIPLINE]]', o.discipline || '')
           .replaceAll('[[STAND]]', r.stand_code || '')
           .replaceAll('[[SITE]]', v?.name || '')
           .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
-        const personalizedBody = sanitizedBodyHtml
+        let personalizedBody = sanitizedBodyHtml
           .replaceAll('[[NOM_EXPOSANT]]', o.name || '')
           .replaceAll('[[DISCIPLINE]]', o.discipline || '')
           .replaceAll('[[STAND]]', r.stand_code || '')
           .replaceAll('[[SITE]]', v?.name || '')
           .replaceAll('[[CONTACT_NAME]]', o.contact_name || '');
+        // 🔗 Replace any remaining mailto:agence@aracom-conseil.fr with the personal access URL
+        // and append a fallback footer (mailto + raw URL) so users can always reach us.
+        personalizedBody = replaceContactWithAccessLink(personalizedBody, accessUrl);
 
         const messageId = uuid();
         const trackedBody = injectTracking(personalizedBody, messageId);
