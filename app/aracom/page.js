@@ -3666,10 +3666,13 @@ function TimelineBlock({ registrationId }) {
 }
 
 function NewSlotForm({ registrationId, venueId, onDone }) {
+  const [show, setShow] = useState(false);
   const [form, setForm] = useState({ day_label: 'vendredi', start_time: '11:00', end_time: '12:00', title: 'Animation' });
   const save = async () => {
-    await api('/api/animation-slots', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, venue_id: venueId, ...form }) });
-    toast.success('Créneau ajouté'); setShow(false); onDone();
+    try {
+      await api('/api/animation-slots', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, venue_id: venueId, ...form }) });
+      toast.success('Créneau ajouté'); setShow(false); onDone();
+    } catch (e) { toast.error('Erreur : ' + e.message); }
   };
   if (!show) return <Button variant="outline" size="sm" className="gap-2" onClick={() => setShow(true)}><Plus className="w-4 h-4" /> Ajouter un créneau</Button>;
   return (
