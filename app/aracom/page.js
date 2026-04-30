@@ -60,9 +60,16 @@ export default function AracomPage() {
   useEffect(() => {
     api('/api/mailing/status').then(setMailStatus).catch(() => {});
   }, []);
-  const setTab = (k) => {
+  const setTab = (k, extraParams) => {
     setActiveTab(k);
-    const url = k === 'dashboard' ? '/aracom' : `/aracom?tab=${k}`;
+    const base = k === 'dashboard' ? '/aracom' : `/aracom?tab=${k}`;
+    let url = base;
+    if (extraParams && typeof extraParams === 'object') {
+      const sp = new URLSearchParams();
+      if (k !== 'dashboard') sp.set('tab', k);
+      Object.entries(extraParams).forEach(([key, val]) => { if (val != null) sp.set(key, String(val)); });
+      url = `/aracom?${sp.toString()}`;
+    }
     window.history.pushState({}, '', url);
   };
 
@@ -87,7 +94,7 @@ export default function AracomPage() {
             </button>
           )}
           <PushToggle />
-          <AlertsBadge />
+          <AlertsBadge onGoto={setTab} />
           <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
         </div>
       }
@@ -1519,6 +1526,8 @@ function MailingView() {
   const [yearFilter, setYearFilter] = useState('all'); // '2019', '2020', '2023', '2024', '2025', 'fidele', 'regulier', 'ponctuel', 'jamais'
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
+  // Ref pour tracker l'initialisation de la sélection (évite les écrasements côté client)
+  const selectionInitializedRef = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [lastUsage, setLastUsage] = useState(null);
@@ -1550,6 +1559,48 @@ function MailingView() {
     }
   };
   useEffect(() => { load(); loadSmtp(); loadTemplates(); loadLists(); loadMailStatus(); }, []);
+
+  // 🔗 Initialisation de la sélection (preselect URL via Centre d'alertes OU auto-populate par défaut)
+  // Ce useEffect tourne UNE SEULE FOIS quand regs sont chargés. Il consomme les params URL
+  // (preselect + mail_type) ou populate avec tous les visibles si pas de preselect.
+  useEffect(() => {
+    if (regs.length === 0) return;
+    if (selectionInitializedRef.current) return;
+    selectionInitializedRef.current = true;
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const preselect = params.get('preselect');
+      const mailType = params.get('mail_type');
+
+      if (preselect) {
+        const ids = preselect.split(',').filter(Boolean);
+        if (ids.length > 0) {
+          setSelectedIds(new Set(ids));
+          toast.success(`📥 ${ids.length} destinataire${ids.length > 1 ? 's' : ''} pré-coché${ids.length > 1 ? 's' : ''} depuis le Centre d'alertes`);
+        }
+        if (mailType && MAIL_TYPES.some(t => t.value === mailType)) {
+          setType(mailType);
+        }
+        // Nettoie les params pour éviter le re-déclenchement après refresh
+        const url = new URL(window.location.href);
+        url.searchParams.delete('preselect');
+        url.searchParams.delete('mail_type');
+        window.history.replaceState({}, '', url.toString());
+        return; // sélection imposée → ne pas auto-populate
+      }
+    }
+    // Cas par défaut : populate avec tous les visibles
+    setSelectedIds(new Set(filteredRegs.map(r => r.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regs.length]);
+
+  // Quand les FILTRES changent (action utilisateur APRÈS init), on resync la sélection avec tous les visibles
+  useEffect(() => {
+    if (!selectionInitializedRef.current) return; // pas encore initialisé → laisser l'autre useEffect gérer
+    setSelectedIds(new Set(filteredRegs.map(r => r.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, siteFilter, yearFilter]);
 
   // Save / load templates
   const saveTemplate = async () => {
@@ -1650,12 +1701,6 @@ function MailingView() {
     return true;
   });
   const venues = [...new Set(regs.map(r => r.venue?.name).filter(Boolean))].sort();
-
-  // Quand les filtres changent, on resync la sélection avec tous les visibles
-  useEffect(() => {
-    setSelectedIds(new Set(filteredRegs.map(r => r.id)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, siteFilter, yearFilter, regs.length]);
 
   // Destinataires effectifs (= cochés ET visibles dans le filtre)
   const targetRegs = filteredRegs.filter(r => selectedIds.has(r.id));
@@ -3450,43 +3495,250 @@ function PendingValidationsCard({ onGoto }) {
   );
 }
 
-function AlertsBadge() {
+function AlertsBadge({ onGoto }) {
   const [alerts, setAlerts] = useState(null);
   const [open, setOpen] = useState(false);
-  useEffect(() => { api('/api/alerts').then(setAlerts).catch(() => {}); const t = setInterval(() => api('/api/alerts').then(setAlerts).catch(() => {}), 30000); return () => clearInterval(t); }, []);
+  const [regs, setRegs] = useState(null);
+  const [anomalies, setAnomalies] = useState([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [activeCat, setActiveCat] = useState('insurance');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Polling alertes (toutes les 30s)
+  useEffect(() => {
+    api('/api/alerts').then(setAlerts).catch(() => {});
+    const t = setInterval(() => api('/api/alerts').then(setAlerts).catch(() => {}), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Charge regs + anomalies à l'ouverture du Sheet
+  useEffect(() => {
+    if (!open) return;
+    setLoadingDetail(true);
+    Promise.all([
+      api('/api/registrations'),
+      api('/api/anomalies').catch(() => []),
+    ])
+      .then(([r, a]) => { setRegs(r); setAnomalies(Array.isArray(a) ? a : []); })
+      .catch(() => {})
+      .finally(() => setLoadingDetail(false));
+    setSelectedIds(new Set());
+  }, [open]);
+
   if (!alerts) return null;
   const total = alerts.anomalies_open + alerts.tasks_open + alerts.missing_insurance + (alerts.validation_pending || 0) + (alerts.validation_rdv || 0);
+
+  // Catégorisation des dossiers (côté client, à partir des flags registrations + anomalies)
+  const activeRegs = (regs || []).filter(r => r.status !== 'annule' && r.status !== 'libre');
+  const byCat = {
+    insurance: {
+      label: '🛡️ Assurance manquante',
+      mail_type: 'relance_assurance',
+      color: 'rose',
+      items: activeRegs.filter(r => !r.is_insurance_uploaded),
+    },
+    convention: {
+      label: '📋 Convention non signée',
+      mail_type: 'relance_convention',
+      color: 'amber',
+      items: activeRegs.filter(r => !r.is_convention_signed),
+    },
+    deposit: {
+      label: '💰 Caution non reçue',
+      mail_type: 'relance_caution',
+      color: 'orange',
+      items: activeRegs.filter(r => !r.is_deposit_received && r.status !== 'a_relancer' && r.stand_code),
+    },
+    a_relancer: {
+      label: '🔔 À relancer (aucune réponse)',
+      mail_type: 'relance_generale',
+      color: 'violet',
+      items: activeRegs.filter(r => r.status === 'a_relancer'),
+    },
+    no_stand: {
+      label: '📍 Sans stand attribué',
+      mail_type: 'relance_generale',
+      color: 'sky',
+      items: activeRegs.filter(r => !r.stand_code && r.status !== 'a_relancer'),
+    },
+    anomalies: {
+      label: '⚠️ Anomalies ouvertes (terrain)',
+      mail_type: 'relance_generale',
+      color: 'red',
+      items: (() => {
+        const openAnom = anomalies.filter(a => a.resolved_status !== 'resolved' && !a.resolved_at);
+        const ids = new Set(openAnom.map(a => a.registration_id));
+        return activeRegs.filter(r => ids.has(r.id)).map(r => ({
+          ...r,
+          _anom_count: openAnom.filter(a => a.registration_id === r.id).length,
+        }));
+      })(),
+    },
+  };
+
+  const cur = byCat[activeCat] || byCat.insurance;
+  const allSelected = cur.items.length > 0 && cur.items.every(r => selectedIds.has(r.id));
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(cur.items.map(r => r.id)));
+    }
+  };
+  const toggleOne = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const openFiche = (regId) => {
+    const url = `/aracom?tab=exposants&open=${encodeURIComponent(regId)}`;
+    window.history.pushState({}, '', url);
+    onGoto?.('exposants');
+    setOpen(false);
+  };
+
+  const sendRelance = () => {
+    if (selectedIds.size === 0) { toast.error('Sélectionnez au moins un exposant'); return; }
+    const ids = Array.from(selectedIds).join(',');
+    setOpen(false);
+    // Passe les params via le 2e argument de setTab (qui préserve preselect/mail_type dans l'URL)
+    onGoto?.('mailing', { preselect: ids, mail_type: cur.mail_type });
+    toast.success(`${selectedIds.size} exposant${selectedIds.size > 1 ? 's' : ''} pré-sélectionné${selectedIds.size > 1 ? 's' : ''} dans Mailing`);
+  };
+
   return (
-    <div className="relative">
-      <Button size="sm" variant="outline" className="gap-2" onClick={() => setOpen(!open)}>
+    <>
+      <Button size="sm" variant="outline" className="gap-2" onClick={() => setOpen(true)} title="Centre d'alertes">
         <AlertTriangle className="w-4 h-4" />
         {total > 0 && <Badge className="bg-red-600 text-white h-5 min-w-[20px] px-1.5 text-[10px]">{total}</Badge>}
       </Button>
-      {open && (
-        <div className="absolute right-0 top-10 w-80 bg-white border rounded-md shadow-lg p-3 z-50 space-y-2">
-          <div className="font-medium text-sm">Alertes</div>
-          <div className="space-y-1 text-sm">
+
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="p-5 border-b sticky top-0 bg-white z-10">
+            <SheetTitle className="flex items-center gap-2 text-lg">
+              <AlertTriangle className="w-5 h-5 text-rose-600" /> Centre d&apos;alertes
+              {total > 0 && <Badge className="bg-rose-600">{total}</Badge>}
+            </SheetTitle>
+            <SheetDescription>
+              Visualisez les dossiers litigieux par catégorie, sélectionnez les destinataires et lancez une relance par email.
+            </SheetDescription>
+          </SheetHeader>
+
+          {/* Mini-récap header (stats globales) */}
+          <div className="px-5 pt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
             {alerts.validation_pending > 0 && (
-              <Link href="/aracom?tab=validations" className="flex items-center justify-between rounded px-2 py-1 bg-violet-50 hover:bg-violet-100">
-                <span className="text-violet-900 font-medium">🔔 Demandes de validation</span>
-                <Badge className="bg-violet-600">{alerts.validation_pending}</Badge>
-              </Link>
+              <button onClick={() => { setOpen(false); onGoto?.('validations'); }} className="rounded-md p-2 text-left bg-violet-50 hover:bg-violet-100 border border-violet-200">
+                <div className="text-xs text-violet-700">🔔 Validations en attente</div>
+                <div className="text-xl font-bold text-violet-900">{alerts.validation_pending}</div>
+              </button>
             )}
             {alerts.validation_rdv > 0 && (
-              <Link href="/aracom?tab=validations" className="flex items-center justify-between rounded px-2 py-1 bg-blue-50 hover:bg-blue-100">
-                <span className="text-blue-900 font-medium">📅 RDV cautions à honorer</span>
-                <Badge className="bg-blue-600">{alerts.validation_rdv}</Badge>
-              </Link>
+              <button onClick={() => { setOpen(false); onGoto?.('validations'); }} className="rounded-md p-2 text-left bg-blue-50 hover:bg-blue-100 border border-blue-200">
+                <div className="text-xs text-blue-700">📅 RDV cautions</div>
+                <div className="text-xl font-bold text-blue-900">{alerts.validation_rdv}</div>
+              </button>
             )}
-            <div className="flex items-center justify-between"><span>Anomalies ouvertes</span><Badge variant={alerts.anomalies_open ? 'destructive' : 'secondary'}>{alerts.anomalies_open}</Badge></div>
-            <div className="flex items-center justify-between"><span>Dont critiques</span><Badge variant={alerts.critical_anomalies ? 'destructive' : 'secondary'}>{alerts.critical_anomalies}</Badge></div>
-            <div className="flex items-center justify-between"><span>Tâches en cours</span><Badge variant="secondary">{alerts.tasks_open}</Badge></div>
-            <div className="flex items-center justify-between"><span>Assurances manquantes</span><Badge variant={alerts.missing_insurance ? 'destructive' : 'secondary'}>{alerts.missing_insurance}</Badge></div>
+            {alerts.tasks_open > 0 && (
+              <button onClick={() => { setOpen(false); onGoto?.('relances'); }} className="rounded-md p-2 text-left bg-amber-50 hover:bg-amber-100 border border-amber-200">
+                <div className="text-xs text-amber-700">📌 Tâches en cours</div>
+                <div className="text-xl font-bold text-amber-900">{alerts.tasks_open}</div>
+              </button>
+            )}
+            {alerts.critical_anomalies > 0 && (
+              <button onClick={() => { setActiveCat('anomalies'); }} className="rounded-md p-2 text-left bg-red-50 hover:bg-red-100 border border-red-200">
+                <div className="text-xs text-red-700">🚨 Anomalies critiques</div>
+                <div className="text-xl font-bold text-red-900">{alerts.critical_anomalies}</div>
+              </button>
+            )}
           </div>
-          <Button size="sm" variant="ghost" className="w-full" onClick={() => setOpen(false)}>Fermer</Button>
-        </div>
-      )}
-    </div>
+
+          {/* Tabs catégories */}
+          <div className="px-5 pt-3 pb-2 border-b">
+            <div className="text-xs uppercase text-slate-500 mb-2">Dossiers litigieux par catégorie</div>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(byCat).map(([key, cat]) => (
+                <button
+                  key={key}
+                  onClick={() => { setActiveCat(key); setSelectedIds(new Set()); }}
+                  className={`text-xs rounded-full px-3 py-1.5 border transition-colors ${activeCat === key ? `bg-${cat.color}-600 text-white border-${cat.color}-700` : 'bg-white hover:bg-slate-50 border-slate-200'}`}
+                >
+                  {cat.label} <span className={`ml-1 ${activeCat === key ? 'text-white' : 'text-slate-500'}`}>({cat.items.length})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Liste des dossiers de la catégorie active */}
+          <div className="flex-1 overflow-y-auto px-5 py-3">
+            {loadingDetail ? (
+              <div className="py-12 text-center text-slate-500"><RefreshCw className="w-6 h-6 mx-auto animate-spin mb-2" /> Chargement…</div>
+            ) : cur.items.length === 0 ? (
+              <div className="py-12 text-center text-emerald-600">
+                <CheckCircle2 className="w-10 h-10 mx-auto mb-2" />
+                <div className="font-medium">Aucun dossier dans cette catégorie 🎉</div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs pb-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+                    <span className="font-medium">{allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}</span>
+                  </label>
+                  <span className="text-slate-500">{selectedIds.size} / {cur.items.length} sélectionnés</span>
+                </div>
+                {cur.items.map(r => (
+                  <div key={r.id} className={`border rounded-md p-2.5 flex items-start gap-2 transition-colors ${selectedIds.has(r.id) ? 'bg-blue-50 border-blue-300' : 'bg-white hover:bg-slate-50'}`}>
+                    <Checkbox className="mt-1" checked={selectedIds.has(r.id)} onCheckedChange={() => toggleOne(r.id)} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm truncate">{r.organization_name || r.organization?.name || '—'}</span>
+                        {r.priority_level && <Badge variant="secondary" className="text-[10px] shrink-0">{r.priority_level}</Badge>}
+                        <Badge variant="secondary" className={`text-[10px] shrink-0 ${REGISTRATION_STATUS_COLOR[r.status] || ''}`}>{REGISTRATION_STATUS_LABEL[r.status] || r.status}</Badge>
+                        {r._anom_count > 0 && <Badge className="bg-red-600 text-white text-[10px]">{r._anom_count} anom.</Badge>}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {r.discipline || '—'}
+                        {r.venue_name && <> · 📍 {r.venue_name}</>}
+                        {r.stand_code && <> · 🔖 {r.stand_code}</>}
+                        <> · {r.completion_percent || 0}%</>
+                      </div>
+                      {(r.main_email || r.organization?.main_email) && (
+                        <div className="text-[11px] text-slate-400 truncate">📧 {r.main_email || r.organization?.main_email}</div>
+                      )}
+                    </div>
+                    <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => openFiche(r.id)}>
+                      <Eye className="w-3 h-3 mr-1" /> Fiche
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer fixe avec actions */}
+          <div className="border-t p-4 bg-slate-50 flex items-center gap-2 sticky bottom-0">
+            <div className="flex-1 text-sm">
+              {selectedIds.size > 0 ? (
+                <span className="font-medium text-blue-700">{selectedIds.size} exposant{selectedIds.size > 1 ? 's' : ''} sélectionné{selectedIds.size > 1 ? 's' : ''}</span>
+              ) : (
+                <span className="text-slate-500 text-xs">Cochez des dossiers puis lancez une relance groupée</span>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Fermer</Button>
+            <Button
+              size="sm"
+              disabled={selectedIds.size === 0}
+              className="bg-blue-600 hover:bg-blue-700 gap-1.5 disabled:opacity-50"
+              onClick={sendRelance}
+            >
+              <Send className="w-4 h-4" /> Relancer par mail ({selectedIds.size})
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 
