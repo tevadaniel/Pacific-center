@@ -560,6 +560,27 @@ function ExposantsView() {
         definitions={PRIORITY_DEFINITIONS}
         storageKey="fr26_help_priorities"
       />
+      <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+        <CardContent className="p-3 flex items-center gap-3 flex-wrap">
+          <div className="flex-1 min-w-[260px]">
+            <div className="font-semibold text-violet-900 text-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> Synthèses IA des profils exposants</div>
+            <div className="text-xs text-violet-800">Génère pour chaque exposant un mini-profil (fidélité, ponctualité, caution, vigilance) à partir de son historique. Apparaît dans l&apos;onglet « Résumé » de chaque fiche.</div>
+          </div>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 gap-1.5"
+            onClick={async () => {
+              if (!confirm('Générer une synthèse IA pour tous les exposants ?\n\nL\'opération tourne en arrière-plan (env. 1-2 min/100 exposants).\nCoût IA : ~600 tokens par exposant.')) return;
+              try {
+                const r = await api('/api/registrations/generate-insights-bulk', { method: 'POST', body: JSON.stringify({}) });
+                toast.success(r.message);
+              } catch (e) { toast.error(e.message); }
+            }}
+          >
+            <Sparkles className="w-4 h-4" /> Générer pour tous
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="p-4">
@@ -763,6 +784,7 @@ function FicheExposant({ id, onClose }) {
               </TabsList>
 
               <TabsContent value="resume" className="space-y-3">
+                <AiInsightCard registration={data.registration} onRefresh={load} />
                 <Info label="Contact" value={data.organization?.contact_name} />
                 <Info label="Email" value={data.organization?.main_email} />
                 <Info label="Téléphone" value={data.organization?.main_phone} />
@@ -4104,6 +4126,58 @@ function ConfirmedExposantsPanel({ stands, venue }) {
 
 
 // ============ PROSPECTION ARACOM VIEW (vue consolidée admin) ============
+// ============ AI Insight Card (synthèse IA d'un exposant) ============
+const VIGILANCE_STYLE = {
+  low:    { bg: 'bg-emerald-50 border-emerald-300', label: '🟢 Fiable',         text: 'text-emerald-900' },
+  medium: { bg: 'bg-amber-50 border-amber-300',     label: '🟡 À surveiller',   text: 'text-amber-900' },
+  high:   { bg: 'bg-rose-50 border-rose-300',       label: '🔴 Vigilance',      text: 'text-rose-900' },
+  new:    { bg: 'bg-violet-50 border-violet-300',   label: '🆕 Nouveau dossier', text: 'text-violet-900' },
+};
+
+function AiInsightCard({ registration, onRefresh }) {
+  const [busy, setBusy] = useState(false);
+  if (!registration) return null;
+  const v = VIGILANCE_STYLE[registration.ai_insight_vigilance] || VIGILANCE_STYLE.new;
+  const generate = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registration.id}/generate-insight`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('✨ Synthèse IA générée');
+      onRefresh && onRefresh();
+    } catch (e) { toast.error('Erreur IA : ' + e.message); }
+    setBusy(false);
+  };
+  return (
+    <Card className={`border-2 ${v.bg}`}>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <h3 className={`font-bold text-sm flex items-center gap-1.5 ${v.text}`}>
+            <Sparkles className="w-4 h-4" /> Synthèse IA — Profil de l&apos;exposant
+            <Badge variant="outline" className="text-[10px] ml-1">{v.label}</Badge>
+          </h3>
+          <Button size="sm" variant="outline" onClick={generate} disabled={busy} className="gap-1 text-[11px] h-7">
+            {busy ? <><RefreshCw className="w-3 h-3 animate-spin" /> Génération…</> : <><Sparkles className="w-3 h-3" /> {registration.ai_insight ? 'Régénérer' : 'Générer'}</>}
+          </Button>
+        </div>
+        {registration.ai_insight ? (
+          <>
+            <div className={`text-sm leading-relaxed ${v.text}`} dangerouslySetInnerHTML={{ __html: registration.ai_insight }} />
+            {registration.ai_insight_generated_at && (
+              <div className="text-[10px] text-slate-500 mt-2 italic">
+                Générée le {new Date(registration.ai_insight_generated_at).toLocaleString('fr-FR')}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-xs text-slate-600 italic">
+            Aucune synthèse IA encore générée pour cet exposant. Cliquez sur <b>Générer</b> pour analyser son historique (fidélité, ponctualité, caution, points de vigilance).
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const PROSPECT_STATUS_ARACOM = [
   { value: 'a_contacter', label: 'À contacter', color: 'bg-slate-100 text-slate-700' },
   { value: 'contacte', label: 'Contacté', color: 'bg-blue-100 text-blue-700' },

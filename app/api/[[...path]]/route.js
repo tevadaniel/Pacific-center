@@ -3694,6 +3694,113 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       return json({ ok: true, receipt_number: receiptNumber, document_id: docId });
     }
 
+    // ============ AI INSIGHT — Synthèse IA du comportement historique d'un exposant ============
+    // Génère un texte court d'aide à la décision pour l'admin :
+    //   - fidélité (nb éditions passées),
+    //   - respect des délais documents,
+    //   - paiement caution,
+    //   - rigueur globale,
+    //   - points de vigilance.
+    // Stocké dans registration.ai_insight (+ ai_insight_generated_at)
+    if (route.match(/^registrations\/[^/]+\/generate-insight$/)) {
+      if (!process.env.EMERGENT_LLM_KEY) return err('Clé Emergent LLM non configurée', 500);
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Registration introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (!org) return err('Organisation introuvable', 404);
+      // Données historiques
+      const deposits = await db.collection('deposit_transactions').find({ registration_id: regId }).sort({ created_at: 1 }).toArray();
+      const docsArchive = await db.collection('registration_documents_archive').find({ registration_id: regId }).toArray();
+      const acts = await db.collection('activity_logs').find({ 'metadata.registration_id': regId }).sort({ created_at: 1 }).limit(15).toArray();
+      const ph = org.participation_history || {};
+      const editionsPast = Object.keys(ph).filter(k => k.startsWith('y') && ph[k] === true).map(k => k.slice(1));
+
+      const ctxLines = [
+        `**Exposant** : ${org.name} (${org.discipline || 'discipline non précisée'})`,
+        `**Contact principal** : ${org.contact_name || '—'} · ${org.main_email || '—'} · ${org.main_phone || '—'}`,
+        `**Priorité officielle** : ${org.priority_level || 'C'}`,
+        `**Fidélité** : ${ph.fidelity || (editionsPast.length >= 3 ? 'Fidèle' : 'Nouveau / occasionnel')} — ${ph.nb_editions || editionsPast.length} édition(s) passée(s) ${editionsPast.length ? '('+editionsPast.join(', ')+')' : ''}`,
+        `**Notes internes ARACOM** : ${org.aracom_private || org.notes || '—'}`,
+        ``,
+        `**Caution (historique)** : ${deposits.length} transaction(s) — ${deposits.map(d => d.status).join(', ') || 'aucune'}`,
+        `**Documents archivés** : ${docsArchive.length}`,
+        `**Activités récentes** : ${acts.slice(-5).map(a => a.action).join(', ') || 'aucune trace'}`,
+      ];
+      const contextStr = ctxLines.join('\n');
+
+      const systemPrompt = `Tu es un assistant analytique pour ARACOM (organisateur du Forum de la Rentrée 2026 en Polynésie).
+Ton rôle : générer un MICRO-PROFIL TYPE FICHE PROSPECT pour aider l'admin à se positionner immédiatement face à un exposant.
+
+Règles strictes :
+- Maximum 80 mots, en français concis et factuel.
+- Format Markdown avec des balises <b> pour les points clés.
+- Termine par 1 ou 2 indicateurs visuels : 🟢 Fiable / 🟡 À surveiller / 🔴 Vigilance / 🆕 Nouveau dossier
+- Pas de blabla, aucune phrase neutre type "il faudrait voir".
+- Concentre-toi sur : fidélité, ponctualité documents, paiement caution, rigueur, points d'attention.
+- Si données absentes ou nouveau dossier, le dis clairement.
+- Ne hallucine PAS de chiffres ou faits non présents dans le contexte.
+
+Retourne UNIQUEMENT un JSON :
+{ "insight": "...", "vigilance_level": "low" | "medium" | "high" | "new" }`;
+
+      const userPrompt = `Voici le contexte de l'exposant :
+${contextStr}
+
+Génère le micro-profil et le niveau de vigilance.`;
+
+      const result = await emergentChat({
+        model: DEFAULT_MODEL_CLAUDE,
+        system: systemPrompt,
+        user: userPrompt,
+        max_tokens: 600,
+        temperature: 0.4,
+      });
+      if (!result.ok) return err('Erreur IA : ' + (result.error || 'inconnue'), 500);
+      const m = (result.text || '').match(/\{[\s\S]*\}/);
+      if (!m) return err('Réponse IA invalide', 500);
+      let parsed;
+      try { parsed = JSON.parse(m[0]); } catch { return err('JSON IA invalide', 500); }
+
+      await db.collection('registrations').updateOne(
+        { id: regId },
+        {
+          $set: {
+            ai_insight: parsed.insight || '',
+            ai_insight_vigilance: parsed.vigilance_level || 'new',
+            ai_insight_generated_at: new Date(),
+            updated_at: new Date(),
+          },
+        }
+      );
+      return json({ ok: true, insight: parsed.insight, vigilance_level: parsed.vigilance_level, llm_source: result.source });
+    }
+
+    // Bulk generate (background) — l'admin peut générer pour tous les exposants
+    if (route === 'registrations/generate-insights-bulk') {
+      if (!process.env.EMERGENT_LLM_KEY) return err('Clé Emergent LLM non configurée', 500);
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      // Lance en arrière-plan (fire-and-forget) pour ne pas bloquer l'UI
+      (async () => {
+        for (const r of regs) {
+          try {
+            // Skip si déjà généré récemment (< 24h)
+            if (r.ai_insight_generated_at && (Date.now() - new Date(r.ai_insight_generated_at).getTime()) < 86400000) continue;
+            const fakeReq = new Request(`http://localhost/api/registrations/${r.id}/generate-insight`, {
+              method: 'POST',
+              headers: { 'x-user-id': ctx.userId || 'u-admin', 'x-user-role': 'aracom_admin', 'Content-Type': 'application/json' },
+              body: '{}',
+            });
+            await POST(fakeReq, { params: { path: ['registrations', r.id, 'generate-insight'] } });
+            await new Promise(res => setTimeout(res, 1500)); // throttle 1.5s entre 2 calls
+          } catch (e) { console.error('[bulk-insight]', r.id, e?.message); }
+        }
+        console.log('[bulk-insight] terminé sur', regs.length, 'registrations');
+      })().catch(e => console.error('[bulk-insight] fatal', e?.message));
+      return json({ ok: true, total: regs.length, message: `Génération lancée en arrière-plan pour ${regs.length} exposants. Les insights apparaîtront progressivement (~${Math.ceil(regs.length * 1.5 / 60)} min).` });
+    }
+
     // ---- AI-powered email generation (Claude Sonnet 4.5 via Emergent LLM proxy) ----
     if (route === 'mailing/generate-ai') {
       const { mail_type, registration_ids, tone = 'professionnel chaleureux', custom_instruction = '', preview_only = true } = body;
