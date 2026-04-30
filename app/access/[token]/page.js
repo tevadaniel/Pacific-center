@@ -45,11 +45,11 @@ export default function AccessTokenPage() {
           accessed_via_token: true,
         });
         const tabSuffix = requestedTab ? `?tab=${encodeURIComponent(requestedTab)}` : '';
-        // Redirect by role / purpose
+        // Redirect by PURPOSE first (more reliable), then by role_code as fallback
         const purpose = data.token_info?.purpose;
         if (purpose === 'inscription_exposant') {
           router.replace('/inscription?token=' + encodeURIComponent(token));
-        } else if (data.user.role_code === 'pacific_centers_readonly') {
+        } else if (purpose === 'pacific_centers' || data.user.role_code === 'pacific_centers_readonly') {
           router.replace('/pacific' + tabSuffix);
         } else if (data.user.role_code === 'aracom_admin') {
           router.replace('/aracom' + tabSuffix);

@@ -1737,7 +1737,14 @@ export async function POST(request, { params }) {
           token_info: { id: tk.id, purpose: tk.purpose, email: tk.email },
         });
       }
-      if (tk.user_id) {
+      // ⚠️ Cas spécial : un token `pacific_centers` doit TOUJOURS ouvrir le portail Pacific,
+      // peu importe l'email associé. On force l'utilisation du compte Pacific Centers unique.
+      // Cela évite 2 bugs : (a) email inconnu → 404, (b) email qui matche un exposant → route vers /exposant.
+      if (tk.purpose === 'pacific_centers') {
+        user = await db.collection('users').findOne({ role_code: 'pacific_centers_readonly' });
+        if (!user) return err('Aucun compte Pacific Centers configuré dans le système', 500);
+      }
+      if (!user && tk.user_id) {
         user = await db.collection('users').findOne({ id: tk.user_id });
       }
       if (!user && tk.email) {
