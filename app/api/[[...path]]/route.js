@@ -10,6 +10,21 @@ import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, u
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
+import { restoreVenueLayoutsIfEmpty, restoreVenueLayoutsForce } from '@/lib/venue-layouts-restore';
+
+// 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
+//    Lance la restauration du backup JSON embarqué si aucun stand n'a de position en DB.
+let __layoutRestoreRan = false;
+async function tryAutoRestoreVenueLayouts() {
+  if (__layoutRestoreRan) return;
+  __layoutRestoreRan = true;
+  try {
+    const db = await getDb();
+    const r = await restoreVenueLayoutsIfEmpty(db);
+    if (r?.ok) console.log('[boot] venue layouts auto-restored:', r);
+    else console.log('[boot] venue layouts restore skipped:', r);
+  } catch (e) { console.error('[boot] venue layouts restore error:', e?.message); }
+}
 
 // ===== Tracking helpers =====
 function getPublicBaseUrl() {
@@ -464,6 +479,8 @@ async function computeBySite(db) {
 // ---------- ROUTING ----------
 export async function GET(request, { params }) {
   try {
+    // 🛟 Auto-restauration des plans au premier hit (idempotent, tourne 1 seule fois)
+    tryAutoRestoreVenueLayouts();
     const db = await getDb();
     const p = params.path || [];
     const route = p.join('/');
@@ -1275,6 +1292,38 @@ export async function POST(request, { params }) {
 
     if (route === 'seed') {
       const result = await doSeed(body?.force || false);
+      return json(result);
+    }
+
+    // ============ AUTO-RESTORE DES PLANS DE SALLES (après redéploiement) ============
+    // Force l'import du backup JSON embarqué (/app/data-backup/venue-layouts-backup.json)
+    // Réservé aux admins ARACOM. Écrase les éléments décoratifs existants pour les venues
+    // présents dans le backup. Utilisé après un redéploiement pour restaurer le travail éditorial.
+    if (route === 'admin/restore-venue-layouts') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const db2 = await getDb();
+      const r = await restoreVenueLayoutsForce(db2);
+      return json(r);
+    }
+
+    // Export à la volée du JSON de backup en se basant sur la DB courante (pour regénérer le fichier)
+    if (route === 'admin/export-venue-layouts') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const db2 = await getDb();
+      const venues = await db2.collection('venues').find({}).sort({ code: 1 }).toArray();
+      const result = { exported_at: new Date().toISOString(), venues: [] };
+      for (const v of venues) {
+        const stands = await db2.collection('venue_stands').find({ venue_id: v.id }).toArray();
+        const els = await db2.collection('venue_elements').find({ venue_id: v.id }).toArray();
+        result.venues.push({
+          code: v.code, name: v.name, id: v.id,
+          stands_count: stands.length,
+          stands_with_pos: stands.filter(s => typeof s.pos_x === 'number').length,
+          elements_count: els.length,
+          stands: stands.map(s => ({ stand_code: s.stand_code, pos_x: s.pos_x, pos_y: s.pos_y })),
+          elements: els.map(e => ({ type: e.type, shape: e.shape, pos_x: e.pos_x, pos_y: e.pos_y, width: e.width, height: e.height, rotation: e.rotation, color: e.color, label: e.label, z_index: e.z_index })),
+        });
+      }
       return json(result);
     }
 

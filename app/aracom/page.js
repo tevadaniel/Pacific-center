@@ -17,7 +17,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, RotateCcw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, CartesianGrid } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
@@ -2928,6 +2928,34 @@ function BackupView() {
     } finally { setBusy(false); }
   };
 
+  // 🛟 Restauration des plans de salles depuis le backup JSON embarqué dans le code
+  //    (utilisé après un redéploiement sur une base vierge).
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const restoreVenueLayouts = async () => {
+    if (layoutBusy) return;
+    if (!confirm('⚠️ RESTAURATION DES PLANS DE SALLES\n\nCette action va remettre tous les stands et éléments décoratifs aux positions sauvegardées dans le backup embarqué (venue-layouts-backup.json).\n\nLes éléments décoratifs actuels (kiosques, formes, étiquettes) seront ÉCRASÉS par ceux du backup.\n\nContinuer ?')) return;
+    setLayoutBusy(true);
+    try {
+      const r = await api('/api/admin/restore-venue-layouts', { method: 'POST', body: JSON.stringify({}) });
+      toast.success(`✅ Plans restaurés : ${r.stands} stands + ${r.elements} éléments décoratifs`);
+    } catch (e) { toast.error('Erreur : ' + e.message); }
+    finally { setLayoutBusy(false); }
+  };
+
+  const downloadCurrentLayout = async () => {
+    try {
+      const data = await api('/api/admin/export-venue-layouts');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `venue-layouts-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('✅ Export téléchargé');
+    } catch (e) { toast.error('Erreur : ' + e.message); }
+  };
+
   const formatSize = (b) => {
     if (b < 1024) return b + ' o';
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' Ko';
@@ -2966,6 +2994,44 @@ function BackupView() {
           >
             {busy ? <><RefreshCw className="w-5 h-5 animate-spin" /> Sauvegarde en cours…</> : <><Download className="w-5 h-5" /> Sauvegarder maintenant</>}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* 🛟 Restauration des plans après redéploiement */}
+      <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+        <CardContent className="p-5 space-y-3">
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+              <MapPin className="w-8 h-8 text-blue-600" />
+            </div>
+            <div className="flex-1 min-w-[280px]">
+              <h2 className="font-bold text-blue-900 text-lg">🛟 Plans de salles — Restauration après déploiement</h2>
+              <p className="text-sm text-blue-800 mt-1">
+                Après un <b>redéploiement</b>, la base de production peut être vide. Utilisez ce bouton pour <b>restaurer en un clic</b> toutes les positions des stands + éléments décoratifs depuis le <b>backup embarqué dans le code</b> (versionné avec l&apos;app).
+              </p>
+              <p className="text-xs text-blue-700 mt-1 italic">
+                💡 La restauration automatique tourne déjà au premier démarrage si la DB est vide. Ce bouton est là au cas où vous voulez forcer la remise à zéro vers le dernier backup figé.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                size="lg"
+                onClick={restoreVenueLayouts}
+                disabled={layoutBusy}
+                className="bg-blue-600 hover:bg-blue-700 gap-2 shadow-md"
+              >
+                {layoutBusy ? <><RefreshCw className="w-5 h-5 animate-spin" /> Restauration…</> : <><RotateCcw className="w-5 h-5" /> Restaurer les plans</>}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={downloadCurrentLayout}
+                className="border-blue-300 text-blue-700 hover:bg-blue-100 gap-1.5"
+              >
+                <Download className="w-4 h-4" /> Télécharger l&apos;état actuel (JSON)
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

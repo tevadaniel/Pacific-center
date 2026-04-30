@@ -1,0 +1,658 @@
+{
+  "exported_at": "2026-04-30T06:10:21.041Z",
+  "venues": [
+    {
+      "code": "ARU",
+      "name": "Arue",
+      "id": "venue-aru",
+      "stands_count": 12,
+      "stands_with_pos": 12,
+      "elements_count": 5,
+      "stands": [
+        {
+          "stand_code": "A-C01",
+          "pos_x": 5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C03",
+          "pos_x": 17,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C04",
+          "pos_x": 23,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C05",
+          "pos_x": 29,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C06",
+          "pos_x": 35,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C07",
+          "pos_x": 41,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C08",
+          "pos_x": 62.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C09",
+          "pos_x": 69,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C10",
+          "pos_x": 75.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C11",
+          "pos_x": 82,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C12",
+          "pos_x": 88.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "A-C02",
+          "pos_x": 11,
+          "pos_y": 60
+        }
+      ],
+      "elements": [
+        {
+          "type": "carrefour",
+          "shape": "rectangle",
+          "pos_x": 50,
+          "pos_y": 10,
+          "width": 100,
+          "height": 42.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Carrefour",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 12.5,
+          "pos_y": 90,
+          "width": 67.5,
+          "height": 20,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 90,
+          "pos_y": 95,
+          "width": 60,
+          "height": 27.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "demo_zone",
+          "shape": "rectangle",
+          "pos_x": 52.5,
+          "pos_y": 60,
+          "width": 10,
+          "height": 8,
+          "rotation": 0,
+          "color": "#a855f7",
+          "label": "Zone démonstration",
+          "z_index": 1
+        },
+        {
+          "type": "kiosque",
+          "shape": "rectangle",
+          "pos_x": 95,
+          "pos_y": 60,
+          "width": 6,
+          "height": 6,
+          "rotation": 0,
+          "color": "#7c2d12",
+          "label": "Kiosque",
+          "z_index": 1
+        }
+      ]
+    },
+    {
+      "code": "FAAA",
+      "name": "Faaa",
+      "id": "venue-faaa",
+      "stands_count": 16,
+      "stands_with_pos": 16,
+      "elements_count": 7,
+      "stands": [
+        {
+          "stand_code": "F-A01",
+          "pos_x": 10,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A02",
+          "pos_x": 14,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A03",
+          "pos_x": 18,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A04",
+          "pos_x": 22,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A05",
+          "pos_x": 26,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A06",
+          "pos_x": 30,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A07",
+          "pos_x": 34,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A08",
+          "pos_x": 45,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A09",
+          "pos_x": 49,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A10",
+          "pos_x": 53,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A11",
+          "pos_x": 70,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A12",
+          "pos_x": 74,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A13",
+          "pos_x": 85,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A14",
+          "pos_x": 89,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A15",
+          "pos_x": 93,
+          "pos_y": 52.5
+        },
+        {
+          "stand_code": "F-A16",
+          "pos_x": 97,
+          "pos_y": 52.5
+        }
+      ],
+      "elements": [
+        {
+          "type": "kiosque",
+          "shape": "rectangle",
+          "pos_x": 40,
+          "pos_y": 52.5,
+          "width": 6,
+          "height": 6,
+          "rotation": 0,
+          "color": "#7c2d12",
+          "label": "Kiosque",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 17.5,
+          "pos_y": 85,
+          "width": 85,
+          "height": 30,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 87.5,
+          "pos_y": 90,
+          "width": 37.5,
+          "height": 42.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "carrefour",
+          "shape": "rectangle",
+          "pos_x": 65,
+          "pos_y": 15,
+          "width": 70,
+          "height": 37.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Carrefour",
+          "z_index": 1
+        },
+        {
+          "type": "kiosque",
+          "shape": "rectangle",
+          "pos_x": 80,
+          "pos_y": 52.5,
+          "width": 5,
+          "height": 6,
+          "rotation": 0,
+          "color": "#7c2d12",
+          "label": "Kiosque",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 0,
+          "pos_y": 12.5,
+          "width": 20,
+          "height": 42.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "demo_zone",
+          "shape": "rectangle",
+          "pos_x": 20,
+          "pos_y": 15,
+          "width": 10,
+          "height": 35,
+          "rotation": 0,
+          "color": "#a855f7",
+          "label": "Zone démonstration",
+          "z_index": 1
+        }
+      ]
+    },
+    {
+      "code": "MAH",
+      "name": "Mahina",
+      "id": "venue-mah",
+      "stands_count": 7,
+      "stands_with_pos": 0,
+      "elements_count": 0,
+      "stands": [
+        {
+          "stand_code": "M-E01"
+        },
+        {
+          "stand_code": "M-E02"
+        },
+        {
+          "stand_code": "M-E03"
+        },
+        {
+          "stand_code": "M-E04"
+        },
+        {
+          "stand_code": "M-E05"
+        },
+        {
+          "stand_code": "M-E06"
+        },
+        {
+          "stand_code": "M-E07"
+        }
+      ],
+      "elements": []
+    },
+    {
+      "code": "MOO",
+      "name": "Moorea",
+      "id": "venue-moo",
+      "stands_count": 7,
+      "stands_with_pos": 0,
+      "elements_count": 0,
+      "stands": [
+        {
+          "stand_code": "R-F01"
+        },
+        {
+          "stand_code": "R-F02"
+        },
+        {
+          "stand_code": "R-F03"
+        },
+        {
+          "stand_code": "R-F04"
+        },
+        {
+          "stand_code": "R-F05"
+        },
+        {
+          "stand_code": "R-F06"
+        },
+        {
+          "stand_code": "R-F07"
+        }
+      ],
+      "elements": []
+    },
+    {
+      "code": "PUN",
+      "name": "Punaauia",
+      "id": "venue-pun",
+      "stands_count": 13,
+      "stands_with_pos": 13,
+      "elements_count": 6,
+      "stands": [
+        {
+          "stand_code": "P-B01",
+          "pos_x": 7.5,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B02",
+          "pos_x": 12.5,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B03",
+          "pos_x": 17.5,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B04",
+          "pos_x": 22.5,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B05",
+          "pos_x": 45,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B06",
+          "pos_x": 50,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B07",
+          "pos_x": 55,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B08",
+          "pos_x": 60,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B09",
+          "pos_x": 65,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B10",
+          "pos_x": 70,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B11",
+          "pos_x": 75,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B12",
+          "pos_x": 80,
+          "pos_y": 57.5
+        },
+        {
+          "stand_code": "P-B13",
+          "pos_x": 85,
+          "pos_y": 57.5
+        }
+      ],
+      "elements": [
+        {
+          "type": "kiosque",
+          "shape": "rectangle",
+          "pos_x": 92.5,
+          "pos_y": 57.5,
+          "width": 6,
+          "height": 6,
+          "rotation": 0,
+          "color": "#7c2d12",
+          "label": "Kiosque",
+          "z_index": 1
+        },
+        {
+          "type": "demo_zone",
+          "shape": "rectangle",
+          "pos_x": 32.5,
+          "pos_y": 57.5,
+          "width": 7.5,
+          "height": 27.5,
+          "rotation": 0,
+          "color": "#a855f7",
+          "label": "Zone démonstration",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 75,
+          "pos_y": 12.5,
+          "width": 72.5,
+          "height": 42.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 5,
+          "pos_y": 15,
+          "width": 37.5,
+          "height": 37.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 75,
+          "pos_y": 90,
+          "width": 70,
+          "height": 27.5,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 5,
+          "pos_y": 90,
+          "width": 32.5,
+          "height": 35,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        }
+      ]
+    },
+    {
+      "code": "TAR",
+      "name": "Taravao",
+      "id": "venue-tar",
+      "stands_count": 12,
+      "stands_with_pos": 12,
+      "elements_count": 5,
+      "stands": [
+        {
+          "stand_code": "T-D01",
+          "pos_x": 5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D02",
+          "pos_x": 10.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D03",
+          "pos_x": 16,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D04",
+          "pos_x": 21.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D05",
+          "pos_x": 27,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D06",
+          "pos_x": 32.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D07",
+          "pos_x": 65,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D08",
+          "pos_x": 70.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D09",
+          "pos_x": 76,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D10",
+          "pos_x": 81.5,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D11",
+          "pos_x": 87,
+          "pos_y": 60
+        },
+        {
+          "stand_code": "T-D12",
+          "pos_x": 92.5,
+          "pos_y": 60
+        }
+      ],
+      "elements": [
+        {
+          "type": "carrefour",
+          "shape": "rectangle",
+          "pos_x": 7.5,
+          "pos_y": 15,
+          "width": 40,
+          "height": 30,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Carrefour",
+          "z_index": 1
+        },
+        {
+          "type": "carrefour",
+          "shape": "rectangle",
+          "pos_x": 92.5,
+          "pos_y": 7.5,
+          "width": 40,
+          "height": 40,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Carrefour",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 50,
+          "pos_y": 92.5,
+          "width": 100,
+          "height": 20,
+          "rotation": 0,
+          "color": "#0a0a0a",
+          "label": "Commerce",
+          "z_index": 1
+        },
+        {
+          "type": "commerce",
+          "shape": "rectangle",
+          "pos_x": 50,
+          "pos_y": 12.5,
+          "width": 35,
+          "height": 30,
+          "rotation": 0,
+          "color": "#92400e",
+          "label": "Espace détente",
+          "z_index": 1
+        },
+        {
+          "type": "demo_zone",
+          "shape": "rectangle",
+          "pos_x": 50,
+          "pos_y": 57.5,
+          "width": 20,
+          "height": 30,
+          "rotation": 0,
+          "color": "#a855f7",
+          "label": "Zone démonstration",
+          "z_index": 1
+        }
+      ]
+    }
+  ]
+}
