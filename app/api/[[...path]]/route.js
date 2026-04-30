@@ -468,6 +468,8 @@ export async function GET(request, { params }) {
     const p = params.path || [];
     const route = p.join('/');
     const url = new URL(request.url);
+    // 🛡️ ctx is needed by several handlers below — declare once here so it's always available
+    const ctx = getUserContext(request);
 
     if (route === '' || route === 'health') return json({ ok: true, service: 'Forum Rentrée 2026' });
 
