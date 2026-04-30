@@ -198,7 +198,12 @@ function DashboardView({ onGoto }) {
                     <div className="text-xs text-slate-500">{r.venue_name} · {r.discipline}</div>
                     <div className="flex flex-wrap gap-1 mt-1">{r.missing.map(m => <Badge key={m} className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">❌ {m}</Badge>)}</div>
                   </div>
-                  <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => onGoto?.('exposants')}>Ouvrir</Button>
+                  <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => {
+                    // 🔗 Navigue vers Exposants avec le registration_id en param → ouvre direct la fiche
+                    const url = `/aracom?tab=exposants&open=${encodeURIComponent(r.id)}`;
+                    window.history.pushState({}, '', url);
+                    onGoto?.('exposants');
+                  }}>Ouvrir</Button>
                 </div>
               ))}
             </CardContent>
@@ -518,6 +523,19 @@ function ExposantsView() {
   const [filters, setFilters] = useState({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
+
+  // 🔗 Ouvre directement la fiche si un registration_id est passé dans l'URL (?open=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const openId = new URLSearchParams(window.location.search).get('open');
+    if (openId) {
+      setSelected(openId);
+      // Nettoie le param pour éviter de rouvrir en boucle sur refresh
+      const url = new URL(window.location.href);
+      url.searchParams.delete('open');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -1322,7 +1340,7 @@ function CautionsView() {
                   </td>
                   <td className="py-1 pr-4">
                     <div className="flex gap-1.5 justify-end items-center flex-wrap">
-                      <Select value={r.deposit?.status} onValueChange={v => updateStatus(r.deposit?.id || r.deposit?._id, v)}>
+                      <Select value={r.deposit?.status || 'non_demandee'} onValueChange={v => updateStatus(r.deposit?.id || r.deposit?._id || r.id, v)}>
                         <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
                       </Select>
@@ -1937,11 +1955,22 @@ function MailingView() {
             <CardContent className="space-y-2">
               {scheduled.map(s => {
                 const due = new Date(s.scheduled_at) <= new Date();
+                const cancelScheduled = async () => {
+                  if (!confirm(`Annuler le mail programmé « ${s.name} » pour le ${new Date(s.scheduled_at).toLocaleString('fr-FR')} ?\n\n${s.recipients_count} destinataire(s) ne recevront PAS ce mail.`)) return;
+                  try {
+                    await api(`/api/mailing/scheduled/${s.id}`, { method: 'DELETE' });
+                    toast.success('Mail programmé annulé');
+                    loadScheduled();
+                  } catch (e) { toast.error('Erreur : ' + e.message); }
+                };
                 return (
                   <div key={s.id} className={`border rounded-md p-3 text-xs ${due ? 'bg-rose-50 border-rose-200' : 'bg-white border-amber-100'}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium truncate">{s.name}</div>
+                      <div className="font-medium truncate flex-1">{s.name}</div>
                       <Badge variant={due ? 'destructive' : 'secondary'}>{due ? 'À traiter' : 'Programmé'}</Badge>
+                      <button onClick={cancelScheduled} className="text-rose-600 hover:text-rose-800 hover:bg-rose-100 rounded p-1 -m-1" title="Annuler ce mail programmé">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     <div className="text-slate-500 mt-0.5">📅 {new Date(s.scheduled_at).toLocaleString('fr-FR')} · 👥 {s.recipients_count} destinataire(s)</div>
                   </div>
@@ -3644,6 +3673,7 @@ function LockValidationModal({ req, onClose, onLocked }) {
 }
 
 function TimelineBlock({ registrationId }) {
+  const [items, setItems] = useState(null);
   useEffect(() => { api(`/api/activity-logs/timeline?registration_id=${registrationId}`).then(setItems).catch(e => toast.error(e.message)); }, [registrationId]);
   if (!items) return <div className="text-sm text-slate-500">Chargement…</div>;
   if (items.length === 0) return <div className="text-sm text-slate-500 py-6 text-center">Aucun événement dans la timeline.</div>;

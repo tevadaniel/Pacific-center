@@ -4124,15 +4124,38 @@ export async function PUT(request, { params }) {
       upd.updated_at = new Date();
       // Also set received_at if status is recue and not set
       if (upd.status === 'recue' && !upd.received_at) upd.received_at = new Date();
-      await db.collection('deposit_transactions').updateOne({ id }, { $set: upd });
+      // 🔁 Upsert intelligent : si aucun deposit trouvé par id, traite l'id comme un registration_id.
+      //    Cela permet à l'UI de ne passer que la registration_id (absence d'ID de deposit dans /api/registrations).
+      let dep = await db.collection('deposit_transactions').findOne({ id });
+      if (!dep) {
+        dep = await db.collection('deposit_transactions').findOne({ registration_id: id });
+        if (!dep) {
+          const newId = uuid();
+          await db.collection('deposit_transactions').insertOne({
+            id: newId,
+            registration_id: id,
+            amount_xpf: 20000,
+            status: upd.status || 'non_demandee',
+            payment_method: upd.payment_method || null,
+            received_at: upd.status === 'recue' ? (upd.received_at || new Date()) : null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+          dep = await db.collection('deposit_transactions').findOne({ id: newId });
+        } else {
+          await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: upd });
+        }
+      } else {
+        await db.collection('deposit_transactions').updateOne({ id: dep.id }, { $set: upd });
+      }
       // Sync is_deposit_received on registration
       if (upd.status) {
-        const dep = await db.collection('deposit_transactions').findOne({ id });
-        await db.collection('registrations').updateOne({ id: dep.registration_id }, { $set: { is_deposit_received: upd.status === 'recue', updated_at: new Date() } });
+        const refreshed = await db.collection('deposit_transactions').findOne({ id: dep.id });
+        await db.collection('registrations').updateOne({ id: refreshed.registration_id }, { $set: { is_deposit_received: upd.status === 'recue', updated_at: new Date() } });
       }
-      const dep = await db.collection('deposit_transactions').findOne({ id });
-      delete dep._id;
-      return json(dep);
+      const out = await db.collection('deposit_transactions').findOne({ id: dep.id });
+      delete out._id;
+      return json(out);
     }
 
     if (route.startsWith('anomalies/')) {
@@ -4244,6 +4267,21 @@ export async function DELETE(request, { params }) {
     if (route.startsWith('mail-recipient-lists/')) {
       await db.collection('mail_recipient_lists').deleteOne({ id: p[1] });
       return json({ ok: true });
+    }
+    // 🗑️ Annulation d'un mail programmé (campagne en statut "scheduled")
+    if (route.startsWith('mailing/scheduled/')) {
+      const campaignId = p[2];
+      const camp = await db.collection('email_campaigns').findOne({ id: campaignId });
+      if (!camp) return err('Campagne introuvable', 404);
+      if (camp.status === 'completed') return err('Campagne déjà envoyée, impossible d\'annuler', 400);
+      // Supprimer les messages en attente liés à cette campagne
+      await db.collection('email_messages').deleteMany({ campaign_id: campaignId, send_status: { $in: ['pending', 'scheduled'] } });
+      // Marquer la campagne comme annulée
+      await db.collection('email_campaigns').updateOne(
+        { id: campaignId },
+        { $set: { status: 'cancelled', cancelled_at: new Date(), cancelled_by: ctx.userId || 'u-admin', updated_at: new Date() } }
+      );
+      return json({ ok: true, campaign_id: campaignId });
     }
     if (route.startsWith('venue-elements/')) {
       await db.collection('venue_elements').deleteOne({ id: p[1] });
