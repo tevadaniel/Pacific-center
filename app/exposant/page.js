@@ -188,7 +188,7 @@ export default function ExposantPortal() {
                   <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
                     {canRequest
                       ? <>Tout est prêt ! Cliquez pour <b>verrouiller votre place</b>. ARACOM recevra une notification et vous contactera pour fixer un RDV de remise de la caution (<b>chèque ou espèces</b> uniquement, 20 000 XPF).</>
-                      : <>Avant de pouvoir confirmer votre présence : choisissez un site & un stand <i>(onglet Sites & plan)</i>, puis au moins 1 créneau d&apos;animation par jour <i>(onglet Animations)</i>.</>
+                      : <>Avant de pouvoir confirmer votre présence : choisissez un site & un stand <i>(onglet Sites & plan)</i>, puis <b>1 créneau d&apos;animation par jour</b> <i>(onglet Animations)</i>.</>
                     }
                   </p>
                 </div>
@@ -914,7 +914,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Calendar className="w-4 h-4 text-blue-600" /> {d.display}
-              <Badge variant="secondary" className="text-[10px] ml-auto">{myCountForDay(d.label)}/{MAX_ANIMATION_SLOTS_PER_DAY} créneaux</Badge>
+              <Badge variant="secondary" className="text-[10px] ml-auto">{myCountForDay(d.label)}/{MAX_ANIMATION_SLOTS_PER_DAY} créneau</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1392,7 +1392,7 @@ function GuideBlock() {
 
         <section>
           <h4 className="font-semibold">2. Animations</h4>
-          <p className="text-slate-700">Sélectionnez vos créneaux d&apos;animation (1h chacun) directement sur la grille horaire. Maximum {MAX_ANIMATION_SLOTS_PER_DAY} créneaux par jour.</p>
+          <p className="text-slate-700">Sélectionnez vos créneaux d&apos;animation (1h chacun) directement sur la grille horaire. <b>1 créneau par jour</b> obligatoire (1 max).</p>
         </section>
 
         <section>
@@ -1406,7 +1406,7 @@ function GuideBlock() {
 
         <section>
           <h4 className="font-semibold">4. Jour J — horaires figés</h4>
-          <p className="text-slate-700">Le Forum est ouvert au public de <b>{EVENT_OPENING_TIME}</b> à <b>{EVENT_CLOSING_TIME}</b>, identique pour tous les sites et tous les exposants. Soyez sur place <b>1h avant l&apos;ouverture</b> pour le montage du stand.</p>
+          <p className="text-slate-700">Le Forum est ouvert au public <b>vendredi de 11h à 17h</b> et <b>samedi de 9h à 17h</b>, identique pour tous les sites et tous les exposants. Soyez sur place <b>1h avant l&apos;ouverture</b> pour le montage du stand.</p>
         </section>
 
         <section>
