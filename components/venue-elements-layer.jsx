@@ -64,9 +64,12 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
     setDragOffset({ id: el.id, dx: e.clientX - r.left - elX, dy: e.clientY - r.top - elY });
   };
 
-  // 🎯 Snap-to-grid : aligne sur 2.5%. Maintenir Shift pour placement libre.
+  // 🎯 Snap-to-grid : aligne sur 2.5%. Lit le toggle global (window.__VENUE_SNAP_ENABLED) défini par le parent.
   const GRID_STEP = 2.5;
-  const snap = (val, withShift = false) => withShift ? +val.toFixed(2) : +(Math.round(val / GRID_STEP) * GRID_STEP).toFixed(2);
+  const snap = (val) => {
+    const snapOn = typeof window !== 'undefined' ? (window.__VENUE_SNAP_ENABLED !== false) : true;
+    return snapOn ? +(Math.round(val / GRID_STEP) * GRID_STEP).toFixed(2) : +val.toFixed(2);
+  };
 
   useEffect(() => {
     if (!dragOffset) return;
@@ -77,9 +80,8 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
       const y = ((e.clientY - r.top - dragOffset.dy) / r.height) * 100;
       const cx = Math.max(0, Math.min(100, x));
       const cy = Math.max(0, Math.min(100, y));
-      // Snap to grid (sauf si Shift pressé)
-      const sx = snap(cx, e.shiftKey);
-      const sy = snap(cy, e.shiftKey);
+      const sx = snap(cx);
+      const sy = snap(cy);
       setElements(prev => prev.map(el => el.id === dragOffset.id ? { ...el, pos_x: sx, pos_y: sy } : el));
       setDirty(true);
     };

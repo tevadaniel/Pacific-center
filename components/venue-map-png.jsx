@@ -42,6 +42,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const [positions, setPositions] = useState({}); // stand_code -> {x,y}
   const [draggedCode, setDraggedCode] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true); // 🎯 Toggle UI plus fiable que Shift
   const containerRef = useRef(null);
 
   const venueCode = venue?.code;
@@ -88,9 +89,9 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   if (!bgUrl && !venueCode) return null;
 
   // 🎯 Snap-to-grid : aligne automatiquement sur une grille de 2.5% (40 colonnes / 40 lignes)
-  // Maintenir Shift désactive le snap (placement libre).
+  // Le toggle "Snap" dans la barre désactive le snap (placement libre).
   const GRID_STEP = 2.5;
-  const snap = (val, withShift = false) => withShift ? +val.toFixed(2) : Math.round(val / GRID_STEP) * GRID_STEP;
+  const snap = (val) => snapEnabled ? Math.round(val / GRID_STEP) * GRID_STEP : +val.toFixed(2);
 
   const onDragStart = (e, code) => {
     if (!editMode) return;
@@ -103,13 +104,19 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     const xRaw = ((e.clientX - r.left) / r.width) * 100;
     const yRaw = ((e.clientY - r.top) / r.height) * 100;
     if (xRaw < 0 || xRaw > 100 || yRaw < 0 || yRaw > 100) { setDraggedCode(null); return; }
-    // Shift = placement libre, sinon snap sur la grille
-    const x = snap(xRaw, e.shiftKey);
-    const y = snap(yRaw, e.shiftKey);
+    const x = snap(xRaw);
+    const y = snap(yRaw);
     setPositions(p => ({ ...p, [draggedCode]: { x, y } }));
     setDirty(true);
     setDraggedCode(null);
   };
+
+  // 🌐 Propage l'état du snap globalement pour que VenueElementsLayer (drag éléments décoratifs) le respecte
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__VENUE_SNAP_ENABLED = snapEnabled;
+    }
+  }, [snapEnabled]);
 
   const savePositions = async () => {
     try {
@@ -211,8 +218,20 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
       </div>
 
       {editMode && (
-        <div className="text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800">
-          <Move className="w-3.5 h-3.5 inline mr-1" /> <b>Mode édition</b> — Les stands et éléments s&apos;alignent automatiquement sur la grille (2,5%). Maintenez <kbd className="px-1 py-0.5 rounded bg-white border text-[10px] font-mono">Shift</kbd> pendant le drag pour un placement libre. Cliquez sur la croix rouge pour supprimer un stand. N&apos;oubliez pas de <b>Sauver</b> après vos modifications.
+        <div className="text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800 flex flex-wrap items-center gap-3">
+          <Move className="w-3.5 h-3.5 inline" /> <b>Mode édition</b>
+          <span>•</span>
+          <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={snapEnabled}
+              onChange={e => setSnapEnabled(e.target.checked)}
+              className="w-3.5 h-3.5 cursor-pointer accent-amber-600"
+            />
+            <span>Aligner sur la grille (snap 2,5%)</span>
+          </label>
+          <span>•</span>
+          <span>Cliquez sur la croix rouge pour supprimer un stand. N&apos;oubliez pas de <b>Sauver</b>.</span>
         </div>
       )}
 
