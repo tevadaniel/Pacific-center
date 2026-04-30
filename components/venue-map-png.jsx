@@ -272,7 +272,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
               draggable={editMode}
               onDragStart={e => onDragStart(e, s.stand_code)}
               onClick={(e) => { if (!editMode && onStandClick) { e.stopPropagation(); onStandClick(s); } }}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full text-[9px] font-bold select-none transition-all ${editMode ? 'cursor-move' : onStandClick ? 'cursor-pointer' : ''} ${highlighted ? 'ring-4 ring-blue-400 ring-offset-1 z-10' : ''}`}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full text-[9px] font-bold select-none transition-all ${editMode ? 'cursor-move z-20' : onStandClick ? 'cursor-pointer z-10' : 'z-10'} ${highlighted ? 'ring-4 ring-blue-400 ring-offset-1' : ''}`}
               style={{
                 left: `${pos.x}%`,
                 top: `${pos.y}%`,

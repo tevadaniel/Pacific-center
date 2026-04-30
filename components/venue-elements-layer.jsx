@@ -142,7 +142,7 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
           <div key={el.id}
             onMouseDown={(e) => startDrag(e, el)}
             onClick={(e) => { e.stopPropagation(); if (editMode) setSelected(el.id); }}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 select-none transition-all flex items-center justify-center font-bold text-white text-[10px] shadow-md ${editMode ? 'cursor-move' : 'pointer-events-none'} ${isSelected ? 'ring-4 ring-yellow-400 ring-offset-1 z-30' : 'z-10'} ${isCircle ? 'rounded-full' : isArrow ? '' : 'rounded'}`}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 select-none transition-all flex items-center justify-center font-bold text-white text-[10px] shadow-md ${editMode ? 'cursor-move' : 'pointer-events-none'} ${isSelected ? 'ring-4 ring-yellow-400 ring-offset-1 z-50' : editMode ? 'z-30' : 'z-10'} ${isCircle ? 'rounded-full' : isArrow ? '' : 'rounded'}`}
             style={{
               left: `${el.pos_x}%`,
               top: `${el.pos_y}%`,
