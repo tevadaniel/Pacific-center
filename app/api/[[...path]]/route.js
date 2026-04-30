@@ -1333,6 +1333,68 @@ export async function POST(request, { params }) {
       return json({ user, organization, token_info: { id: tk.id, purpose: tk.purpose } });
     }
 
+    // ============ AUTO-RENVOI DU MAGIC LINK À LA DÉCONNEXION ============
+    // Appelé par le frontend juste avant clearSession() : renvoie à l'utilisateur son lien magique par email
+    // pour qu'il puisse se reconnecter en un clic sans avoir à retrouver l'ancien mail.
+    if (route === 'auth/logout-email') {
+      const userId = request.headers.get('x-user-id');
+      const role = request.headers.get('x-user-role');
+      if (!userId || !role) return json({ ok: false, skipped: 'no session' });
+      // Pas d'email de renvoi pour les admins ARACOM (ils se connectent par mot de passe)
+      if (role === 'aracom_admin') return json({ ok: true, skipped: 'admin password login' });
+      const user = await db.collection('users').findOne({ id: userId });
+      if (!user?.email) return json({ ok: false, skipped: 'no email' });
+      // Détermine la purpose en fonction du rôle
+      const purpose = role === 'pacific_centers_readonly' ? 'pacific_centers' : 'exposant';
+      // Cherche un token existant non révoqué (par user_id, email ou organization_id)
+      const orQuery = [{ user_id: userId }, { email: user.email.toLowerCase() }];
+      if (user.organization_id) orQuery.push({ organization_id: user.organization_id });
+      let tk = await db.collection('access_tokens').findOne(
+        { $or: orQuery, purpose, revoked_at: null },
+        { sort: { created_at: -1 } }
+      );
+      // Sinon fallback sur n'importe quel token non-révoqué du user (tous purposes)
+      if (!tk) {
+        tk = await db.collection('access_tokens').findOne(
+          { $or: orQuery, revoked_at: null },
+          { sort: { created_at: -1 } }
+        );
+      }
+      // Si aucun token trouvé → en créer un
+      if (!tk) {
+        const tokenStr = uuid().replace(/-/g, '') + uuid().replace(/-/g, '').slice(0, 16);
+        const tokenId = uuid();
+        const doc = {
+          id: tokenId, token: tokenStr, purpose,
+          user_id: userId, email: user.email.toLowerCase(),
+          organization_id: user.organization_id || null,
+          label: `Auto-renvoi déconnexion ${purpose}`,
+          expires_at: null, revoked_at: null, last_used_at: null, last_email_sent_at: null,
+          use_count: 0, created_at: new Date(), updated_at: new Date(), created_by: 'auto_logout',
+        };
+        await db.collection('access_tokens').insertOne(doc);
+        tk = doc;
+      }
+      const accessUrl = `${getPublicBaseUrl()}/access/${tk.token}`;
+      const displayName = user.full_name || user.email;
+      const html = `<p>Bonjour ${displayName},</p>
+<p>Vous venez de vous déconnecter de votre espace <b>${purpose === 'pacific_centers' ? 'Pacific Centers' : 'exposant'}</b> du Forum de la Rentrée 2026.</p>
+<p>Voici à nouveau votre <b>lien personnel</b> pour vous reconnecter à tout moment :</p>
+<p><a href="${accessUrl}" style="display:inline-block;padding:12px 22px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">🔐 Me reconnecter à mon espace</a></p>
+<p style="font-size:12px;color:#64748b">Ce lien est <b>permanent et personnel</b>. Conservez-le précieusement (ajoutez-le à vos favoris) pour vos prochaines connexions. Aucun mot de passe à retenir.</p>
+<p>À bientôt,<br/>L'équipe ARACOM</p>`;
+      const subject = `🔐 Votre lien de reconnexion — Forum de la Rentrée 2026`;
+      // Envoi non-bloquant (le user redirige immédiatement vers /goodbye)
+      sendMail({ to: user.email, subject, html }).then(r => {
+        if (r.ok) {
+          db.collection('access_tokens').updateOne({ id: tk.id }, { $set: { last_email_sent_at: new Date(), last_resent_at: new Date(), updated_at: new Date() } }).catch(() => {});
+        } else {
+          console.error('[logout-email]', r.error);
+        }
+      }).catch(e => console.error('[logout-email]', e?.message));
+      return json({ ok: true, email: user.email, purpose });
+    }
+
     // Check-in
     if (route.match(/^attendance\/[^/]+\/check-in$/)) {
       const regId = p[1];

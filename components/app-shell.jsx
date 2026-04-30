@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { getSession, clearSession } from '@/lib/auth-client';
+import { getSession, clearSession, api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { LogOut, MapPin } from 'lucide-react';
@@ -19,7 +19,18 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
     setSession(s);
   }, [router, allowedRoles]);
 
-  const logout = () => { clearSession(); router.replace('/'); };
+  const logout = () => {
+    // 📨 Fire-and-forget : on déclenche l'envoi d'email en arrière-plan (pour les exposants & pacific)
+    //    et on redirige IMMÉDIATEMENT vers /goodbye (pas d'attente utilisateur).
+    //    Les admins ARACOM sont ignorés côté backend (login par mot de passe).
+    if (session?.role && session.role !== 'aracom_admin') {
+      api('/api/auth/logout-email', { method: 'POST', body: JSON.stringify({}) })
+        .catch(e => console.error('[logout-email]', e?.message));
+      try { sessionStorage.setItem('fr26_logout_email_sent', 'ok'); } catch { /* ignore */ }
+    }
+    clearSession();
+    router.replace('/goodbye');
+  };
 
   if (!session) return null;
 
