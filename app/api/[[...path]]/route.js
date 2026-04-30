@@ -3250,6 +3250,8 @@ export async function POST(request, { params }) {
       if (purpose === 'access' && !resolvedUserId && !resolvedEmail) {
         return err('Pour un lien d\'accès, organization_id ou email requis', 400);
       }
+      // Pour les liens Pacific Centers, aucun compte ni email n'est requis :
+      // c'est un simple lien magique partageable. On le rattache au compte Pacific générique au consume.
 
       // ============ IDEMPOTENCY : reuse existing active token ============
       // Check if an active (non-revoked, non-expired) token already exists for this target.

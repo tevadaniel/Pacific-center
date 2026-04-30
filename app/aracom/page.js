@@ -2977,10 +2977,16 @@ function CreateAccessTokenModal({ mode, onClose, onCreated }) {
             )}
             {mode === 'pacific' && (
               <>
+                <div className="rounded-md bg-cyan-50 border border-cyan-200 p-3 text-sm text-cyan-900">
+                  <p className="font-medium mb-1">🔗 Lien magique sans compte requis</p>
+                  <p className="text-xs leading-relaxed">
+                    Le lien Pacific Centers est un <b>simple lien à partager</b>. Aucun compte ni mot de passe n&apos;est nécessaire — toute personne qui clique sur le lien accède au portail Pacific Centers en lecture seule. Vous pouvez le copier-coller ou l&apos;envoyer par email.
+                  </p>
+                </div>
                 <div>
-                  <Label>Email du destinataire Pacific Centers</Label>
-                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="pacific@centers.pf" />
-                  <p className="text-[11px] text-slate-500 mt-1">L&apos;email doit correspondre à un compte Pacific Centers existant. Par défaut : <code>pacific@centers.pf</code></p>
+                  <Label>Email destinataire (facultatif)</Label>
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="contact@pacific.pf (optionnel)" />
+                  <p className="text-[11px] text-slate-500 mt-1">Renseignez un email seulement si vous voulez que le lien soit envoyé automatiquement par mail. Sinon, laissez vide et copiez le lien généré.</p>
                 </div>
                 <div>
                   <Label>Étiquette interne (facultatif)</Label>
