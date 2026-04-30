@@ -108,12 +108,22 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
   };
 
   const deleteEl = async (el) => {
-    if (!confirm(`Supprimer ${ELEMENT_TYPES[el.type]?.label || 'cet élément'} ?`)) return;
+    // Pas de confirm() : Safari peut bloquer le popup et le user a déjà cliqué explicitement sur "Supprimer".
+    // Suppression directe + toast undo possible plus tard si besoin.
     try {
-      await api(`/api/venue-elements/${el.id}`, { method: 'DELETE' });
+      // Suppression optimiste : on retire de la liste IMMÉDIATEMENT, puis on appelle l'API.
+      // Si l'API échoue, on remet l'élément.
+      const backup = el;
       setElements(prev => prev.filter(e => e.id !== el.id));
       setSelected(null);
-      toast.success('Supprimé');
+      try {
+        await api(`/api/venue-elements/${el.id}`, { method: 'DELETE' });
+        toast.success(`✅ ${ELEMENT_TYPES[el.type]?.label || 'Élément'} supprimé`);
+      } catch (e) {
+        // Rollback en cas d'échec API
+        setElements(prev => [...prev, backup]);
+        toast.error('Suppression échouée : ' + e.message);
+      }
     } catch (e) { toast.error(e.message); }
   };
 
@@ -153,9 +163,9 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
               </svg>
             ) : isCircle ? (
               <Icon className="w-1/2 h-1/2" strokeWidth={3} />
-            ) : (
-              <span className="px-1 text-center leading-tight truncate">{el.label || cfg.label}</span>
-            )}
+            ) : el.label ? (
+              <span className="px-1 text-center leading-tight truncate">{el.label}</span>
+            ) : null}
           </div>
         );
       })}
@@ -204,11 +214,11 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
             </div>
             <div className="flex items-center gap-1">
               <Label className="text-[10px] text-slate-600 mb-0 whitespace-nowrap">L {selectedEl.width}%</Label>
-              <input type="range" min="2.5" max="50" step="2.5" value={selectedEl.width} onChange={(e) => updateField(selectedEl.id, 'width', parseFloat(e.target.value))} className="w-20" />
+              <input type="range" min="2.5" max="100" step="2.5" value={selectedEl.width} onChange={(e) => updateField(selectedEl.id, 'width', parseFloat(e.target.value))} className="w-24" />
             </div>
             <div className="flex items-center gap-1">
               <Label className="text-[10px] text-slate-600 mb-0 whitespace-nowrap">H {selectedEl.height}%</Label>
-              <input type="range" min="2.5" max="50" step="2.5" value={selectedEl.height} onChange={(e) => updateField(selectedEl.id, 'height', parseFloat(e.target.value))} className="w-20" />
+              <input type="range" min="2.5" max="100" step="2.5" value={selectedEl.height} onChange={(e) => updateField(selectedEl.id, 'height', parseFloat(e.target.value))} className="w-24" />
             </div>
             <div className="flex items-center gap-1">
               <Label className="text-[10px] text-slate-600 mb-0 whitespace-nowrap">⟳ {selectedEl.rotation || 0}°</Label>
