@@ -284,7 +284,16 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
             <span>Aligner sur la grille (snap 2,5%)</span>
           </label>
           <span>•</span>
-          <span>Cliquez sur la croix rouge pour supprimer un stand. N&apos;oubliez pas de <b>Sauver</b>.</span>
+          <span><b>Clic</b> sur un stand = (dé)sélection pour alignement (anneau bleu) • <b>Glisser</b> = déplacer • <b>Croix rouge</b> = supprimer.</span>
+          {selectedCodes.size > 0 && (
+            <>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1.5 bg-sky-100 border border-sky-300 rounded px-2 py-0.5 text-sky-900 font-semibold">
+                {selectedCodes.size} stand(s) sélectionné(s)
+                <button onClick={() => setSelectedCodes(new Set())} className="ml-1 hover:text-rose-600" title="Tout désélectionner">✕</button>
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -317,15 +326,23 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1">Sélection</label>
-              <div className="flex gap-1">
+              <label className="text-xs font-medium text-slate-700 block mb-1">Cible de l&apos;alignement</label>
+              <div className="flex gap-1 flex-wrap">
+                <Button size="sm" variant={alignParams.target === 'selected' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'selected' }))}>
+                  ✅ Sélection ({selectedCodes.size})
+                </Button>
+                <Button size="sm" variant={alignParams.target === 'visible' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'visible' }))}>
+                  Filtre ({stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase())).length})
+                </Button>
                 <Button size="sm" variant={alignParams.target === 'all' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'all' }))}>
                   Tous ({stands.length})
                 </Button>
-                <Button size="sm" variant={alignParams.target === 'visible' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'visible' }))}>
-                  Filtre actuel ({stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase())).length})
-                </Button>
               </div>
+              {alignParams.target === 'selected' && selectedCodes.size > 0 && (
+                <button type="button" onClick={() => setSelectedCodes(new Set())} className="mt-1 text-[10px] text-rose-600 hover:underline">
+                  ✕ Tout désélectionner
+                </button>
+              )}
             </div>
           </div>
 
@@ -416,13 +433,30 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
             (s.stand_code || '').toLowerCase().includes(q) ||
             (s.organization?.name || '').toLowerCase().includes(q) ||
             (s.organization?.discipline || '').toLowerCase().includes(q);
+          const isSelected = editMode && selectedCodes.has(s.stand_code);
           return (
             <div
               key={s.id || s.stand_code}
               draggable={editMode}
               onDragStart={e => onDragStart(e, s.stand_code)}
-              onClick={(e) => { if (!editMode && onStandClick) { e.stopPropagation(); onStandClick(s); } }}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full text-[9px] font-bold select-none transition-all ${editMode ? 'cursor-move z-20' : onStandClick ? 'cursor-pointer z-10' : 'z-10'} ${highlighted ? 'ring-4 ring-blue-400 ring-offset-1' : ''}`}
+              onClick={(e) => {
+                if (editMode) {
+                  // 🎯 En mode édition, clic = toggle sélection (pour alignement multi)
+                  e.stopPropagation();
+                  setSelectedCodes(prev => {
+                    const next = new Set(prev);
+                    if (next.has(s.stand_code)) next.delete(s.stand_code);
+                    else next.add(s.stand_code);
+                    return next;
+                  });
+                  // Auto-bascule la cible alignement sur "Sélection"
+                  setAlignParams(p => p.target === 'selected' ? p : { ...p, target: 'selected' });
+                } else if (onStandClick) {
+                  e.stopPropagation();
+                  onStandClick(s);
+                }
+              }}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full text-[9px] font-bold select-none transition-all ${editMode ? 'cursor-pointer z-20' : onStandClick ? 'cursor-pointer z-10' : 'z-10'} ${isSelected ? 'scale-125' : ''}`}
               style={{
                 left: `${pos.x}%`,
                 top: `${pos.y}%`,
@@ -432,10 +466,17 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
                 background: color,
                 color: '#fff',
                 textAlign: 'center',
-                boxShadow: editMode ? '0 0 0 2px #fff, 0 0 8px rgba(0,0,0,.4)' : '0 1px 3px rgba(0,0,0,.3)',
+                // ⚠️ Utilisation de boxShadow stacké (au lieu de Tailwind ring) car la classe ring est neutralisée par le boxShadow inline
+                boxShadow: isSelected
+                  ? '0 0 0 3px #fff, 0 0 0 6px #0284c7, 0 0 12px rgba(2,132,199,.6)' // Anneau bleu sky-600 pour stand sélectionné
+                  : highlighted
+                    ? '0 0 0 2px #fff, 0 0 0 5px #60a5fa, 0 0 8px rgba(0,0,0,.4)' // Anneau bleu clair pour stand surligné (recherche)
+                    : editMode
+                      ? '0 0 0 2px #fff, 0 0 8px rgba(0,0,0,.4)'
+                      : '0 1px 3px rgba(0,0,0,.3)',
                 opacity: matchesSearch ? 1 : 0.25,
               }}
-              title={s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline})` : `${s.stand_code} — Libre`}
+              title={s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline})${editMode ? ' — Cliquez pour (dé)sélectionner, glisser pour déplacer' : ''}` : `${s.stand_code} — Libre${editMode ? ' — Cliquez pour (dé)sélectionner, glisser pour déplacer' : ''}`}
             >
               <div className="text-[9px] leading-tight font-mono">{s.stand_code.replace(/^[A-Z]-[A-Z]/, '').replace(/^[A-Z]/, '')}</div>
               {editMode && (
