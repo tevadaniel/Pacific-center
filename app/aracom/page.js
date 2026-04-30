@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
 import HelpCard from '@/components/help-card';
+import AiInsightTrigger from '@/components/ai-insight-trigger';
 import { api, getSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -198,7 +199,7 @@ function DashboardView({ onGoto }) {
                 <div key={r.id} className="border rounded-md p-3 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 font-bold flex items-center justify-center text-xs">{r.risk_score}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2"><span className="font-medium truncate">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
+                    <div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><span className="font-medium truncate">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
                     <div className="text-xs text-slate-500">{r.venue_name} · {r.discipline}</div>
                     <div className="flex flex-wrap gap-1 mt-1">{r.missing.map(m => <Badge key={m} className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">❌ {m}</Badge>)}</div>
                   </div>
@@ -646,8 +647,13 @@ function ExposantsView() {
               {rows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="py-2.5 px-4">
-                    <div className="font-medium text-slate-900">{r.organization?.name}</div>
-                    <div className="text-xs text-slate-500">{r.organization?.discipline}</div>
+                    <div className="flex items-center gap-2">
+                      <AiInsightTrigger registration={r} size="xs" />
+                      <div>
+                        <div className="font-medium text-slate-900">{r.organization?.name}</div>
+                        <div className="text-xs text-slate-500">{r.organization?.discipline}</div>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-2"><PrioBadge p={r.organization?.priority_level} /></td>
                   <td className="px-2 text-slate-700">{r.venue?.name}</td>
@@ -1371,7 +1377,7 @@ function CautionsView() {
               return (
                 <tr key={r.id} className={`hover:bg-slate-50/50 ${checked ? 'bg-violet-50/30' : ''}`}>
                   <td className="py-2 pl-4"><input type="checkbox" checked={checked} onChange={() => toggleBulk(r.id)} className="w-4 h-4 accent-violet-600" /></td>
-                  <td><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></td>
+                  <td><div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><div><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></div></div></td>
                   <td>{r.venue?.name}</td>
                   <td className="font-mono text-xs">{r.stand_code}</td>
                   <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
@@ -2126,6 +2132,7 @@ function MailingView() {
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        <AiInsightTrigger registration={r} size="xs" />
                         <span className="font-medium truncate">{r.organization?.name}</span>
                         {r.stand_code && <span className="text-[10px] font-mono text-slate-400 shrink-0">{r.stand_code}</span>}
                         {h?.fidelity?.includes('Fidèle') && <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-700 border border-amber-200 shrink-0" title={`${h.nb_editions} éditions`}>⭐</span>}
@@ -2189,7 +2196,7 @@ function AnomaliesView() {
           <tbody className="divide-y">
             {rows.map(a => (
               <tr key={a.id}>
-                <td className="py-2 px-4 font-medium">{a.organization_name}</td>
+                <td className="py-2 px-4 font-medium"><div className="flex items-center gap-1.5">{a.registration_id && <AiInsightTrigger registration={{ id: a.registration_id }} size="xs" />}{a.organization_name}</div></td>
                 <td>{a.venue_name}</td>
                 <td className="text-xs">{a.anomaly_type}</td>
                 <td><Badge variant={a.severity_level === 'critique' || a.severity_level === 'haute' ? 'destructive' : 'secondary'}>{a.severity_level}</Badge></td>
@@ -2548,7 +2555,7 @@ function RelancesView() {
               <tr key={t.id} className={t.status === 'termine' ? 'opacity-60' : ''}>
                 <td className="px-4"><input type="checkbox" checked={t.status === 'termine'} onChange={() => toggleDone(t)} /></td>
                 <td className={`py-2 font-medium ${t.status === 'termine' ? 'line-through text-slate-500' : ''}`}>{t.title}<div className="text-xs text-slate-500 font-normal">{t.notes}</div></td>
-                <td className="text-slate-700">{t.organization_name} • <span className="font-mono text-xs">{t.stand_code}</span></td>
+                <td className="text-slate-700"><div className="flex items-center gap-1.5">{t.registration_id && <AiInsightTrigger registration={{ id: t.registration_id }} size="xs" />}{t.organization_name} • <span className="font-mono text-xs">{t.stand_code}</span></div></td>
                 <td><Badge variant="secondary">{t.task_type}</Badge></td>
                 <td className="text-xs text-slate-500">{t.due_date || '—'}</td>
                 <td className="pr-4 text-right"><Button size="sm" variant="ghost" onClick={() => del(t.id)}>Supprimer</Button></td>
@@ -2755,6 +2762,7 @@ function AccessTokensView() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
+                    {t.registration_id && <AiInsightTrigger registration={{ id: t.registration_id }} size="xs" />}
                     <b className="text-sm">{t.organization?.name || t.email || t.label || '—'}</b>
                     <Badge variant="secondary" className="text-[10px]">{t.purpose === 'inscription_exposant' ? 'Inscription' : t.purpose === 'pacific_centers' ? 'Pacific' : 'Accès'}</Badge>
                     {t.is_revoked && <Badge className="bg-slate-500 text-white text-[10px]">Révoqué</Badge>}
@@ -3427,7 +3435,7 @@ function PendingValidationsCard({ onGoto }) {
             <div key={r.id} className="bg-white rounded-md border border-violet-200 p-2 flex items-center gap-2">
               <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate">{r.organization?.name || '—'}</div>
+                <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" />{r.organization?.name || '—'}</div>
                 <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
                 {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
               </div>
@@ -3577,6 +3585,7 @@ function ValidationRequestCard({ req, onSetRdv, onLock, onCancel }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <Building2 className="w-4 h-4 text-slate-500" />
+              <AiInsightTrigger registration={{ id: req.registration_id || req.id, ai_insight: req.ai_insight, ai_insight_vigilance: req.ai_insight_vigilance, ai_insight_generated_at: req.ai_insight_generated_at }} size="xs" />
               <h3 className="font-bold text-base">{req.organization?.name || '—'}</h3>
               <Badge variant="secondary" className="text-xs">{req.organization?.discipline || '—'}</Badge>
             </div>
