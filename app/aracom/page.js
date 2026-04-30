@@ -3030,10 +3030,10 @@ function BackupView() {
           <div className="flex-1 min-w-[280px]">
             <h2 className="font-bold text-orange-900 text-lg">🚨 Reset pour une nouvelle édition</h2>
             <p className="text-sm text-orange-800 mt-1">
-              Remet <b>tous les exposants</b> au statut <b>&quot;à relancer&quot;</b>, décoche les flags convention/assurance/guide et archive les documents passés. Les exposants devront renvoyer leurs documents pour finaliser leur inscription.
+              Remet <b>tous les exposants</b> au statut <b>&quot;à relancer&quot;</b>, <b>détache les stands</b> (plans vierges), décoche les flags convention/assurance/guide et archive les documents passés. Les exposants devront renvoyer leurs documents pour finaliser leur inscription.
             </p>
             <p className="text-xs text-orange-700 mt-1 italic">
-              ✅ <b>Conservé</b> : organisations, stands assignés, cautions passées, notes, animations, historique complet dans les profils.
+              ✅ <b>Conservé</b> : organisations, <b>positions des stands sur le plan</b> (kiosques, stands visuels), cautions passées, notes internes, animations, historique complet dans les profils.
             </p>
           </div>
           <Button

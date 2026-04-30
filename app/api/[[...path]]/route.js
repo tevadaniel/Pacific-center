@@ -1393,10 +1393,17 @@ export async function POST(request, { params }) {
             is_insurance_uploaded: false,
             is_guide_sent: false,
             completion_percent: 0,
+            stand_code: null,              // 🆕 détache les stands pour plans vierges
+            stand_detached_at: now,
             reset_for_edition_at: now,
             updated_at: now,
           },
         }
+      );
+      // 🆕 Annule toutes les assignments de stands (plans deviennent vierges)
+      const assignResult = await db.collection('stand_assignments').updateMany(
+        { status: { $ne: 'annule' } },
+        { $set: { status: 'annule', cancelled_at: now, cancelled_reason: 'reset_nouvelle_edition', updated_at: now } }
       );
       // Note : on ne touche PAS aux cautions pour préserver l'historique financier.
       //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
@@ -1414,8 +1421,9 @@ export async function POST(request, { params }) {
         ok: true,
         registrations_reset: rUpd.modifiedCount,
         documents_archived: archivedDocs,
+        stand_assignments_cancelled: assignResult.modifiedCount,
         total_registrations_found: regs.length,
-        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). L'historique (organisations, stands, cautions, notes) est préservé.`,
+        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). ${assignResult.modifiedCount} attribution(s) de stand annulée(s) (plans vierges). L'historique (organisations, positions de stands, cautions, notes) est préservé.`,
       });
     }
 
