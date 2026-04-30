@@ -216,11 +216,21 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         </div>
       )}
 
+      {/* 🎯 Barre des outils décoratifs (kiosques, démos, commerces, flèches…) — au-dessus du plan */}
+      {editMode && (
+        <div id="venue-elements-toolbar" className="rounded-md bg-white border border-slate-200 px-3 py-2 flex flex-wrap items-center gap-2 min-h-[44px]" />
+      )}
+
+      {/* 🎯 Barre d'options de l'élément sélectionné — au-dessus du plan, ne masque jamais la zone de travail */}
+      {editMode && (
+        <div id="venue-element-edit-toolbar" className="min-h-[0] flex items-center" />
+      )}
+
       <div
         ref={containerRef}
         onDragOver={(e) => editMode && e.preventDefault()}
         onDrop={onDragEnd}
-        className="relative rounded-xl overflow-hidden border bg-black shadow-lg"
+        className="relative rounded-xl overflow-hidden border bg-black shadow-lg w-full max-w-full"
         style={{
           aspectRatio: '1600 / 556',
           ...(bgUrl
