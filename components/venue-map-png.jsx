@@ -57,6 +57,8 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const venueCode = venue?.code;
   const bgUrl = BG_BY_VENUE[venueCode];
 
+  // ⚠️ TOUS les hooks DOIVENT être déclarés avant tout early return (Rules of Hooks).
+
   // Initialize positions from stands (DB pos_x,pos_y) or defaults
   // 🆕 Si plusieurs stands sont à la position par défaut (50,50) ou n'ont pas de position,
   // on les répartit automatiquement en grille pour qu'ils soient cliquables individuellement.
@@ -105,8 +107,6 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     setDirty(false);
   }, [stands, venueCode]);
 
-  if (!bgUrl && !venueCode) return null;
-
   // 🎯 Snap-to-grid : aligne automatiquement sur une grille de 2.5% (40 colonnes / 40 lignes)
   // Le toggle "Snap" dans la barre désactive le snap (placement libre).
   const GRID_STEP = 2.5;
@@ -151,6 +151,9 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [editMode, dirty]);
+
+  // ✅ Early return APRÈS tous les hooks (Rules of Hooks respectées)
+  if (!bgUrl && !venueCode) return null;
 
   const savePositions = async () => {
     if (saving) return;
