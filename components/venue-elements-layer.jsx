@@ -103,11 +103,24 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
         width: el.width, height: el.height, rotation: el.rotation,
         color: el.color, label: el.label, z_index: el.z_index || 1,
       }));
-      await api('/api/venue-elements/bulk-update', { method: 'POST', body: JSON.stringify({ updates }) });
-      toast.success('Plan sauvegardé');
+      if (updates.length) {
+        await api('/api/venue-elements/bulk-update', { method: 'POST', body: JSON.stringify({ updates }) });
+      }
       setDirty(false);
-    } catch (e) { toast.error(e.message); }
+      return { elements_saved: updates.length };
+    } catch (e) { toast.error('Erreur éléments : ' + e.message); throw e; }
   };
+
+  // 🔗 Expose saveAll + dirty au parent (venue-map-png) via window global
+  // pour permettre un bouton Sauver UNIFIÉ (stands + éléments décoratifs en un seul clic)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.__VENUE_ELEMENTS_SAVE_ALL = saveAll;
+    window.__VENUE_ELEMENTS_DIRTY = dirty;
+    return () => {
+      if (window.__VENUE_ELEMENTS_SAVE_ALL === saveAll) delete window.__VENUE_ELEMENTS_SAVE_ALL;
+    };
+  });
 
   const deleteEl = async (el) => {
     // Pas de confirm() : Safari peut bloquer le popup et le user a déjà cliqué explicitement sur "Supprimer".
@@ -194,8 +207,8 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
                 );
               })}
               <span className="border-l h-5 mx-1" />
-              <Button size="sm" variant="default" className="gap-1.5" disabled={!dirty} onClick={saveAll}><Save className="w-3.5 h-3.5" /> Sauver</Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setEditMode(false); setSelected(null); }}>Quitter</Button>
+              <span className="text-[11px] text-slate-500 italic">💾 Sauvegarde unifiée → bouton « Tout sauver » en haut</span>
+              <Button size="sm" variant="outline" className="gap-1.5 ml-auto" onClick={() => { setEditMode(false); setSelected(null); }}>Quitter édition éléments</Button>
             </div>
           ),
           host

@@ -42,17 +42,15 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const [positions, setPositions] = useState({}); // stand_code -> {x,y}
   const [draggedCode, setDraggedCode] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true); // 🎯 Toggle UI plus fiable que Shift
   const [alignOpen, setAlignOpen] = useState(false); // 📐 Panneau d'alignement auto
   const [selectedCodes, setSelectedCodes] = useState(() => new Set()); // 🎯 Multi-sélection de stands
   const [alignParams, setAlignParams] = useState({
-    mode: 'grid',       // 'row' | 'column' | 'grid'
-    target: 'selected', // 'selected' | 'all' | 'visible'
-    cols: 6,            // pour grille
+    mode: 'row',        // 'row' | 'column'  (🧹 simplifié : plus de 'grid')
     startX: 15,         // % position de départ X
-    startY: 25,         // % position de départ Y
-    spacingX: 10,       // % espacement horizontal
-    spacingY: 10,       // % espacement vertical
+    startY: 50,         // % position de départ Y (milieu par défaut pour une ligne horizontale)
+    spacing: 6,         // % espacement entre stands (unique, s'applique sur X ou Y selon mode)
   });
   const containerRef = useRef(null);
 
@@ -139,7 +137,24 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     }
   }, [snapEnabled]);
 
+  // 🚨 Avertissement si fermeture d'onglet ou navigation avec des modifications non sauvées
+  useEffect(() => {
+    if (!editMode) return;
+    const handler = (e) => {
+      const elementsDirty = typeof window !== 'undefined' && window.__VENUE_ELEMENTS_DIRTY;
+      if (dirty || elementsDirty) {
+        e.preventDefault();
+        e.returnValue = 'Vous avez des modifications non sauvegardées. Voulez-vous vraiment quitter ?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [editMode, dirty]);
+
   const savePositions = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       // 🛡️ On envoie UNE LIGNE PAR STAND du site, avec la position issue du state React.
       //    Si un stand n'a pas de position en state (cas extrême), on retombe sur son pos_x/pos_y DB.
@@ -151,14 +166,24 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         if (x == null || y == null) return null;
         return { id: s.id, pos_x: Number(x.toFixed(2)), pos_y: Number(y.toFixed(2)) };
       }).filter(Boolean);
-      if (!updates.length) { toast.error('Aucune position à sauvegarder'); return; }
-      const r = await api('/api/venue-stands/positions', { method: 'POST', body: JSON.stringify({ updates }) });
-      toast.success(`✅ ${r.updated || updates.length} position(s) sauvegardée(s)`);
+      let standsSaved = 0;
+      if (updates.length) {
+        const r = await api('/api/venue-stands/positions', { method: 'POST', body: JSON.stringify({ updates }) });
+        standsSaved = r.updated || updates.length;
+      }
+      // 🔗 Sauvegarde UNIFIÉE : on déclenche aussi le save des éléments décoratifs
+      let elementsSaved = 0;
+      if (typeof window !== 'undefined' && typeof window.__VENUE_ELEMENTS_SAVE_ALL === 'function') {
+        try {
+          const r2 = await window.__VENUE_ELEMENTS_SAVE_ALL();
+          elementsSaved = r2?.elements_saved || 0;
+        } catch (e) { /* toast déjà affiché côté enfant */ }
+      }
+      toast.success(`✅ Plan sauvegardé — ${standsSaved} stand(s) + ${elementsSaved} élément(s) décoratif(s)`);
       setDirty(false);
-      // 🔕 On NE recharge PAS les stands ici : le state React est déjà synchronisé avec la DB.
-      //    Un reload inutile risquerait de remélanger l'affichage (bug historique).
-      //    Le parent pourra rafraîchir au prochain changement de site/onglet.
+      // 🔕 Pas de reload : state local déjà synchronisé.
     } catch (e) { toast.error('Erreur sauvegarde : ' + e.message); }
+    finally { setSaving(false); }
   };
 
   const resetPositions = () => {
@@ -183,37 +208,22 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     } catch (e) { toast.error(e.message); }
   };
 
-  // 📐 Alignement automatique : range les stands sélectionnés / filtrés / tous
+  // 📐 Alignement simple : stands sélectionnés (s'il y en a) sinon tous.
+  //    Mode : 'row' (ligne horizontale) ou 'column' (colonne verticale).
+  //    Paramètres : startX, startY, spacing (espacement entre chaque stand).
   const applyAlignment = () => {
-    let filtered;
-    if (alignParams.target === 'selected') {
-      filtered = stands.filter(s => selectedCodes.has(s.stand_code));
-      if (!filtered.length) { toast.error('Aucun stand sélectionné — cliquez sur les stands à aligner (Cmd/Ctrl+clic pour multi-sélection)'); return; }
-    } else if (alignParams.target === 'visible') {
-      filtered = stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase()));
-      if (!filtered.length) { toast.error('Aucun stand ne correspond au filtre'); return; }
-    } else {
-      filtered = [...stands];
-      if (!filtered.length) { toast.error('Aucun stand à aligner'); return; }
-    }
+    const hasSelection = selectedCodes.size > 0;
+    let filtered = hasSelection
+      ? stands.filter(s => selectedCodes.has(s.stand_code))
+      : [...stands];
+    if (!filtered.length) { toast.error('Aucun stand à aligner'); return; }
     // Tri pour ordre cohérent (stand_code alphanumérique)
     filtered.sort((a, b) => a.stand_code.localeCompare(b.stand_code, 'fr', { numeric: true }));
-    const { mode, cols, startX, startY, spacingX, spacingY } = alignParams;
+    const { mode, startX, startY, spacing } = alignParams;
     const newPositions = { ...positions };
     filtered.forEach((s, i) => {
-      let x, y;
-      if (mode === 'row') {
-        x = startX + i * spacingX;
-        y = startY;
-      } else if (mode === 'column') {
-        x = startX;
-        y = startY + i * spacingY;
-      } else {
-        const c = i % cols;
-        const r = Math.floor(i / cols);
-        x = startX + c * spacingX;
-        y = startY + r * spacingY;
-      }
+      const x = mode === 'row' ? startX + i * spacing : startX;
+      const y = mode === 'column' ? startY + i * spacing : startY;
       newPositions[s.stand_code] = {
         x: Math.max(2, Math.min(98, +x.toFixed(2))),
         y: Math.max(2, Math.min(98, +y.toFixed(2))),
@@ -221,7 +231,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     });
     setPositions(newPositions);
     setDirty(true);
-    toast.success(`✅ ${filtered.length} stand(s) aligné(s) en ${mode === 'row' ? 'ligne H' : mode === 'column' ? 'colonne V' : `grille ${cols}c`}. N'oubliez pas de sauver.`);
+    toast.success(`✅ ${filtered.length} stand(s) alignés en ${mode === 'row' ? 'ligne horizontale ➡️' : 'colonne verticale ⬇️'}. N'oubliez pas de Sauver.`);
   };
 
   const addStand = async () => {
@@ -281,7 +291,9 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
                 <Button variant={alignOpen ? 'default' : 'outline'} size="sm" className="gap-1.5" onClick={() => setAlignOpen(!alignOpen)}>📐 Aligner</Button>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPositions}><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
                 <Button variant="outline" size="sm" className="gap-1.5 text-red-600 border-red-300 hover:bg-red-50" onClick={clearAllPositions}><Trash2 className="w-3.5 h-3.5" /> Tout effacer</Button>
-                <Button variant="default" size="sm" className="gap-1.5" disabled={!dirty} onClick={savePositions}><Save className="w-3.5 h-3.5" /> Sauver</Button>
+                <Button variant="default" size="sm" className={`gap-1.5 ${dirty ? 'animate-pulse bg-emerald-600 hover:bg-emerald-700' : ''}`} disabled={saving} onClick={savePositions}>
+                  <Save className="w-3.5 h-3.5" /> {saving ? 'Sauvegarde…' : dirty ? '💾 Tout sauver (stands + éléments)' : 'Tout sauver'}
+                </Button>
               </>
             )}
           </div>
@@ -315,87 +327,63 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         </div>
       )}
 
-      {/* 📐 Panneau d'alignement automatique */}
+      {/* 📐 Panneau d'alignement simplifié : Ligne/Colonne + X + Y + Espacement */}
       {editMode && alignOpen && (
-        <div className="rounded-md bg-blue-50 border-2 border-blue-300 px-4 py-3 space-y-2.5">
+        <div className="rounded-md bg-blue-50 border-2 border-blue-300 px-4 py-3 space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="font-bold text-sm text-blue-900">📐 Alignement automatique des stands</h4>
+            <h4 className="font-bold text-sm text-blue-900">
+              📐 Aligner {selectedCodes.size > 0 ? `les ${selectedCodes.size} stand(s) sélectionné(s)` : `les ${stands.length} stands`}
+            </h4>
             <button onClick={() => setAlignOpen(false)} className="text-slate-400 hover:text-rose-600">✕</button>
           </div>
-          <div className="grid md:grid-cols-2 gap-3">
+
+          {/* Mode : Ligne ou Colonne */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={alignParams.mode === 'row' ? 'default' : 'outline'}
+              className="flex-1"
+              onClick={() => setAlignParams(p => ({ ...p, mode: 'row' }))}
+            >
+              ➡️ Ligne horizontale
+            </Button>
+            <Button
+              size="sm"
+              variant={alignParams.mode === 'column' ? 'default' : 'outline'}
+              className="flex-1"
+              onClick={() => setAlignParams(p => ({ ...p, mode: 'column' }))}
+            >
+              ⬇️ Colonne verticale
+            </Button>
+          </div>
+
+          {/* Sliders X / Y / Espacement */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1">Disposition</label>
-              <div className="flex gap-1">
-                {[
-                  { v: 'row', label: '➡️ Ligne H' },
-                  { v: 'column', label: '⬇️ Colonne' },
-                  { v: 'grid', label: '⊞ Grille' },
-                ].map(opt => (
-                  <Button
-                    key={opt.v}
-                    size="sm"
-                    variant={alignParams.mode === opt.v ? 'default' : 'outline'}
-                    className="text-[11px] flex-1"
-                    onClick={() => setAlignParams(p => ({ ...p, mode: opt.v }))}
-                  >
-                    {opt.label}
-                  </Button>
-                ))}
-              </div>
+              <label className="text-xs font-medium text-slate-700 block mb-1">Position X : <b>{alignParams.startX}%</b></label>
+              <input type="range" min="0" max="95" step="2.5" value={alignParams.startX} onChange={e => setAlignParams(p => ({ ...p, startX: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1">Cible de l&apos;alignement</label>
-              <div className="flex gap-1 flex-wrap">
-                <Button size="sm" variant={alignParams.target === 'selected' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'selected' }))}>
-                  ✅ Sélection ({selectedCodes.size})
-                </Button>
-                <Button size="sm" variant={alignParams.target === 'visible' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'visible' }))}>
-                  Filtre ({stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase())).length})
-                </Button>
-                <Button size="sm" variant={alignParams.target === 'all' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'all' }))}>
-                  Tous ({stands.length})
-                </Button>
-              </div>
-              {alignParams.target === 'selected' && selectedCodes.size > 0 && (
-                <button type="button" onClick={() => setSelectedCodes(new Set())} className="mt-1 text-[10px] text-rose-600 hover:underline">
-                  ✕ Tout désélectionner
-                </button>
-              )}
+              <label className="text-xs font-medium text-slate-700 block mb-1">Position Y : <b>{alignParams.startY}%</b></label>
+              <input type="range" min="0" max="95" step="2.5" value={alignParams.startY} onChange={e => setAlignParams(p => ({ ...p, startY: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700 block mb-1">Espacement : <b>{alignParams.spacing}%</b></label>
+              <input type="range" min="2.5" max="20" step="0.5" value={alignParams.spacing} onChange={e => setAlignParams(p => ({ ...p, spacing: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
             </div>
           </div>
 
-          <div className="grid md:grid-cols-4 gap-3">
-            <div>
-              <label className="text-[11px] text-slate-600">Position X départ ({alignParams.startX}%)</label>
-              <input type="range" min="0" max="90" step="2.5" value={alignParams.startX} onChange={e => setAlignParams(p => ({ ...p, startX: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-600">Position Y départ ({alignParams.startY}%)</label>
-              <input type="range" min="0" max="90" step="2.5" value={alignParams.startY} onChange={e => setAlignParams(p => ({ ...p, startY: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-600">Espacement X ({alignParams.spacingX}%)</label>
-              <input type="range" min="2.5" max="25" step="2.5" value={alignParams.spacingX} onChange={e => setAlignParams(p => ({ ...p, spacingX: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-600">Espacement Y ({alignParams.spacingY}%)</label>
-              <input type="range" min="2.5" max="25" step="2.5" value={alignParams.spacingY} onChange={e => setAlignParams(p => ({ ...p, spacingY: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
-            </div>
-          </div>
-
-          {alignParams.mode === 'grid' && (
-            <div>
-              <label className="text-[11px] text-slate-600">Nombre de colonnes ({alignParams.cols})</label>
-              <input type="range" min="2" max="12" step="1" value={alignParams.cols} onChange={e => setAlignParams(p => ({ ...p, cols: parseInt(e.target.value) }))} className="w-full accent-blue-600" />
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 pt-1 border-t border-blue-200">
+          <div className="flex items-center gap-2 pt-2 border-t border-blue-200">
             <Button size="sm" variant="default" className="gap-1.5 bg-blue-600 hover:bg-blue-700" onClick={applyAlignment}>
               ✓ Appliquer l&apos;alignement
             </Button>
-            <span className="text-[11px] text-slate-600">
-              💡 Aperçu instantané sur le plan • Cliquez « Sauver » pour persister en base.
+            {selectedCodes.size > 0 && (
+              <Button size="sm" variant="outline" className="text-[11px]" onClick={() => setSelectedCodes(new Set())}>
+                ✕ Tout désélectionner
+              </Button>
+            )}
+            <span className="text-[11px] text-slate-600 ml-auto">
+              💡 Aperçu instantané • Cliquez « Tout sauver » pour persister.
             </span>
           </div>
         </div>
