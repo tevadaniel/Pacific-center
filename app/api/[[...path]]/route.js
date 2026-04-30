@@ -4705,7 +4705,8 @@ export async function DELETE(request, { params }) {
       return json({ ok: true });
     }
     if (route.startsWith('official-documents/')) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const userRole = request.headers.get('x-user-role');
+      if (userRole !== 'aracom_admin') return err('Réservé aux admins', 403);
       const docId = p[1];
       const doc = await db.collection('official_documents').findOne({ id: docId });
       if (!doc) return err('Document introuvable', 404);
