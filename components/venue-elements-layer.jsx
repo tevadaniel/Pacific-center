@@ -64,6 +64,10 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
     setDragOffset({ id: el.id, dx: e.clientX - r.left - elX, dy: e.clientY - r.top - elY });
   };
 
+  // 🎯 Snap-to-grid : aligne sur 2.5%. Maintenir Shift pour placement libre.
+  const GRID_STEP = 2.5;
+  const snap = (val, withShift = false) => withShift ? +val.toFixed(2) : +(Math.round(val / GRID_STEP) * GRID_STEP).toFixed(2);
+
   useEffect(() => {
     if (!dragOffset) return;
     const onMove = (e) => {
@@ -73,7 +77,10 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
       const y = ((e.clientY - r.top - dragOffset.dy) / r.height) * 100;
       const cx = Math.max(0, Math.min(100, x));
       const cy = Math.max(0, Math.min(100, y));
-      setElements(prev => prev.map(el => el.id === dragOffset.id ? { ...el, pos_x: +cx.toFixed(2), pos_y: +cy.toFixed(2) } : el));
+      // Snap to grid (sauf si Shift pressé)
+      const sx = snap(cx, e.shiftKey);
+      const sy = snap(cy, e.shiftKey);
+      setElements(prev => prev.map(el => el.id === dragOffset.id ? { ...el, pos_x: sx, pos_y: sy } : el));
       setDirty(true);
     };
     const onUp = () => setDragOffset(null);
@@ -206,11 +213,11 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
           <div className="grid grid-cols-2 gap-1.5">
             <div>
               <Label className="text-[10px] text-slate-600">L ({selectedEl.width}%)</Label>
-              <input type="range" min="1" max="50" step="0.5" value={selectedEl.width} onChange={(e) => updateField(selectedEl.id, 'width', parseFloat(e.target.value))} className="w-full" />
+              <input type="range" min="2.5" max="50" step="2.5" value={selectedEl.width} onChange={(e) => updateField(selectedEl.id, 'width', parseFloat(e.target.value))} className="w-full" />
             </div>
             <div>
               <Label className="text-[10px] text-slate-600">H ({selectedEl.height}%)</Label>
-              <input type="range" min="1" max="50" step="0.5" value={selectedEl.height} onChange={(e) => updateField(selectedEl.id, 'height', parseFloat(e.target.value))} className="w-full" />
+              <input type="range" min="2.5" max="50" step="2.5" value={selectedEl.height} onChange={(e) => updateField(selectedEl.id, 'height', parseFloat(e.target.value))} className="w-full" />
             </div>
           </div>
           <div>

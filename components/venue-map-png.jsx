@@ -87,6 +87,11 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
 
   if (!bgUrl && !venueCode) return null;
 
+  // 🎯 Snap-to-grid : aligne automatiquement sur une grille de 2.5% (40 colonnes / 40 lignes)
+  // Maintenir Shift désactive le snap (placement libre).
+  const GRID_STEP = 2.5;
+  const snap = (val, withShift = false) => withShift ? +val.toFixed(2) : Math.round(val / GRID_STEP) * GRID_STEP;
+
   const onDragStart = (e, code) => {
     if (!editMode) return;
     setDraggedCode(code);
@@ -95,10 +100,13 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const onDragEnd = (e) => {
     if (!editMode || !draggedCode || !containerRef.current) { setDraggedCode(null); return; }
     const r = containerRef.current.getBoundingClientRect();
-    const x = ((e.clientX - r.left) / r.width) * 100;
-    const y = ((e.clientY - r.top) / r.height) * 100;
-    if (x < 0 || x > 100 || y < 0 || y > 100) { setDraggedCode(null); return; }
-    setPositions(p => ({ ...p, [draggedCode]: { x: +x.toFixed(2), y: +y.toFixed(2) } }));
+    const xRaw = ((e.clientX - r.left) / r.width) * 100;
+    const yRaw = ((e.clientY - r.top) / r.height) * 100;
+    if (xRaw < 0 || xRaw > 100 || yRaw < 0 || yRaw > 100) { setDraggedCode(null); return; }
+    // Shift = placement libre, sinon snap sur la grille
+    const x = snap(xRaw, e.shiftKey);
+    const y = snap(yRaw, e.shiftKey);
+    setPositions(p => ({ ...p, [draggedCode]: { x, y } }));
     setDirty(true);
     setDraggedCode(null);
   };
@@ -204,7 +212,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
 
       {editMode && (
         <div className="text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800">
-          <Move className="w-3.5 h-3.5 inline mr-1" /> <b>Mode édition</b> : glisse les stands pour les repositionner, clique sur la croix pour supprimer un stand libre, ou utilise "Ajouter" pour en créer un nouveau. N'oublie pas de <b>Sauver</b>.
+          <Move className="w-3.5 h-3.5 inline mr-1" /> <b>Mode édition</b> — Les stands et éléments s&apos;alignent automatiquement sur la grille (2,5%). Maintenez <kbd className="px-1 py-0.5 rounded bg-white border text-[10px] font-mono">Shift</kbd> pendant le drag pour un placement libre. Cliquez sur la croix rouge pour supprimer un stand. N&apos;oubliez pas de <b>Sauver</b> après vos modifications.
         </div>
       )}
 
@@ -220,6 +228,21 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
             : { backgroundColor: BLANK_BG_COLOR }),
         }}
       >
+        {/* 🎯 Grille de snap visible en mode édition (lignes tous les 2.5% en clair, tous les 10% en plus marqué) */}
+        {editMode && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: [
+                'linear-gradient(to right, rgba(0,0,0,0.04) 1px, transparent 1px)',
+                'linear-gradient(to bottom, rgba(0,0,0,0.04) 1px, transparent 1px)',
+                'linear-gradient(to right, rgba(0,0,0,0.10) 1px, transparent 1px)',
+                'linear-gradient(to bottom, rgba(0,0,0,0.10) 1px, transparent 1px)',
+              ].join(','),
+              backgroundSize: '2.5% 2.5%, 2.5% 2.5%, 10% 10%, 10% 10%',
+            }}
+          />
+        )}
         {/* Couche d'éléments décoratifs (zones, kiosques, commerces, flèches, prises) */}
         <VenueElementsLayer venueId={venue?.id} editable={editable} containerRef={containerRef} />
 
