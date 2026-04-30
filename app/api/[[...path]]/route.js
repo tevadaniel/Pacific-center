@@ -533,6 +533,22 @@ export async function GET(request, { params }) {
       return json(docs.map(d => { delete d._id; return d; }));
     }
 
+    // ============ DEADLINES par étape (Profil, Stand, Animation, Documents, Caution, Convention) ============
+    // Lecture publique (tous rôles authentifiés) — les exposants verront leur compte à rebours
+    if (route === 'step-deadlines') {
+      const cfg = await db.collection('app_settings').findOne({ key: 'step_deadlines' });
+      const defaults = {
+        profile: null,         // ISO date string ou null
+        stand: null,
+        animation: null,
+        documents: null,
+        caution: null,
+        convention: null,
+      };
+      const deadlines = { ...defaults, ...(cfg?.deadlines || {}) };
+      return json({ deadlines, updated_at: cfg?.updated_at || null, updated_by: cfg?.updated_by || null });
+    }
+
     // ============ PROSPECTION (Pacific Centers + ARACOM) ============
     // Liste des prospects. Pacific Centers voient uniquement leurs sites.
     if (route === 'prospects') {
@@ -1488,6 +1504,40 @@ export async function POST(request, { params }) {
       await db.collection('official_documents').insertOne(doc);
       delete doc._id;
       return json(doc);
+    }
+
+    // ============ DEADLINES par étape — POST (admin only) ============
+    if (route === 'step-deadlines') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const { deadlines } = body || {};
+      if (!deadlines || typeof deadlines !== 'object') return err('Body invalide : deadlines requis', 400);
+      const allowed = ['profile', 'stand', 'animation', 'documents', 'caution', 'convention'];
+      const cleaned = {};
+      for (const k of allowed) {
+        if (deadlines[k] === null || deadlines[k] === '') {
+          cleaned[k] = null;
+        } else if (typeof deadlines[k] === 'string') {
+          // Validation : doit être parsable en date
+          const d = new Date(deadlines[k]);
+          if (isNaN(d.getTime())) return err(`Deadline ${k} invalide`, 400);
+          cleaned[k] = d.toISOString();
+        }
+      }
+      const userId = ctx.userId || request.headers.get('x-user-id');
+      const user = userId ? await db.collection('users').findOne({ id: userId }) : null;
+      await db.collection('app_settings').updateOne(
+        { key: 'step_deadlines' },
+        {
+          $set: {
+            key: 'step_deadlines',
+            deadlines: cleaned,
+            updated_at: new Date(),
+            updated_by: user?.email || userId || 'admin',
+          },
+        },
+        { upsert: true }
+      );
+      return json({ ok: true, deadlines: cleaned });
     }
 
     // ============ VALIDATION D'UN DOCUMENT REÇU PAR L'EXPOSANT ============

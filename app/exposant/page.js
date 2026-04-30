@@ -24,7 +24,7 @@ import {
 import {
   REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
   DOCUMENT_TYPE_LABEL, EVENT_DATES, EVENT_OPENING_TIME, EVENT_CLOSING_TIME,
-  ANIMATION_HOURLY_SLOTS, DEMO_ZONE_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS, MAX_DEMO_PARALLEL, MIN_ANIMATION_SLOTS_PER_DAY,
+  ANIMATION_HOURLY_SLOTS, getAnimationSlotsForDate, DEMO_ZONE_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS, MAX_DEMO_PARALLEL, MIN_ANIMATION_SLOTS_PER_DAY,
   LOGISTIQUE_PROVISIONS, LOGISTIQUE_RULES, DISCIPLINES,
 } from '@/lib/constants';
 
@@ -46,6 +46,7 @@ export default function ExposantPortal() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('profil');
+  const [stepDeadlines, setStepDeadlines] = useState({});
 
   // Read ?tab= from URL on mount and when changed externally
   useEffect(() => {
@@ -82,6 +83,10 @@ export default function ExposantPortal() {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+  // Charge les deadlines globales définies par ARACOM (pour le compte à rebours)
+  useEffect(() => {
+    api('/api/step-deadlines').then(d => setStepDeadlines(d.deadlines || {})).catch(() => {});
+  }, []);
 
   if (loading) return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><div className="py-20 text-center text-slate-500">Chargement…</div></Shell>;
   if (!data?.registration) {
@@ -140,8 +145,9 @@ export default function ExposantPortal() {
           </CardContent>
         </Card>
 
-        {/* STEPPER — Process en 6 étapes */}
+        {/* STEPPER — Process en 6 étapes + deadlines */}
         <ExposantStepper
+          deadlines={stepDeadlines}
           checks={{
             profile: !!o?.contact_name && !!o?.main_email && !!o?.main_phone,
             site_stand: !!r.venue_id && !!r.stand_code,
@@ -291,15 +297,28 @@ export default function ExposantPortal() {
 // EXPOSANT STEPPER — 6 étapes visuelles du parcours d'inscription
 // =====================================================================
 const STEPS = [
-  { key: 'profile', n: 1, label: 'Compléter mon profil', desc: 'Contact, téléphone, description', tab: 'profil' },
-  { key: 'site_stand', n: 2, label: 'Choisir mon site & stand', desc: 'Pré-réservation', tab: 'sites' },
-  { key: 'animations', n: 3, label: 'Sélectionner mes animations', desc: '≥1 créneau par jour', tab: 'animations' },
-  { key: 'documents', n: 4, label: 'Déposer mes documents', desc: 'Assurance + convention', tab: 'documents' },
-  { key: 'validation_requested', n: 5, label: 'Demander la validation', desc: 'Caution chèque ou espèces', tab: 'profil' },
-  { key: 'locked', n: 6, label: 'Inscription verrouillée', desc: 'Confirmé par ARACOM', tab: 'profil' },
+  { key: 'profile', n: 1, label: 'Compléter mon profil', desc: 'Contact, téléphone, description', tab: 'profil', dl_key: 'profile' },
+  { key: 'site_stand', n: 2, label: 'Choisir mon site & stand', desc: 'Pré-réservation', tab: 'sites', dl_key: 'stand' },
+  { key: 'animations', n: 3, label: 'Sélectionner mes animations', desc: '1 créneau par jour', tab: 'animations', dl_key: 'animation' },
+  { key: 'documents', n: 4, label: 'Déposer mes documents', desc: 'Assurance + convention', tab: 'documents', dl_key: 'documents' },
+  { key: 'validation_requested', n: 5, label: 'Demander la validation', desc: 'Caution chèque ou espèces', tab: 'profil', dl_key: 'caution' },
+  { key: 'locked', n: 6, label: 'Inscription verrouillée', desc: 'Confirmé par ARACOM', tab: 'profil', dl_key: 'convention' },
 ];
 
-function ExposantStepper({ checks }) {
+// Helper : calcule J-X depuis une deadline ISO. Retourne { daysLeft, overdue, label, color }
+function computeDeadlineState(isoDate) {
+  if (!isoDate) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dl = new Date(isoDate); dl.setHours(0, 0, 0, 0);
+  const daysLeft = Math.ceil((dl - today) / (1000 * 60 * 60 * 24));
+  if (daysLeft < 0) return { daysLeft, overdue: true, label: `⚠️ Retard ${-daysLeft}j`, color: 'bg-red-600 text-white' };
+  if (daysLeft === 0) return { daysLeft, overdue: false, label: '⏰ Aujourd\'hui', color: 'bg-orange-500 text-white' };
+  if (daysLeft <= 3) return { daysLeft, overdue: false, label: `⏰ Plus que ${daysLeft}j`, color: 'bg-amber-500 text-white' };
+  if (daysLeft <= 7) return { daysLeft, overdue: false, label: `J-${daysLeft}`, color: 'bg-yellow-500 text-white' };
+  return { daysLeft, overdue: false, label: `J-${daysLeft}`, color: 'bg-slate-200 text-slate-700' };
+}
+
+function ExposantStepper({ checks, deadlines = {} }) {
   // Find the first incomplete step → "current"
   const currentIdx = STEPS.findIndex(s => !checks[s.key]);
   return (
@@ -313,9 +332,11 @@ function ExposantStepper({ checks }) {
           {STEPS.map((s, i) => {
             const done = checks[s.key];
             const isCurrent = i === currentIdx;
+            const dl = !done ? computeDeadlineState(deadlines[s.dl_key]) : null;
             return (
               <div key={s.key} className={`relative rounded-md p-3 border-2 text-center transition ${
                 done ? 'border-emerald-300 bg-emerald-50' :
+                dl?.overdue ? 'border-red-400 bg-red-50 shadow-md' :
                 isCurrent ? 'border-violet-400 bg-violet-50 shadow-md ring-2 ring-violet-200' :
                 'border-slate-200 bg-slate-50'
               }`}>
@@ -328,6 +349,11 @@ function ExposantStepper({ checks }) {
                 </div>
                 <div className={`text-xs font-bold ${done ? 'text-emerald-900' : isCurrent ? 'text-violet-900' : 'text-slate-700'}`}>{s.label}</div>
                 <div className={`text-[10px] mt-0.5 ${done ? 'text-emerald-700' : 'text-slate-500'}`}>{s.desc}</div>
+                {dl && (
+                  <div className={`mt-1.5 inline-block text-[10px] font-bold rounded-full px-2 py-0.5 ${dl.color}`} title={`Deadline : ${new Date(deadlines[s.dl_key]).toLocaleDateString('fr-FR')}`}>
+                    {dl.label}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -336,6 +362,11 @@ function ExposantStepper({ checks }) {
           <div className="mt-3 text-xs text-slate-600 bg-violet-50 rounded-md px-3 py-2 border border-violet-100 flex items-center gap-2">
             <span className="text-violet-700 font-bold">→</span>
             Prochaine étape : <b className="text-violet-900">{STEPS[currentIdx].label}</b>
+            {(() => {
+              const dl = computeDeadlineState(deadlines[STEPS[currentIdx].dl_key]);
+              if (!dl) return null;
+              return <span className={`ml-auto text-[11px] font-bold rounded-full px-2 py-0.5 ${dl.color}`}>{dl.label}</span>;
+            })()}
           </div>
         )}
       </CardContent>
@@ -577,20 +608,33 @@ function ProfilBlock({ organization, registration, onRefresh }) {
         </div>
 
         <div className="pt-3 border-t">
-          <div className="font-medium text-sm mb-2 flex items-center gap-2"><Clock className="w-4 h-4 text-slate-500" /> Horaires officiels du Forum <Badge variant="secondary" className="text-[10px]">Figés</Badge></div>
+          <div className="font-medium text-sm mb-2 flex items-center gap-2"><Clock className="w-4 h-4 text-slate-500" /> Horaires officiels du Forum <Badge variant="secondary" className="text-[10px]">Figés 2026</Badge></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md bg-slate-50 border p-3">
-              <div className="text-xs text-slate-500 uppercase">Heure d&apos;arrivée</div>
-              <div className="text-2xl font-bold text-slate-700 font-mono">{EVENT_OPENING_TIME}</div>
-              <div className="text-xs text-slate-500 mt-1">Ouverture officielle</div>
-            </div>
-            <div className="rounded-md bg-slate-50 border p-3">
-              <div className="text-xs text-slate-500 uppercase">Heure de départ</div>
-              <div className="text-2xl font-bold text-slate-700 font-mono">{EVENT_CLOSING_TIME}</div>
-              <div className="text-xs text-slate-500 mt-1">Fermeture officielle</div>
-            </div>
+            {EVENT_DATES.map(d => (
+              <div key={d.label} className="rounded-md bg-slate-50 border p-3">
+                <div className="text-xs text-slate-500 uppercase">{d.display}</div>
+                <div className="text-2xl font-bold text-slate-700 font-mono">{d.start} – {d.end}</div>
+                <div className="text-xs text-slate-500 mt-1">{d.label === 'vendredi' ? 'Ouverture publique 11h' : 'Journée complète 9h-17h'}</div>
+              </div>
+            ))}
           </div>
-          <p className="text-xs text-slate-500 mt-2">⚠️ Les horaires sont identiques pour tous les exposants et tous les sites. Il est demandé d&apos;être présent <b>1h avant</b> pour le montage du stand.</p>
+          <p className="text-xs text-slate-500 mt-2">⚠️ Soyez présent <b>1h avant</b> l&apos;ouverture pour le montage du stand.</p>
+        </div>
+
+        {/* 🤝 Bandeau d'engagement et accompagnement ARACOM */}
+        <div className="pt-3 border-t space-y-2">
+          <div className="rounded-lg bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 p-3">
+            <div className="font-medium text-sm flex items-center gap-2 text-amber-900">🕐 Présence appréciée</div>
+            <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+              En assurant une présence régulière et un stand vivant tout au long de la journée, vous contribuez au respect des engagements partagés pour cet événement. <b>Un grand merci pour votre implication.</b>
+            </p>
+          </div>
+          <div className="rounded-lg bg-gradient-to-br from-blue-50 to-sky-50 border border-blue-200 p-3">
+            <div className="font-medium text-sm flex items-center gap-2 text-blue-900">🤝 L&apos;équipe ARACOM à vos côtés</div>
+            <p className="text-xs text-blue-800 mt-1 leading-relaxed">
+              L&apos;équipe ARACOM sera <b>présente toute la journée</b> sur chaque site pour vous accompagner, répondre à vos questions et résoudre toute difficulté.
+            </p>
+          </div>
         </div>
 
         <Button onClick={save} disabled={saving} className="gap-2"><CheckCircle2 className="w-4 h-4" /> {saving ? 'Enregistrement…' : 'Enregistrer mon profil'}</Button>
@@ -839,11 +883,12 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
           <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
           <div className="text-sm text-blue-900 space-y-1">
             <p>📍 <b>Site sélectionné :</b> {venueName || 'Votre site'} — les créneaux affichés sont spécifiques à ce site.</p>
-            <p>👉 Pour chaque jour, choisissez <b>au moins 1 créneau</b> ({MAX_ANIMATION_SLOTS_PER_DAY} max). Deux types de créneaux possibles :</p>
+            <p>👉 Pour chaque jour, choisissez <b>1 créneau d&apos;animation</b> (obligatoire, 1 max). Deux types possibles :</p>
             <ul className="text-xs space-y-0.5 ml-3">
-              <li>🟦 <b>Sur mon stand</b> : 1h, illimité (votre stand vous appartient pour la journée)</li>
+              <li>🟦 <b>Sur mon stand</b> : 1h, votre stand vous appartient pour la journée</li>
               <li>🟧 <b>Zone de démonstration</b> : 30min, partagée — <b>1 seul exposant à la fois</b></li>
             </ul>
+            <p className="text-[11px] mt-1 text-amber-700">⚠️ Vous devez tenir votre stand <b>toute la journée</b> ({EVENT_DATES.find(x => x.label === 'vendredi')?.start || '11:00'}-17h vendredi · 9h-17h samedi). L&apos;animation est un temps fort de votre journée.</p>
           </div>
         </CardContent>
       </Card>
@@ -877,7 +922,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
             <div>
               <div className="font-semibold text-xs uppercase text-blue-700 mb-2 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-600" /> Sur mon stand <span className="text-slate-400 font-normal normal-case">— créneaux d&apos;1h, votre stand</span></div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                {ANIMATION_HOURLY_SLOTS.map(slot => {
+                {getAnimationSlotsForDate(d.date).map(slot => {
                   const mine = standMine(d.label, slot);
                   if (mine) {
                     return (
@@ -917,7 +962,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
             <div>
               <div className="font-semibold text-xs uppercase text-orange-700 mb-2 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500" /> Zone de démonstration <span className="text-slate-400 font-normal normal-case">— 30min, partagée (1 exposant à la fois)</span></div>
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5">
-                {DEMO_ZONE_SLOTS.map(slot => {
+                {DEMO_ZONE_SLOTS.filter(s => d.label === 'vendredi' ? s.start >= '11:00' : true).map(slot => {
                   const mine = demoMine(d.label, slot);
                   if (mine) {
                     return (

@@ -130,6 +130,26 @@ function SyntheseView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 🤝 Engagement & accompagnement */}
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Card className="bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200">
+          <CardContent className="p-4">
+            <p className="font-medium text-sm text-amber-900 flex items-center gap-2">🕐 Présence appréciée des exposants</p>
+            <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+              En assurant une présence régulière et un stand vivant tout au long de la journée, chaque exposant contribue au respect des engagements partagés pour cet événement.
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="bg-gradient-to-br from-blue-50 to-sky-50 border-blue-200">
+          <CardContent className="p-4">
+            <p className="font-medium text-sm text-blue-900 flex items-center gap-2">🤝 ARACOM sur le terrain</p>
+            <p className="text-xs text-blue-800 mt-1 leading-relaxed">
+              L&apos;équipe ARACOM est présente <b>toute la journée</b> sur chaque site pour accompagner les exposants et résoudre toute difficulté.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
