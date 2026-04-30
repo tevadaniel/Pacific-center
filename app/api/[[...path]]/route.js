@@ -1353,6 +1353,72 @@ export async function POST(request, { params }) {
     let body = {};
     if (!isMultipart) { try { body = await request.json(); } catch {} }
 
+    // ============ RESET POUR NOUVELLE ÉDITION ============
+    // Remet tous les exposants à "a_relancer" + archive leurs documents + décoche les flags
+    // de validation. Préserve : organisation, stand, cautions historiques, notes internes,
+    // animations, planification. L'exposant devra renvoyer ses documents pour confirmer
+    // l'inscription à la nouvelle édition.
+    // Sécurité : nécessite le body.confirm === 'RESET-NOUVELLE-EDITION-2026'
+    if (route === 'admin/reset-for-new-edition') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      if (body?.confirm !== 'RESET-NOUVELLE-EDITION-2026') {
+        return err('Confirmation requise : envoyer { confirm: "RESET-NOUVELLE-EDITION-2026" }', 400);
+      }
+      const now = new Date();
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      let archivedDocs = 0;
+      for (const r of regs) {
+        // Archive les documents existants
+        const docs = await db.collection('registration_documents').find({ registration_id: r.id }).toArray();
+        for (const d of docs) {
+          const { _id, ...rest } = d;
+          await db.collection('registration_documents_archive').insertOne({
+            ...rest,
+            archived_at: now,
+            archived_reason: 'reset_nouvelle_edition_2026',
+            archived_by: ctx.userId || 'u-admin',
+            original_edition_id: r.edition_id || EDITION_ID,
+          });
+          archivedDocs++;
+        }
+        await db.collection('registration_documents').deleteMany({ registration_id: r.id });
+      }
+      // Reset des flags & statut sur toutes les registrations
+      const rUpd = await db.collection('registrations').updateMany(
+        { edition_id: EDITION_ID },
+        {
+          $set: {
+            status: 'a_relancer',
+            is_convention_signed: false,
+            is_insurance_uploaded: false,
+            is_guide_sent: false,
+            completion_percent: 0,
+            reset_for_edition_at: now,
+            updated_at: now,
+          },
+        }
+      );
+      // Note : on ne touche PAS aux cautions pour préserver l'historique financier.
+      //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
+      //        On laisse internal_notes, stand_code, animation_type, planned_arrival_time intacts.
+      // Log l'action
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'RESET_NEW_EDITION',
+        description: `Reset global : ${regs.length} exposants remis à 'a_relancer', ${archivedDocs} documents archivés`,
+        metadata: { registrations_reset: regs.length, documents_archived: archivedDocs },
+        created_at: now,
+      });
+      return json({
+        ok: true,
+        registrations_reset: rUpd.modifiedCount,
+        documents_archived: archivedDocs,
+        total_registrations_found: regs.length,
+        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). L'historique (organisations, stands, cautions, notes) est préservé.`,
+      });
+    }
+
     if (route === 'seed') {
       const result = await doSeed(body?.force || false);
       return json(result);

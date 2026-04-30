@@ -3021,6 +3021,38 @@ function BackupView() {
 
   return (
     <div className="space-y-4">
+      {/* 🚨 Reset pour nouvelle édition */}
+      <Card className="border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50">
+        <CardContent className="p-5 flex items-start gap-4 flex-wrap">
+          <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+            <RefreshCw className="w-8 h-8 text-orange-600" />
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <h2 className="font-bold text-orange-900 text-lg">🚨 Reset pour une nouvelle édition</h2>
+            <p className="text-sm text-orange-800 mt-1">
+              Remet <b>tous les exposants</b> au statut <b>&quot;à relancer&quot;</b>, décoche les flags convention/assurance/guide et archive les documents passés. Les exposants devront renvoyer leurs documents pour finaliser leur inscription.
+            </p>
+            <p className="text-xs text-orange-700 mt-1 italic">
+              ✅ <b>Conservé</b> : organisations, stands assignés, cautions passées, notes, animations, historique complet dans les profils.
+            </p>
+          </div>
+          <Button
+            size="lg"
+            onClick={async () => {
+              const answer = window.prompt('⚠️ Cette action est IRRÉVERSIBLE.\n\nPour confirmer, tapez exactement :\nRESET-NOUVELLE-EDITION-2026\n\n(Les documents existants seront archivés, les flags décochés, les 68 exposants remis à "à relancer".)');
+              if (answer !== 'RESET-NOUVELLE-EDITION-2026') { if (answer !== null) toast.error('Confirmation incorrecte'); return; }
+              try {
+                const r = await api('/api/admin/reset-for-new-edition', { method: 'POST', body: JSON.stringify({ confirm: 'RESET-NOUVELLE-EDITION-2026' }) });
+                toast.success(r.message || '✅ Reset effectué');
+              } catch (e) { toast.error(e.message); }
+            }}
+            className="bg-orange-600 hover:bg-orange-700 gap-2 shadow-md"
+          >
+            <RefreshCw className="w-5 h-5" /> Reset pour nouvelle édition
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Intro + Drive info */}
       <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50">
         <CardContent className="p-5 flex items-start gap-4 flex-wrap">
