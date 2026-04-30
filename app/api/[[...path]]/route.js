@@ -1418,6 +1418,12 @@ export async function POST(request, { params }) {
             completion_percent: 0,
             stand_code: null,              // 🆕 détache les stands pour plans vierges
             stand_detached_at: now,
+            // 🆕 nettoie les données d'animation héritées des anciennes éditions
+            animation_type: null,
+            friday_slot_label: null,
+            saturday_slot_label: null,
+            planned_arrival_time: null,
+            planned_departure_time: null,
             reset_for_edition_at: now,
             updated_at: now,
           },
@@ -1442,6 +1448,8 @@ export async function POST(request, { params }) {
         await db.collection('animation_slots').deleteMany({});
       }
       // Note : on ne touche PAS aux cautions pour préserver l'historique financier.
+      //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
+      //        On laisse internal_notes intacts (notes archivées d'ARACOM).
       //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
       //        On laisse internal_notes, stand_code, animation_type, planned_arrival_time intacts.
       // Log l'action
