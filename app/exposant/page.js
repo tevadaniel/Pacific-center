@@ -22,7 +22,7 @@ import {
   ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck,
 } from 'lucide-react';
 import {
-  REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
+  DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
   DOCUMENT_TYPE_LABEL, EVENT_DATES, EVENT_OPENING_TIME, EVENT_CLOSING_TIME,
   ANIMATION_HOURLY_SLOTS, getAnimationSlotsForDate, DEMO_ZONE_SLOTS, MAX_ANIMATION_SLOTS_PER_DAY, MAX_PARALLEL_ANIMATIONS, MAX_DEMO_PARALLEL, MIN_ANIMATION_SLOTS_PER_DAY,
   LOGISTIQUE_PROVISIONS, LOGISTIQUE_RULES, DISCIPLINES,
@@ -133,7 +133,6 @@ export default function ExposantPortal() {
               <div className="flex flex-wrap gap-2 mt-3">
                 {v?.name && <Badge variant="secondary"><MapPin className="w-3 h-3 mr-1" /> {v.name}</Badge>}
                 {r.stand_code && <Badge variant="secondary" className="font-mono">Stand {r.stand_code}</Badge>}
-                <Badge className={REGISTRATION_STATUS_COLOR[r.status]}>{REGISTRATION_STATUS_LABEL[r.status]}</Badge>
                 {isPreReserved && <Badge className="bg-amber-100 text-amber-700 border-amber-200">⏳ Pré-réservé — en attente caution</Badge>}
               </div>
             </div>
