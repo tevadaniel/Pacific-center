@@ -44,9 +44,10 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const [dirty, setDirty] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true); // 🎯 Toggle UI plus fiable que Shift
   const [alignOpen, setAlignOpen] = useState(false); // 📐 Panneau d'alignement auto
+  const [selectedCodes, setSelectedCodes] = useState(() => new Set()); // 🎯 Multi-sélection de stands
   const [alignParams, setAlignParams] = useState({
     mode: 'grid',       // 'row' | 'column' | 'grid'
-    target: 'all',      // 'all' | 'visible' (after search filter)
+    target: 'selected', // 'selected' | 'all' | 'visible'
     cols: 6,            // pour grille
     startX: 15,         // % position de départ X
     startY: 25,         // % position de départ Y
@@ -164,10 +165,21 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     } catch (e) { toast.error(e.message); }
   };
 
-  // 📐 Alignement automatique : range les stands en ligne, colonne ou grille
+  // 📐 Alignement automatique : range les stands sélectionnés / filtrés / tous
   const applyAlignment = () => {
-    const filtered = stands.filter(s => alignParams.target === 'all' || s.stand_code.toLowerCase().includes(search.toLowerCase()));
-    if (!filtered.length) { toast.error('Aucun stand à aligner'); return; }
+    let filtered;
+    if (alignParams.target === 'selected') {
+      filtered = stands.filter(s => selectedCodes.has(s.stand_code));
+      if (!filtered.length) { toast.error('Aucun stand sélectionné — cliquez sur les stands à aligner (Cmd/Ctrl+clic pour multi-sélection)'); return; }
+    } else if (alignParams.target === 'visible') {
+      filtered = stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase()));
+      if (!filtered.length) { toast.error('Aucun stand ne correspond au filtre'); return; }
+    } else {
+      filtered = [...stands];
+      if (!filtered.length) { toast.error('Aucun stand à aligner'); return; }
+    }
+    // Tri pour ordre cohérent (stand_code alphanumérique)
+    filtered.sort((a, b) => a.stand_code.localeCompare(b.stand_code, 'fr', { numeric: true }));
     const { mode, cols, startX, startY, spacingX, spacingY } = alignParams;
     const newPositions = { ...positions };
     filtered.forEach((s, i) => {
@@ -179,7 +191,6 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
         x = startX;
         y = startY + i * spacingY;
       } else {
-        // grid
         const c = i % cols;
         const r = Math.floor(i / cols);
         x = startX + c * spacingX;
@@ -192,7 +203,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     });
     setPositions(newPositions);
     setDirty(true);
-    toast.success(`✅ ${filtered.length} stand(s) aligné(s) en ${mode === 'row' ? 'ligne horizontale' : mode === 'column' ? 'colonne verticale' : `grille ${cols} colonnes`}. N'oubliez pas de sauver.`);
+    toast.success(`✅ ${filtered.length} stand(s) aligné(s) en ${mode === 'row' ? 'ligne H' : mode === 'column' ? 'colonne V' : `grille ${cols}c`}. N'oubliez pas de sauver.`);
   };
 
   const addStand = async () => {
