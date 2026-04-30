@@ -43,6 +43,16 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const [draggedCode, setDraggedCode] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true); // 🎯 Toggle UI plus fiable que Shift
+  const [alignOpen, setAlignOpen] = useState(false); // 📐 Panneau d'alignement auto
+  const [alignParams, setAlignParams] = useState({
+    mode: 'grid',       // 'row' | 'column' | 'grid'
+    target: 'all',      // 'all' | 'visible' (after search filter)
+    cols: 6,            // pour grille
+    startX: 15,         // % position de départ X
+    startY: 25,         // % position de départ Y
+    spacingX: 10,       // % espacement horizontal
+    spacingY: 10,       // % espacement vertical
+  });
   const containerRef = useRef(null);
 
   const venueCode = venue?.code;
@@ -154,6 +164,37 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     } catch (e) { toast.error(e.message); }
   };
 
+  // 📐 Alignement automatique : range les stands en ligne, colonne ou grille
+  const applyAlignment = () => {
+    const filtered = stands.filter(s => alignParams.target === 'all' || s.stand_code.toLowerCase().includes(search.toLowerCase()));
+    if (!filtered.length) { toast.error('Aucun stand à aligner'); return; }
+    const { mode, cols, startX, startY, spacingX, spacingY } = alignParams;
+    const newPositions = { ...positions };
+    filtered.forEach((s, i) => {
+      let x, y;
+      if (mode === 'row') {
+        x = startX + i * spacingX;
+        y = startY;
+      } else if (mode === 'column') {
+        x = startX;
+        y = startY + i * spacingY;
+      } else {
+        // grid
+        const c = i % cols;
+        const r = Math.floor(i / cols);
+        x = startX + c * spacingX;
+        y = startY + r * spacingY;
+      }
+      newPositions[s.stand_code] = {
+        x: Math.max(2, Math.min(98, +x.toFixed(2))),
+        y: Math.max(2, Math.min(98, +y.toFixed(2))),
+      };
+    });
+    setPositions(newPositions);
+    setDirty(true);
+    toast.success(`✅ ${filtered.length} stand(s) aligné(s) en ${mode === 'row' ? 'ligne horizontale' : mode === 'column' ? 'colonne verticale' : `grille ${cols} colonnes`}. N'oubliez pas de sauver.`);
+  };
+
   const addStand = async () => {
     const code = prompt(`Code du nouveau stand (ex: ${venueCode === 'ARU' ? 'A-C13' : venueCode === 'TAR' ? 'T-D13' : venueCode === 'FAAA' ? 'F-A17' : 'P-B14'}) :`);
     if (!code) return;
@@ -208,6 +249,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
             {editMode && (
               <>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={addStand}><Plus className="w-3.5 h-3.5" /> Ajouter</Button>
+                <Button variant={alignOpen ? 'default' : 'outline'} size="sm" className="gap-1.5" onClick={() => setAlignOpen(!alignOpen)}>📐 Aligner</Button>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPositions}><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
                 <Button variant="outline" size="sm" className="gap-1.5 text-red-600 border-red-300 hover:bg-red-50" onClick={clearAllPositions}><Trash2 className="w-3.5 h-3.5" /> Tout effacer</Button>
                 <Button variant="default" size="sm" className="gap-1.5" disabled={!dirty} onClick={savePositions}><Save className="w-3.5 h-3.5" /> Sauver</Button>
@@ -232,6 +274,84 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
           </label>
           <span>•</span>
           <span>Cliquez sur la croix rouge pour supprimer un stand. N&apos;oubliez pas de <b>Sauver</b>.</span>
+        </div>
+      )}
+
+      {/* 📐 Panneau d'alignement automatique */}
+      {editMode && alignOpen && (
+        <div className="rounded-md bg-blue-50 border-2 border-blue-300 px-4 py-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-sm text-blue-900">📐 Alignement automatique des stands</h4>
+            <button onClick={() => setAlignOpen(false)} className="text-slate-400 hover:text-rose-600">✕</button>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-700 block mb-1">Disposition</label>
+              <div className="flex gap-1">
+                {[
+                  { v: 'row', label: '➡️ Ligne H' },
+                  { v: 'column', label: '⬇️ Colonne' },
+                  { v: 'grid', label: '⊞ Grille' },
+                ].map(opt => (
+                  <Button
+                    key={opt.v}
+                    size="sm"
+                    variant={alignParams.mode === opt.v ? 'default' : 'outline'}
+                    className="text-[11px] flex-1"
+                    onClick={() => setAlignParams(p => ({ ...p, mode: opt.v }))}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700 block mb-1">Sélection</label>
+              <div className="flex gap-1">
+                <Button size="sm" variant={alignParams.target === 'all' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'all' }))}>
+                  Tous ({stands.length})
+                </Button>
+                <Button size="sm" variant={alignParams.target === 'visible' ? 'default' : 'outline'} className="text-[11px] flex-1" onClick={() => setAlignParams(p => ({ ...p, target: 'visible' }))}>
+                  Filtre actuel ({stands.filter(s => s.stand_code.toLowerCase().includes(search.toLowerCase())).length})
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-4 gap-3">
+            <div>
+              <label className="text-[11px] text-slate-600">Position X départ ({alignParams.startX}%)</label>
+              <input type="range" min="0" max="90" step="2.5" value={alignParams.startX} onChange={e => setAlignParams(p => ({ ...p, startX: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-600">Position Y départ ({alignParams.startY}%)</label>
+              <input type="range" min="0" max="90" step="2.5" value={alignParams.startY} onChange={e => setAlignParams(p => ({ ...p, startY: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-600">Espacement X ({alignParams.spacingX}%)</label>
+              <input type="range" min="2.5" max="25" step="2.5" value={alignParams.spacingX} onChange={e => setAlignParams(p => ({ ...p, spacingX: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-600">Espacement Y ({alignParams.spacingY}%)</label>
+              <input type="range" min="2.5" max="25" step="2.5" value={alignParams.spacingY} onChange={e => setAlignParams(p => ({ ...p, spacingY: parseFloat(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+          </div>
+
+          {alignParams.mode === 'grid' && (
+            <div>
+              <label className="text-[11px] text-slate-600">Nombre de colonnes ({alignParams.cols})</label>
+              <input type="range" min="2" max="12" step="1" value={alignParams.cols} onChange={e => setAlignParams(p => ({ ...p, cols: parseInt(e.target.value) }))} className="w-full accent-blue-600" />
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1 border-t border-blue-200">
+            <Button size="sm" variant="default" className="gap-1.5 bg-blue-600 hover:bg-blue-700" onClick={applyAlignment}>
+              ✓ Appliquer l&apos;alignement
+            </Button>
+            <span className="text-[11px] text-slate-600">
+              💡 Aperçu instantané sur le plan • Cliquez « Sauver » pour persister en base.
+            </span>
+          </div>
         </div>
       )}
 
