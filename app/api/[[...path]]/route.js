@@ -526,6 +526,13 @@ export async function GET(request, { params }) {
       return json(visible.map(v => { delete v._id; return v; }));
     }
 
+    // ============ DOCUMENTS OFFICIELS (bibliothèque admin → exposants) ============
+    // GET /api/official-documents — accessible à tous les rôles authentifiés
+    if (route === 'official-documents') {
+      const docs = await db.collection('official_documents').find({ active: { $ne: false } }).sort({ category: 1, sort_order: 1 }).toArray();
+      return json(docs.map(d => { delete d._id; return d; }));
+    }
+
     // ============ PROSPECTION (Pacific Centers + ARACOM) ============
     // Liste des prospects. Pacific Centers voient uniquement leurs sites.
     if (route === 'prospects') {
@@ -1430,6 +1437,105 @@ export async function POST(request, { params }) {
     if (route === 'seed') {
       const result = await doSeed(body?.force || false);
       return json(result);
+    }
+
+    // ============ DOCUMENTS OFFICIELS (admin upload) ============
+    // POST /api/official-documents — upload d'un PDF/document partagé à tous les exposants
+    // body : { title, description, category, file_data (base64), mime_type, file_name }
+    if (route === 'official-documents') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      if (!body.title) return err('Titre requis', 400);
+      if (!body.file_data) return err('Fichier requis (base64)', 400);
+      const id = uuid();
+      const safeFileName = (body.file_name || `${body.title}.pdf`).replace(/[^a-zA-Z0-9._-]/g, '_');
+      let driveFile = null;
+      let drive_url = null;
+      if (isDriveConfigured()) {
+        try {
+          const folderId = await ensureFolderPath(['Forum 2026', 'Documents officiels']);
+          const buffer = Buffer.from(body.file_data, 'base64');
+          driveFile = await driveUploadFile({
+            folderId,
+            fileName: safeFileName,
+            mimeType: body.mime_type || 'application/pdf',
+            buffer,
+          });
+          await makeAnyoneReader(driveFile.id);
+          drive_url = driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`;
+        } catch (e) {
+          return err('Erreur upload Drive : ' + e.message, 500);
+        }
+      } else {
+        return err('Google Drive non configuré — impossible d\'uploader un document officiel', 500);
+      }
+      const doc = {
+        id,
+        title: body.title,
+        description: body.description || '',
+        category: body.category || 'autre', // 'convention', 'guide', 'reglement', 'autre'
+        file_name: safeFileName,
+        mime_type: body.mime_type || 'application/pdf',
+        size_bytes: Buffer.from(body.file_data, 'base64').length,
+        drive_file_id: driveFile?.id || null,
+        drive_url,
+        active: true,
+        sort_order: body.sort_order || 0,
+        uploaded_by: ctx.userId || 'u-admin',
+        uploaded_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('official_documents').insertOne(doc);
+      delete doc._id;
+      return json(doc);
+    }
+
+    // ============ VALIDATION D'UN DOCUMENT REÇU PAR L'EXPOSANT ============
+    // POST /api/registration-documents/:id/validate
+    // body : { decision: 'approved'|'rejected', comment }
+    if (route.match(/^registration-documents\/[^/]+\/validate$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const docId = p[1];
+      const decision = body.decision;
+      if (!['approved', 'rejected', 'pending'].includes(decision)) return err('Décision invalide (approved|rejected|pending)', 400);
+      const doc = await db.collection('registration_documents').findOne({ id: docId });
+      if (!doc) return err('Document introuvable', 404);
+      const upd = {
+        validation_status: decision,
+        validation_comment: body.comment || null,
+        validated_at: decision === 'pending' ? null : new Date(),
+        validated_by: decision === 'pending' ? null : (ctx.userId || 'u-admin'),
+        updated_at: new Date(),
+      };
+      await db.collection('registration_documents').updateOne({ id: docId }, { $set: upd });
+      // Synchro flag exposant : si décision 'rejected' → décocher le flag du type de doc
+      const reg = await db.collection('registrations').findOne({ id: doc.registration_id });
+      if (reg && doc.document_type) {
+        const flagsByType = {
+          convention: 'is_convention_signed',
+          attestation_assurance: 'is_insurance_uploaded',
+          assurance: 'is_insurance_uploaded',
+        };
+        const flag = flagsByType[doc.document_type];
+        if (flag) {
+          await db.collection('registrations').updateOne(
+            { id: reg.id },
+            { $set: { [flag]: decision === 'approved', updated_at: new Date() } }
+          );
+        }
+      }
+      // Trace
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: `DOCUMENT_${decision.toUpperCase()}`,
+        description: `Document ${doc.document_type} ${decision === 'approved' ? 'validé' : decision === 'rejected' ? 'refusé' : 'remis en attente'}${body.comment ? ' — ' + body.comment : ''}`,
+        metadata: { registration_id: doc.registration_id, document_id: docId, decision, comment: body.comment },
+        created_at: new Date(),
+      });
+      const out = await db.collection('registration_documents').findOne({ id: docId });
+      delete out._id;
+      return json(out);
     }
 
     // ============ PROSPECTS (création + ajout de note) ============
@@ -4596,6 +4702,15 @@ export async function DELETE(request, { params }) {
     }
     if (route.startsWith('prospects/')) {
       await db.collection('prospects').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    if (route.startsWith('official-documents/')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const docId = p[1];
+      const doc = await db.collection('official_documents').findOne({ id: docId });
+      if (!doc) return err('Document introuvable', 404);
+      // Désactive plutôt que supprimer (garde la traçabilité dans Drive)
+      await db.collection('official_documents').updateOne({ id: docId }, { $set: { active: false, deactivated_at: new Date(), updated_at: new Date() } });
       return json({ ok: true });
     }
     if (route.startsWith('mail-recipient-lists/')) {
