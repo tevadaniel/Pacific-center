@@ -1807,6 +1807,7 @@ export async function POST(request, { params }) {
     if (route.match(/^registrations\/[^/]+\/assign-stand$/)) {
       const regId = p[1];
       const { venue_stand_id, status, venue_id, stand_code } = body;
+      // 🛡️ Always cancel previous active assignments (both detach and reassign cases)
       await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
       if (venue_stand_id) {
         await db.collection('stand_assignments').insertOne({
@@ -1817,10 +1818,11 @@ export async function POST(request, { params }) {
         });
       }
       const upd = { updated_at: new Date() };
-      if (venue_id) upd.venue_id = venue_id;
-      if (stand_code) upd.stand_code = stand_code;
+      if (venue_id !== undefined) upd.venue_id = venue_id;
+      // 🆕 Support detach: stand_code: null  → set to null in DB (was previously ignored due to falsy check)
+      if (stand_code !== undefined) upd.stand_code = stand_code; // null OK = detach
       await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
-      await logActivity(db, ctx.userId, 'registration', regId, 'stand_assign', null, { venue_stand_id, stand_code });
+      await logActivity(db, ctx.userId, 'registration', regId, stand_code === null ? 'stand_detach' : 'stand_assign', null, { venue_stand_id, stand_code });
       return json({ ok: true });
     }
 
@@ -4136,9 +4138,16 @@ export async function DELETE(request, { params }) {
     if (route.startsWith('venue-stands/')) {
       const stand = await db.collection('venue_stands').findOne({ id: p[1] });
       if (!stand) return err('Stand introuvable', 404);
-      // Check if any active assignment exists
-      const assignment = await db.collection('stand_assignments').findOne({ venue_stand_id: stand.id, status: { $ne: 'annule' } });
-      if (assignment) return err('Ce stand est attribué à un exposant — libérez-le d\'abord', 400);
+      // 🆕 Auto-detach: cancel any active assignment + clear stand_code on linked registrations
+      // (le frontend a déjà détaché via assign-stand mais on sécurise au cas où)
+      await db.collection('stand_assignments').updateMany(
+        { venue_stand_id: stand.id, status: { $ne: 'annule' } },
+        { $set: { status: 'annule', updated_at: new Date() } }
+      );
+      await db.collection('registrations').updateMany(
+        { venue_id: stand.venue_id, stand_code: stand.stand_code },
+        { $set: { stand_code: null, updated_at: new Date() } }
+      );
       await db.collection('venue_stands').deleteOne({ id: p[1] });
       await db.collection('venues').updateOne({ id: stand.venue_id }, { $inc: { capacity_stands: -1 } });
       return json({ ok: true });

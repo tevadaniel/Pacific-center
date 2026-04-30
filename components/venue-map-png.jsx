@@ -154,31 +154,17 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
 
   const deleteStand = async (stand) => {
     if (stand.organization) {
-      // Stand assigné → double confirmation : on détache d'abord l'exposant puis on supprime
       const orgName = stand.organization.name || 'cet exposant';
-      if (!confirm(`⚠️ Le stand ${stand.stand_code} est attribué à ${orgName}.\n\nVoulez-vous DÉTACHER ${orgName} de ce stand ET supprimer le stand ?\n\nL'exposant restera inscrit mais sans stand attribué.`)) return;
-      // Find registration linked to this stand and unassign
-      try {
-        const regs = await api('/api/registrations');
-        const reg = regs.find(r => r.stand_code === stand.stand_code && r.venue_id === stand.venue_id);
-        if (reg) {
-          await api(`/api/registrations/${reg.id}/assign-stand`, {
-            method: 'POST',
-            body: JSON.stringify({ stand_code: null }),
-          });
-        }
-      } catch (e) {
-        toast.error('Détachement échoué : ' + e.message);
-        return;
-      }
+      if (!confirm(`⚠️ Le stand ${stand.stand_code} est attribué à ${orgName}.\n\nVoulez-vous DÉTACHER ${orgName} ET supprimer ce stand ?\n\n${orgName} restera inscrit(e) mais sans stand attribué (vous pourrez en réassigner un autre plus tard).`)) return;
     } else {
       if (!confirm(`Supprimer définitivement le stand ${stand.stand_code} ?`)) return;
     }
     try {
+      // Le backend détache automatiquement les registrations liées + annule les stand_assignments
       await api(`/api/venue-stands/${stand.id}`, { method: 'DELETE' });
-      toast.success(`Stand ${stand.stand_code} supprimé`);
+      toast.success(`✅ Stand ${stand.stand_code} supprimé`);
       onStandsReload && onStandsReload();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) { toast.error('Erreur de suppression : ' + e.message); }
   };
 
   const q = search.trim().toLowerCase();
@@ -269,8 +255,8 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
               title={s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline})` : `${s.stand_code} — Libre`}
             >
               <div className="text-[9px] leading-tight font-mono">{s.stand_code.replace(/^[A-Z]-[A-Z]/, '').replace(/^[A-Z]/, '')}</div>
-              {editMode && !s.organization && (
-                <button onClick={(e) => { e.stopPropagation(); deleteStand(s); }} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center hover:scale-110" title="Supprimer ce stand">
+              {editMode && (
+                <button onClick={(e) => { e.stopPropagation(); deleteStand(s); }} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center hover:scale-110 shadow" title={s.organization ? `Détacher ${s.organization.name} et supprimer ce stand` : 'Supprimer ce stand'}>
                   <X className="w-2.5 h-2.5" />
                 </button>
               )}
