@@ -28,6 +28,7 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
   const [draft, setDraft] = useState(null); // unsaved changes
   const [dragOffset, setDragOffset] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const [toolbarOpen, setToolbarOpen] = useState(false); // 🆕 collapsible toolbar
 
   const load = async () => {
     if (!venueId) return;
@@ -154,72 +155,82 @@ export default function VenueElementsLayer({ venueId, editable = false, containe
 
       {/* Toolbar — visible uniquement quand editable */}
       {editable && (
-        <div className="absolute top-2 right-2 z-40 flex flex-col gap-2 items-end">
+        <div className="absolute top-2 right-2 z-40 flex flex-col gap-2 items-end pointer-events-none">
           {!editMode ? (
-            <Button size="sm" variant="default" className="gap-1.5 shadow-lg" onClick={() => setEditMode(true)}>
+            <Button size="sm" variant="default" className="gap-1.5 shadow-lg pointer-events-auto" onClick={() => setEditMode(true)}>
               <Plus className="w-3.5 h-3.5" /> Édition plan
             </Button>
           ) : (
             <>
-              <div className="bg-white rounded-md shadow-lg border p-2 flex flex-wrap gap-1 max-w-[440px]">
-                {Object.entries(ELEMENT_TYPES).map(([type, cfg]) => {
-                  const Icon = cfg.icon;
-                  return (
-                    <Button key={type} size="sm" variant="outline" className="gap-1 h-7 text-[11px]" onClick={() => addElement(type)} style={{ borderColor: cfg.defaultColor }}>
-                      <Icon className="w-3 h-3" style={{ color: cfg.defaultColor }} />
-                      {cfg.label}
-                    </Button>
-                  );
-                })}
-              </div>
-              <div className="flex gap-1.5">
+              {!toolbarOpen ? (
+                <Button size="sm" variant="default" className="gap-1.5 shadow-lg pointer-events-auto" onClick={() => setToolbarOpen(true)}>
+                  <Plus className="w-3.5 h-3.5" /> Outils
+                </Button>
+              ) : (
+                <div className="bg-white rounded-md shadow-lg border p-2 flex flex-wrap gap-1 max-w-[280px] pointer-events-auto">
+                  <div className="w-full flex items-center justify-between mb-1">
+                    <div className="text-[11px] font-bold text-slate-700">Ajouter un élément :</div>
+                    <button onClick={() => setToolbarOpen(false)} className="text-slate-400 hover:text-slate-700"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  {Object.entries(ELEMENT_TYPES).map(([type, cfg]) => {
+                    const Icon = cfg.icon;
+                    return (
+                      <Button key={type} size="sm" variant="outline" className="gap-1 h-7 text-[11px]" onClick={() => addElement(type)} style={{ borderColor: cfg.defaultColor }}>
+                        <Icon className="w-3 h-3" style={{ color: cfg.defaultColor }} />
+                        {cfg.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex gap-1.5 pointer-events-auto">
                 <Button size="sm" variant="default" className="gap-1.5 shadow-lg" disabled={!dirty} onClick={saveAll}><Save className="w-3.5 h-3.5" /> Sauver</Button>
-                <Button size="sm" variant="outline" className="gap-1.5 shadow-lg" onClick={() => { setEditMode(false); setSelected(null); }}>Quitter</Button>
+                <Button size="sm" variant="outline" className="gap-1.5 shadow-lg" onClick={() => { setEditMode(false); setSelected(null); setToolbarOpen(false); }}>Quitter</Button>
               </div>
             </>
           )}
         </div>
       )}
 
-      {/* Panneau d'édition de l'élément sélectionné */}
+      {/* Panneau d'édition de l'élément sélectionné — compact, déplaçable, fermable */}
       {editMode && selectedEl && (
-        <div className="absolute bottom-2 left-2 z-40 bg-white rounded-md shadow-lg border p-3 w-72 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between">
-            <div className="font-semibold text-sm">{ELEMENT_TYPES[selectedEl.type]?.label}</div>
-            <button onClick={() => setSelected(null)}><X className="w-4 h-4 text-slate-400 hover:text-slate-700" /></button>
+        <div className="absolute bottom-2 right-2 z-50 bg-white/95 backdrop-blur rounded-md shadow-xl border-2 border-blue-300 p-2.5 w-64 space-y-1.5" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between border-b pb-1.5">
+            <div className="font-semibold text-xs text-blue-900">⚙️ {ELEMENT_TYPES[selectedEl.type]?.label}</div>
+            <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-rose-600"><X className="w-3.5 h-3.5" /></button>
           </div>
           <div>
-            <Label className="text-[11px]">Étiquette</Label>
-            <Input className="h-7 text-xs" value={selectedEl.label || ''} onChange={(e) => updateField(selectedEl.id, 'label', e.target.value)} />
+            <Label className="text-[10px] text-slate-600">Étiquette</Label>
+            <Input className="h-6 text-[11px]" value={selectedEl.label || ''} onChange={(e) => updateField(selectedEl.id, 'label', e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             <div>
-              <Label className="text-[11px]">Largeur ({selectedEl.width}%)</Label>
+              <Label className="text-[10px] text-slate-600">L ({selectedEl.width}%)</Label>
               <input type="range" min="1" max="50" step="0.5" value={selectedEl.width} onChange={(e) => updateField(selectedEl.id, 'width', parseFloat(e.target.value))} className="w-full" />
             </div>
             <div>
-              <Label className="text-[11px]">Hauteur ({selectedEl.height}%)</Label>
+              <Label className="text-[10px] text-slate-600">H ({selectedEl.height}%)</Label>
               <input type="range" min="1" max="50" step="0.5" value={selectedEl.height} onChange={(e) => updateField(selectedEl.id, 'height', parseFloat(e.target.value))} className="w-full" />
             </div>
           </div>
           <div>
-            <Label className="text-[11px]">Rotation ({selectedEl.rotation || 0}°)</Label>
-            <div className="flex items-center gap-2">
+            <Label className="text-[10px] text-slate-600">Rotation ({selectedEl.rotation || 0}°)</Label>
+            <div className="flex items-center gap-1">
               <input type="range" min="0" max="360" step="5" value={selectedEl.rotation || 0} onChange={(e) => updateField(selectedEl.id, 'rotation', parseInt(e.target.value))} className="flex-1" />
-              <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => updateField(selectedEl.id, 'rotation', ((selectedEl.rotation || 0) + 90) % 360)}><RotateCw className="w-3 h-3" /></Button>
+              <Button size="sm" variant="outline" className="h-6 px-1.5" onClick={() => updateField(selectedEl.id, 'rotation', ((selectedEl.rotation || 0) + 90) % 360)}><RotateCw className="w-2.5 h-2.5" /></Button>
             </div>
           </div>
           <div>
-            <Label className="text-[11px]">Couleur</Label>
-            <div className="flex gap-1 flex-wrap">
+            <Label className="text-[10px] text-slate-600">Couleur</Label>
+            <div className="flex gap-0.5 flex-wrap">
               {PALETTE.map(c => (
-                <button key={c} onClick={() => updateField(selectedEl.id, 'color', c)} className={`w-6 h-6 rounded ${selectedEl.color === c ? 'ring-2 ring-offset-1 ring-slate-700' : ''}`} style={{ background: c }} />
+                <button key={c} onClick={() => updateField(selectedEl.id, 'color', c)} className={`w-5 h-5 rounded ${selectedEl.color === c ? 'ring-2 ring-offset-1 ring-slate-700' : ''}`} style={{ background: c }} />
               ))}
-              <input type="color" value={selectedEl.color} onChange={(e) => updateField(selectedEl.id, 'color', e.target.value)} className="w-6 h-6 rounded border cursor-pointer" />
+              <input type="color" value={selectedEl.color} onChange={(e) => updateField(selectedEl.id, 'color', e.target.value)} className="w-5 h-5 rounded border cursor-pointer" />
             </div>
           </div>
-          <Button size="sm" variant="outline" className="w-full text-rose-600 border-rose-200 gap-1.5 h-7" onClick={() => deleteEl(selectedEl)}>
-            <Trash2 className="w-3 h-3" /> Supprimer
+          <Button size="sm" variant="outline" className="w-full text-rose-600 border-rose-200 gap-1 h-6 text-[11px]" onClick={() => deleteEl(selectedEl)}>
+            <Trash2 className="w-2.5 h-2.5" /> Supprimer
           </Button>
         </div>
       )}

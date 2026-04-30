@@ -48,13 +48,39 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   const bgUrl = BG_BY_VENUE[venueCode];
 
   // Initialize positions from stands (DB pos_x,pos_y) or defaults
+  // 🆕 Si plusieurs stands sont à la position par défaut (50,50) ou n'ont pas de position,
+  // on les répartit automatiquement en grille pour qu'ils soient cliquables individuellement.
   useEffect(() => {
     const map = {};
     const defaults = DEFAULT_POSITIONS[venueCode] || {};
+    const standsWithoutPos = [];
     stands.forEach(s => {
       const db = (typeof s.pos_x === 'number' && typeof s.pos_y === 'number') ? { x: s.pos_x, y: s.pos_y } : null;
-      map[s.stand_code] = db || defaults[s.stand_code] || { x: 50, y: 50 };
+      const dflt = defaults[s.stand_code];
+      if (db) {
+        map[s.stand_code] = db;
+      } else if (dflt) {
+        map[s.stand_code] = dflt;
+      } else {
+        standsWithoutPos.push(s.stand_code);
+      }
     });
+    // Auto-grid layout pour les stands sans position : 8 colonnes, espacement régulier
+    if (standsWithoutPos.length) {
+      const cols = Math.min(8, Math.ceil(Math.sqrt(standsWithoutPos.length * 1.5)));
+      const stepX = 70 / cols;
+      const stepY = 8;
+      const startX = 15;
+      const startY = 18;
+      standsWithoutPos.forEach((code, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        map[code] = {
+          x: +(startX + col * stepX).toFixed(1),
+          y: +(startY + row * stepY).toFixed(1),
+        };
+      });
+    }
     setPositions(map);
     setDirty(false);
   }, [stands, venueCode]);
@@ -127,11 +153,30 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   };
 
   const deleteStand = async (stand) => {
-    if (stand.organization) { toast.error('Libérez le stand avant de le supprimer'); return; }
-    if (!confirm(`Supprimer définitivement le stand ${stand.stand_code} ?`)) return;
+    if (stand.organization) {
+      // Stand assigné → double confirmation : on détache d'abord l'exposant puis on supprime
+      const orgName = stand.organization.name || 'cet exposant';
+      if (!confirm(`⚠️ Le stand ${stand.stand_code} est attribué à ${orgName}.\n\nVoulez-vous DÉTACHER ${orgName} de ce stand ET supprimer le stand ?\n\nL'exposant restera inscrit mais sans stand attribué.`)) return;
+      // Find registration linked to this stand and unassign
+      try {
+        const regs = await api('/api/registrations');
+        const reg = regs.find(r => r.stand_code === stand.stand_code && r.venue_id === stand.venue_id);
+        if (reg) {
+          await api(`/api/registrations/${reg.id}/assign-stand`, {
+            method: 'POST',
+            body: JSON.stringify({ stand_code: null }),
+          });
+        }
+      } catch (e) {
+        toast.error('Détachement échoué : ' + e.message);
+        return;
+      }
+    } else {
+      if (!confirm(`Supprimer définitivement le stand ${stand.stand_code} ?`)) return;
+    }
     try {
       await api(`/api/venue-stands/${stand.id}`, { method: 'DELETE' });
-      toast.success('Stand supprimé');
+      toast.success(`Stand ${stand.stand_code} supprimé`);
       onStandsReload && onStandsReload();
     } catch (e) { toast.error(e.message); }
   };
