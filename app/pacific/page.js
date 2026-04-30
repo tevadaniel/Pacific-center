@@ -15,6 +15,8 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Sparkles, LayoutGrid, FileText, Activity, Target, Plus, MessageSquare, CheckCircle2, XCircle, Mail, Phone, Trash2 } from 'lucide-react';
+import { PROSPECT_STATUS_DEFINITIONS } from '@/lib/constants';
+import HelpCard from '@/components/help-card';
 import SmartVenueMap from '@/components/smart-venue-map';
 
 export default function PacificCentersPage() {
@@ -389,6 +391,11 @@ function ProspectionView() {
 
   return (
     <div className="space-y-4">
+      <HelpCard
+        title="Signification des 6 statuts de prospection"
+        definitions={PROSPECT_STATUS_DEFINITIONS}
+        storageKey="fr26_help_prospect_pacific"
+      />
       {/* KPIs prospection */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

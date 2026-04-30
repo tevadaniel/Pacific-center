@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
+import HelpCard from '@/components/help-card';
 import { api, getSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, RotateCcw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, CartesianGrid } from 'recharts';
-import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
+import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, PRIORITY_DEFINITIONS, PROSPECT_STATUS_DEFINITIONS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
@@ -554,6 +555,12 @@ function ExposantsView() {
 
   return (
     <div className="space-y-4">
+      <HelpCard
+        title="Signification des priorités (A / B / C / Prospect)"
+        definitions={PRIORITY_DEFINITIONS}
+        storageKey="fr26_help_priorities"
+      />
+
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -571,7 +578,17 @@ function ExposantsView() {
             </Select>
             <Select value={filters.priority || 'all'} onValueChange={v => setFilters({ ...filters, priority: v === 'all' ? '' : v })}>
               <SelectTrigger><SelectValue placeholder="Priorité" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">Toutes priorités</SelectItem>{PRIORITY_LEVELS.map(p => <SelectItem key={p} value={p}>{p === 'prospect' ? 'Prospect' : `Priorité ${p}`}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                <SelectItem value="all">Toutes priorités</SelectItem>
+                {PRIORITY_LEVELS.map(p => {
+                  const d = PRIORITY_DEFINITIONS[p];
+                  return (
+                    <SelectItem key={p} value={p} title={d?.description}>
+                      {d?.emoji} {d?.label || p}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
             </Select>
           </div>
           <div className="flex items-center justify-between mt-3 pt-3 border-t">
@@ -2599,7 +2616,15 @@ function NewExposantDialog({ venues, onClose, onCreated }) {
               <Select value={form.discipline} onValueChange={v => setForm({ ...form, discipline: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DISCIPLINES.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent></Select>
             </div>
             <div><Label>Priorité</Label>
-              <Select value={form.priority_level} onValueChange={v => setForm({ ...form, priority_level: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORITY_LEVELS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select>
+              <Select value={form.priority_level} onValueChange={v => setForm({ ...form, priority_level: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PRIORITY_LEVELS.map(p => {
+                    const d = PRIORITY_DEFINITIONS[p];
+                    return <SelectItem key={p} value={p} title={d?.description}>{d?.emoji} {d?.label || p}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -4105,6 +4130,12 @@ function ProspectionAracomView() {
         <h2 className="text-xl font-bold flex items-center gap-2">🎯 Prospection — Vue consolidée</h2>
         <p className="text-sm text-slate-500">Les Pacific Centers gèrent leurs prospects dans leur portail. Cette vue synthétise l&apos;ensemble.</p>
       </div>
+
+      <HelpCard
+        title="Signification des 6 statuts de prospection"
+        definitions={PROSPECT_STATUS_DEFINITIONS}
+        storageKey="fr26_help_prospect_aracom"
+      />
 
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
