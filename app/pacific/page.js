@@ -10,8 +10,11 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Sparkles, LayoutGrid, FileText, Activity } from 'lucide-react';
+import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Sparkles, LayoutGrid, FileText, Activity, Target, Plus, MessageSquare, CheckCircle2, XCircle, Mail, Phone, Trash2 } from 'lucide-react';
 import SmartVenueMap from '@/components/smart-venue-map';
 
 export default function PacificCentersPage() {
@@ -35,15 +38,17 @@ export default function PacificCentersPage() {
         </Card>
 
         <Tabs defaultValue="synthese">
-          <TabsList className="w-full grid grid-cols-4">
+          <TabsList className="w-full grid grid-cols-5">
             <TabsTrigger value="synthese">Synthèse</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>
             <TabsTrigger value="planning">Planning animations</TabsTrigger>
+            <TabsTrigger value="prospection">🎯 Prospection</TabsTrigger>
             <TabsTrigger value="reporting">Reporting</TabsTrigger>
           </TabsList>
           <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
           <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
           <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
+          <TabsContent value="prospection" className="space-y-6 mt-4"><ProspectionView /></TabsContent>
           <TabsContent value="reporting" className="space-y-6 mt-4"><ReportingView /></TabsContent>
         </Tabs>
       </div>
@@ -321,5 +326,337 @@ function ReportingView() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ============ PROSPECTION VIEW ============
+// Statuts possibles : à contacter → contacté → intéressé → converti (ou refusé/abandonné)
+const PROSPECT_STATUS = [
+  { value: 'a_contacter', label: 'À contacter', color: 'bg-slate-100 text-slate-700 border-slate-200' },
+  { value: 'contacte', label: 'Contacté', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  { value: 'interesse', label: 'Intéressé', color: 'bg-amber-100 text-amber-700 border-amber-200' },
+  { value: 'converti', label: '✓ Converti (exposant)', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  { value: 'refuse', label: 'Refusé', color: 'bg-rose-100 text-rose-700 border-rose-200' },
+  { value: 'abandonne', label: 'Abandonné', color: 'bg-slate-100 text-slate-500 border-slate-200' },
+];
+
+function ProspectionView() {
+  const [prospects, setProspects] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [venues, setVenues] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [venueFilter, setVenueFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [detailProspect, setDetailProspect] = useState(null);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [p, s, v] = await Promise.all([api('/api/prospects'), api('/api/prospects/stats'), api('/api/venues')]);
+      setProspects(p); setStats(s); setVenues(v);
+    } catch (e) { toast.error(e.message); }
+    setLoading(false);
+  };
+  useEffect(() => { reload(); }, []);
+
+  const filtered = prospects.filter(p => {
+    if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+    if (venueFilter !== 'all' && p.venue_id !== venueFilter) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      if (!(p.organization_name?.toLowerCase().includes(s) || p.contact_name?.toLowerCase().includes(s) || p.contact_email?.toLowerCase().includes(s))) return false;
+    }
+    return true;
+  });
+
+  const deleteProspect = async (p) => {
+    if (!confirm(`Supprimer définitivement le prospect "${p.organization_name}" ?`)) return;
+    try { await api(`/api/prospects/${p.id}`, { method: 'DELETE' }); toast.success('Prospect supprimé'); reload(); }
+    catch (e) { toast.error(e.message); }
+  };
+
+  const convertProspect = async (p) => {
+    if (!confirm(`Convertir "${p.organization_name}" en exposant officiel ?\n\nCela créera une inscription pré-réservée liée à ce prospect.`)) return;
+    try {
+      const r = await api(`/api/prospects/${p.id}/convert`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success(`✅ Prospect converti — nouvelle inscription créée (id: ${r.registration_id.slice(0,8)}…)`);
+      reload();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* KPIs prospection */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <KpiCard label="Total prospects" value={stats.total} accent="violet" icon={Target} />
+          <KpiCard label="Contactés" value={stats.contacted} accent="blue" icon={Phone} />
+          <KpiCard label="Intéressés" value={stats.by_status.interesse} accent="orange" icon={Sparkles} />
+          <KpiCard label="Convertis" value={stats.converted} accent="emerald" icon={CheckCircle2} />
+          <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+            <CardContent className="p-4">
+              <div className="text-xs uppercase text-violet-700 font-semibold flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Taux conversion</div>
+              <div className="text-3xl font-extrabold text-violet-900 mt-1">{stats.conversion_rate_pct}%</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">{stats.converted} / {stats.total} prospects</div>
+              {stats.contacted > 0 && <div className="text-[11px] text-slate-600 mt-1">Sur contactés : <b>{stats.contact_to_conversion_pct}%</b></div>}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Toolbar + filtres */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap gap-2 items-end">
+          <div className="flex-1 min-w-[180px]">
+            <Label className="text-[10px] uppercase text-slate-500">Recherche</Label>
+            <Input placeholder="Nom org., contact, email…" value={search} onChange={e => setSearch(e.target.value)} className="h-9 mt-1" />
+          </div>
+          <div className="w-[180px]">
+            <Label className="text-[10px] uppercase text-slate-500">Statut</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous statuts</SelectItem>
+                {PROSPECT_STATUS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-[180px]">
+            <Label className="text-[10px] uppercase text-slate-500">Site</Label>
+            <Select value={venueFilter} onValueChange={setVenueFilter}>
+              <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous sites</SelectItem>
+                {venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => { setEditing(null); setShowForm(true); }} className="gap-1.5 bg-violet-600 hover:bg-violet-700">
+            <Plus className="w-4 h-4" /> Nouveau prospect
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Liste */}
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          {loading ? (
+            <div className="py-12 text-center text-slate-500">Chargement…</div>
+          ) : filtered.length === 0 ? (
+            <div className="py-12 text-center text-slate-500">
+              <Target className="w-12 h-12 mx-auto mb-2 text-slate-300" />
+              Aucun prospect. Cliquez sur <b>Nouveau prospect</b> pour commencer votre suivi.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="py-2 px-3">Organisation</th>
+                  <th>Contact</th>
+                  <th>Site</th>
+                  <th>Statut</th>
+                  <th>Notes</th>
+                  <th>MàJ</th>
+                  <th className="pr-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filtered.map(p => {
+                  const statusDef = PROSPECT_STATUS.find(s => s.value === p.status) || PROSPECT_STATUS[0];
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="py-2 px-3">
+                        <div className="font-medium">{p.organization_name || '—'}</div>
+                        {p.discipline && <div className="text-[11px] text-slate-500">{p.discipline}</div>}
+                      </td>
+                      <td className="text-xs">
+                        <div>{p.contact_name || '—'}</div>
+                        {p.contact_email && <div className="text-slate-500 flex items-center gap-1"><Mail className="w-3 h-3" />{p.contact_email}</div>}
+                        {p.contact_phone && <div className="text-slate-500 flex items-center gap-1"><Phone className="w-3 h-3" />{p.contact_phone}</div>}
+                      </td>
+                      <td className="text-xs">{p.venue_name || '—'}</td>
+                      <td>
+                        <Select value={p.status} onValueChange={async v => { await api(`/api/prospects/${p.id}`, { method: 'PUT', body: JSON.stringify({ status: v }) }); toast.success('Statut mis à jour'); reload(); }}>
+                          <SelectTrigger className={`h-8 w-[170px] border text-xs ${statusDef.color}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PROSPECT_STATUS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="text-xs">
+                        <button onClick={() => setDetailProspect(p)} className="text-blue-600 hover:underline flex items-center gap-1">
+                          <MessageSquare className="w-3 h-3" /> {p.notes?.length || 0} note(s)
+                        </button>
+                      </td>
+                      <td className="text-[11px] text-slate-500">{new Date(p.updated_at).toLocaleDateString('fr-FR')}</td>
+                      <td className="pr-3">
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => { setEditing(p); setShowForm(true); }} title="Éditer">✏️</Button>
+                          {p.status !== 'converti' && <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-600 hover:bg-emerald-50" onClick={() => convertProspect(p)} title="Convertir en exposant"><CheckCircle2 className="w-4 h-4" /></Button>}
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-rose-600 hover:bg-rose-50" onClick={() => deleteProspect(p)} title="Supprimer"><Trash2 className="w-4 h-4" /></Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Formulaire nouveau/édition */}
+      <ProspectFormDialog open={showForm} onClose={() => { setShowForm(false); setEditing(null); }} prospect={editing} venues={venues} onSaved={reload} />
+      {/* Panel détail + notes */}
+      <ProspectDetailDialog open={!!detailProspect} prospect={detailProspect} onClose={() => setDetailProspect(null)} onChanged={reload} />
+    </div>
+  );
+}
+
+function ProspectFormDialog({ open, onClose, prospect, venues, onSaved }) {
+  const [form, setForm] = useState({ venue_id: '', organization_name: '', contact_name: '', contact_email: '', contact_phone: '', discipline: '', status: 'a_contacter', initial_note: '' });
+  useEffect(() => {
+    if (prospect) {
+      setForm({
+        venue_id: prospect.venue_id || '',
+        organization_name: prospect.organization_name || '',
+        contact_name: prospect.contact_name || '',
+        contact_email: prospect.contact_email || '',
+        contact_phone: prospect.contact_phone || '',
+        discipline: prospect.discipline || '',
+        status: prospect.status || 'a_contacter',
+        initial_note: '',
+      });
+    } else {
+      setForm({ venue_id: '', organization_name: '', contact_name: '', contact_email: '', contact_phone: '', discipline: '', status: 'a_contacter', initial_note: '' });
+    }
+  }, [prospect, open]);
+
+  const save = async () => {
+    if (!form.organization_name.trim()) { toast.error("Nom de l'organisation requis"); return; }
+    try {
+      if (prospect) {
+        const upd = { ...form }; delete upd.initial_note;
+        await api(`/api/prospects/${prospect.id}`, { method: 'PUT', body: JSON.stringify(upd) });
+        toast.success('Prospect mis à jour');
+      } else {
+        await api('/api/prospects', { method: 'POST', body: JSON.stringify(form) });
+        toast.success('Prospect créé');
+      }
+      onClose(); onSaved();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{prospect ? 'Modifier le prospect' : 'Nouveau prospect'}</DialogTitle>
+          <DialogDescription>Suivez vos actions de prospection d&apos;exposants potentiels.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs uppercase text-slate-500">Nom de l&apos;organisation *</Label>
+            <Input className="mt-1" value={form.organization_name} onChange={e => setForm({ ...form, organization_name: e.target.value })} placeholder="Ex: Club Sportif Pirae" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Nom contact</Label>
+              <Input className="mt-1" value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} />
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Discipline</Label>
+              <Input className="mt-1" value={form.discipline} onChange={e => setForm({ ...form, discipline: e.target.value })} placeholder="Danse, Sport, Art…" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Email</Label>
+              <Input className="mt-1" type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} />
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Téléphone</Label>
+              <Input className="mt-1" value={form.contact_phone} onChange={e => setForm({ ...form, contact_phone: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Site pressenti</Label>
+              <Select value={form.venue_id} onValueChange={v => setForm({ ...form, venue_id: v })}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Aucun" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Aucun —</SelectItem>
+                  {venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Statut</Label>
+              <Select value={form.status} onValueChange={v => setForm({ ...form, status: v })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_STATUS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {!prospect && (
+            <div>
+              <Label className="text-xs uppercase text-slate-500">Première note (optionnel)</Label>
+              <textarea className="mt-1 w-full border rounded-md p-2 text-sm resize-y min-h-[60px]" value={form.initial_note} onChange={e => setForm({ ...form, initial_note: e.target.value })} placeholder="Ex: Première prise de contact par téléphone le 12/05" />
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annuler</Button>
+          <Button onClick={save} className="bg-violet-600 hover:bg-violet-700">{prospect ? 'Enregistrer' : 'Créer le prospect'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProspectDetailDialog({ open, prospect, onClose, onChanged }) {
+  const [newNote, setNewNote] = useState('');
+  const [current, setCurrent] = useState(prospect);
+  useEffect(() => { setCurrent(prospect); setNewNote(''); }, [prospect, open]);
+
+  const addNote = async () => {
+    if (!newNote.trim()) return;
+    try {
+      const r = await api(`/api/prospects/${current.id}/notes`, { method: 'POST', body: JSON.stringify({ text: newNote.trim() }) });
+      setCurrent(r); setNewNote('');
+      toast.success('Note ajoutée');
+      onChanged();
+    } catch (e) { toast.error(e.message); }
+  };
+  if (!current) return null;
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{current.organization_name}</DialogTitle>
+          <DialogDescription>{current.contact_name} · {current.contact_email} · {current.venue_name || 'Site non défini'}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+          {(current.notes || []).slice().reverse().map((n, i) => (
+            <div key={i} className="border-l-4 border-violet-200 bg-violet-50 p-3 rounded-r text-sm">
+              <div className="text-[11px] text-slate-500 mb-1">📅 {new Date(n.at).toLocaleString('fr-FR')}</div>
+              <div className="whitespace-pre-wrap">{n.text}</div>
+            </div>
+          ))}
+          {(!current.notes || current.notes.length === 0) && <div className="text-center text-slate-500 py-6">Aucune note. Ajoutez-en une ci-dessous.</div>}
+        </div>
+        <div className="border-t pt-3 space-y-2">
+          <Label className="text-xs uppercase text-slate-500">Nouvelle note</Label>
+          <textarea className="w-full border rounded-md p-2 text-sm resize-y min-h-[80px]" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Ex: Relance effectuée, attend retour équipe…" />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>Fermer</Button>
+            <Button onClick={addNote} disabled={!newNote.trim()} className="bg-violet-600 hover:bg-violet-700">Ajouter la note</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
