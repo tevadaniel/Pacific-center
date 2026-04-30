@@ -519,7 +519,8 @@ export async function GET(request, { params }) {
 
     if (route.startsWith('venues/') && route.endsWith('/stands')) {
       const venueId = p[1];
-      const stands = await db.collection('venue_stands').find({ venue_id: venueId }).toArray();
+      // 🔒 Tri stable par stand_code pour garantir le même ordre entre appels (évite tout "remélange" côté UI)
+      const stands = await db.collection('venue_stands').find({ venue_id: venueId }).sort({ stand_code: 1 }).toArray();
       const assignments = await db.collection('stand_assignments').find({}).toArray();
       const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
       const orgs = await db.collection('organizations').find({}).toArray();

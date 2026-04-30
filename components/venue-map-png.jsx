@@ -62,38 +62,48 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
   // Initialize positions from stands (DB pos_x,pos_y) or defaults
   // 🆕 Si plusieurs stands sont à la position par défaut (50,50) ou n'ont pas de position,
   // on les répartit automatiquement en grille pour qu'ils soient cliquables individuellement.
+  // 🛡️ MERGE au lieu de REPLACE : on préserve les positions déjà en state React pour les stands
+  //    sans pos_x/pos_y DB (évite le "remélange" quand le parent refetch après Sauver).
   useEffect(() => {
-    const map = {};
-    const defaults = DEFAULT_POSITIONS[venueCode] || {};
-    const standsWithoutPos = [];
-    stands.forEach(s => {
-      const db = (typeof s.pos_x === 'number' && typeof s.pos_y === 'number') ? { x: s.pos_x, y: s.pos_y } : null;
-      const dflt = defaults[s.stand_code];
-      if (db) {
-        map[s.stand_code] = db;
-      } else if (dflt) {
-        map[s.stand_code] = dflt;
-      } else {
-        standsWithoutPos.push(s.stand_code);
-      }
-    });
-    // Auto-grid layout pour les stands sans position : 8 colonnes, espacement régulier
-    if (standsWithoutPos.length) {
-      const cols = Math.min(8, Math.ceil(Math.sqrt(standsWithoutPos.length * 1.5)));
-      const stepX = 70 / cols;
-      const stepY = 8;
-      const startX = 15;
-      const startY = 18;
-      standsWithoutPos.forEach((code, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        map[code] = {
-          x: +(startX + col * stepX).toFixed(1),
-          y: +(startY + row * stepY).toFixed(1),
-        };
+    setPositions(prev => {
+      const map = { ...prev }; // 🔐 conserve les positions existantes (y compris drag non encore sauvés)
+      const defaults = DEFAULT_POSITIONS[venueCode] || {};
+      const standsWithoutPos = [];
+      stands.forEach(s => {
+        const db = (typeof s.pos_x === 'number' && typeof s.pos_y === 'number') ? { x: s.pos_x, y: s.pos_y } : null;
+        const dflt = defaults[s.stand_code];
+        if (db) {
+          // DB fait foi : on écrase le state local
+          map[s.stand_code] = db;
+        } else if (!map[s.stand_code]) {
+          // Pas de position en DB ET pas de position en state → on cherche un défaut puis auto-grid
+          if (dflt) map[s.stand_code] = dflt;
+          else standsWithoutPos.push(s.stand_code);
+        }
+        // Sinon : on garde map[s.stand_code] déjà présent (positionné par l'utilisateur)
       });
-    }
-    setPositions(map);
+      // Auto-grid layout UNIQUEMENT pour les stands vraiment sans position : tri alphabétique pour ordre stable
+      if (standsWithoutPos.length) {
+        standsWithoutPos.sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+        const cols = Math.min(8, Math.ceil(Math.sqrt(standsWithoutPos.length * 1.5)));
+        const stepX = 70 / cols;
+        const stepY = 8;
+        const startX = 15;
+        const startY = 18;
+        standsWithoutPos.forEach((code, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          map[code] = {
+            x: +(startX + col * stepX).toFixed(1),
+            y: +(startY + row * stepY).toFixed(1),
+          };
+        });
+      }
+      // 🧹 Retire du state les stands qui n'existent plus (supprimés)
+      const activeCodes = new Set(stands.map(s => s.stand_code));
+      Object.keys(map).forEach(k => { if (!activeCodes.has(k)) delete map[k]; });
+      return map;
+    });
     setDirty(false);
   }, [stands, venueCode]);
 
@@ -131,16 +141,24 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
 
   const savePositions = async () => {
     try {
-      const updates = stands.map(s => ({
-        id: s.id,
-        pos_x: positions[s.stand_code]?.x,
-        pos_y: positions[s.stand_code]?.y,
-      })).filter(u => u.pos_x != null);
-      await api('/api/venue-stands/positions', { method: 'POST', body: JSON.stringify({ updates }) });
-      toast.success('Positions sauvegardées');
+      // 🛡️ On envoie UNE LIGNE PAR STAND du site, avec la position issue du state React.
+      //    Si un stand n'a pas de position en state (cas extrême), on retombe sur son pos_x/pos_y DB.
+      //    Si aucun des deux n'est dispo, on ignore ce stand (il garde son état actuel en DB).
+      const updates = stands.map(s => {
+        const local = positions[s.stand_code];
+        const x = (local && typeof local.x === 'number') ? local.x : (typeof s.pos_x === 'number' ? s.pos_x : null);
+        const y = (local && typeof local.y === 'number') ? local.y : (typeof s.pos_y === 'number' ? s.pos_y : null);
+        if (x == null || y == null) return null;
+        return { id: s.id, pos_x: Number(x.toFixed(2)), pos_y: Number(y.toFixed(2)) };
+      }).filter(Boolean);
+      if (!updates.length) { toast.error('Aucune position à sauvegarder'); return; }
+      const r = await api('/api/venue-stands/positions', { method: 'POST', body: JSON.stringify({ updates }) });
+      toast.success(`✅ ${r.updated || updates.length} position(s) sauvegardée(s)`);
       setDirty(false);
-      onStandsReload && onStandsReload();
-    } catch (e) { toast.error(e.message); }
+      // 🔕 On NE recharge PAS les stands ici : le state React est déjà synchronisé avec la DB.
+      //    Un reload inutile risquerait de remélanger l'affichage (bug historique).
+      //    Le parent pourra rafraîchir au prochain changement de site/onglet.
+    } catch (e) { toast.error('Erreur sauvegarde : ' + e.message); }
   };
 
   const resetPositions = () => {
