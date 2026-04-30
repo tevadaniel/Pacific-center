@@ -1006,6 +1006,11 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
 // =====================================================================
 function DocsBlockExposant({ registrationId, docs, onRefresh }) {
   const cautionReceipt = docs.find(d => d.document_type === 'recu_caution');
+  const [officialDocs, setOfficialDocs] = useState([]);
+
+  useEffect(() => {
+    api('/api/official-documents').then(setOfficialDocs).catch(() => {});
+  }, []);
 
   const uploadDoc = async (type, payload) => {
     try {
@@ -1023,6 +1028,35 @@ function DocsBlockExposant({ registrationId, docs, onRefresh }) {
 
   return (
     <div className="space-y-4">
+      {/* BANNIÈRE — Documents officiels à télécharger (fournis par ARACOM) */}
+      {officialDocs.length > 0 && (
+        <Card className="border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-amber-900">
+              <FileText className="w-5 h-5 text-amber-600" />
+              📄 Documents officiels à télécharger
+            </CardTitle>
+            <p className="text-sm text-amber-800 mt-1">
+              Téléchargez la <b>convention</b>, le <b>guide</b> et tout autre document à signer. Imprimez, signez et redéposez-les ci-dessous dans la section <i>« Mes documents à fournir »</i>.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {officialDocs.map(d => (
+                <a key={d.id} href={d.drive_url} target="_blank" rel="noreferrer" className="flex items-start gap-3 bg-white border border-amber-200 hover:border-amber-400 hover:shadow-sm rounded-md p-3 transition">
+                  <FileText className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm text-amber-900 truncate">{d.title}</div>
+                    {d.description && <div className="text-xs text-amber-700 line-clamp-2 mt-0.5">{d.description}</div>}
+                    <div className="text-[11px] text-amber-600 mt-1 flex items-center gap-1"><Download className="w-3 h-3" /> Cliquer pour télécharger</div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Reçu de caution — INFO ONLY */}
       <Card className={cautionReceipt ? 'border-emerald-200 bg-emerald-50/30' : 'border-amber-200 bg-amber-50/30'}>
         <CardHeader>
