@@ -1428,6 +1428,19 @@ export async function POST(request, { params }) {
         { status: { $ne: 'annule' } },
         { $set: { status: 'annule', cancelled_at: now, cancelled_reason: 'reset_nouvelle_edition', updated_at: now } }
       );
+      // 🆕 Reset complet des animations : on archive puis on supprime
+      // → Les exposants repartent sur de nouveaux créneaux (nouvelles dates 2026, nouveaux horaires Vendredi 11-17h / Samedi 9-17h)
+      const oldSlots = await db.collection('animation_slots').find({}).toArray();
+      let archivedSlots = 0;
+      if (oldSlots.length > 0) {
+        const archiveDocs = oldSlots.map(s => {
+          const { _id, ...rest } = s;
+          return { ...rest, archived_at: now, archived_reason: 'reset_nouvelle_edition_2026', archived_by: ctx.userId || 'u-admin' };
+        });
+        await db.collection('animation_slots_archive').insertMany(archiveDocs);
+        archivedSlots = oldSlots.length;
+        await db.collection('animation_slots').deleteMany({});
+      }
       // Note : on ne touche PAS aux cautions pour préserver l'historique financier.
       //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
       //        On laisse internal_notes, stand_code, animation_type, planned_arrival_time intacts.
@@ -1440,13 +1453,23 @@ export async function POST(request, { params }) {
         metadata: { registrations_reset: regs.length, documents_archived: archivedDocs },
         created_at: now,
       });
+      // Log l'action
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'RESET_NEW_EDITION',
+        description: `Reset global : ${regs.length} exposants remis à 'a_relancer', ${archivedDocs} documents archivés, ${oldSlots.length} animations archivées`,
+        metadata: { registrations_reset: regs.length, documents_archived: archivedDocs, animations_archived: archivedSlots },
+        created_at: now,
+      });
       return json({
         ok: true,
         registrations_reset: rUpd.modifiedCount,
         documents_archived: archivedDocs,
         stand_assignments_cancelled: assignResult.modifiedCount,
+        animations_archived: archivedSlots,
         total_registrations_found: regs.length,
-        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). ${assignResult.modifiedCount} attribution(s) de stand annulée(s) (plans vierges). L'historique (organisations, positions de stands, cautions, notes) est préservé.`,
+        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). ${assignResult.modifiedCount} stand(s) libéré(s). ${archivedSlots} animation(s) archivée(s) — les exposants repartent sur les nouveaux créneaux 2026 (Ven 11-17h / Sam 9-17h). L'historique est préservé.`,
       });
     }
 
