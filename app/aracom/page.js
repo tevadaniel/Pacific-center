@@ -813,6 +813,14 @@ function FicheExposant({ id, onClose }) {
               <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPassword}><KeyRound className="w-3.5 h-3.5" /> Reset mot de passe</Button>
             </div>
 
+            <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50/40 p-3">
+              <div>
+                <div className="font-medium text-blue-900 text-sm flex items-center gap-1.5">📧 Rappel J-X personnalisé</div>
+                <div className="text-xs text-blue-700">Génère un email de rappel par IA avec décompte et coordonnées du référent du site.</div>
+              </div>
+              <JxReminderTrigger registration={data.registration} organization={data.organization} venue={data.venue} />
+            </div>
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <KpiCard label="Statut" value={REGISTRATION_STATUS_LABEL[data.registration?.status] || '—'} accent="blue" />
               <KpiCard label="Caution" value={DEPOSIT_STATUS_LABEL[data.deposit?.status] || '—'} accent={data.deposit?.status === 'recue' ? 'emerald' : 'orange'} />
@@ -1139,6 +1147,101 @@ function Info({ label, value }) {
   return <div className="flex items-center justify-between border-b py-2"><div className="text-xs text-slate-500 uppercase tracking-wider">{label}</div><div className="text-sm font-medium text-slate-900">{value || '—'}</div></div>;
 }
 
+function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onTogglePacific, onSaveReferent }) {
+  const [open, setOpen] = useState(false);
+  const initial = venue.referent_aracom || {};
+  const [name, setName] = useState(initial.name || '');
+  const [email, setEmail] = useState(initial.email || '');
+  const [phone, setPhone] = useState(initial.phone || '');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setName(venue.referent_aracom?.name || '');
+    setEmail(venue.referent_aracom?.email || '');
+    setPhone(venue.referent_aracom?.phone || '');
+  }, [venue.referent_aracom?.name, venue.referent_aracom?.email, venue.referent_aracom?.phone]);
+
+  const hasReferent = Boolean(venue.referent_aracom?.name || venue.referent_aracom?.email || venue.referent_aracom?.phone);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSaveReferent({ name, email, phone }); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className={`p-2.5 rounded-md border ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-semibold truncate">{venue.name}</span>
+          <Badge variant="secondary" className="text-[10px] shrink-0">{venue.code}</Badge>
+        </div>
+        <Switch checked={active} onCheckedChange={onToggleAvailability} />
+      </div>
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
+        <span className="text-slate-600 flex items-center gap-1">
+          {pacific ? '👁️' : '🙈'} Pacific Centers
+        </span>
+        <Switch
+          checked={pacific}
+          onCheckedChange={onTogglePacific}
+          className="data-[state=checked]:bg-violet-500 scale-75"
+        />
+      </div>
+      <div className="pt-1.5 mt-1.5 border-t border-emerald-100/50">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="w-full flex items-center justify-between text-[11px] text-slate-700 hover:text-blue-700 transition"
+        >
+          <span className="flex items-center gap-1">
+            👤 <span className="font-medium">Référent ARACOM</span>
+            {hasReferent ? (
+              <Badge variant="secondary" className="text-[9px] bg-emerald-100 text-emerald-800 ml-1">défini</Badge>
+            ) : (
+              <Badge variant="secondary" className="text-[9px] bg-amber-100 text-amber-800 ml-1">à définir</Badge>
+            )}
+          </span>
+          <span className="text-slate-400">{open ? '▲' : '▼'}</span>
+        </button>
+        {open && (
+          <div className="mt-2 space-y-1.5 bg-white rounded-md p-2 border border-emerald-100">
+            <Input
+              placeholder="Nom du référent"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Input
+              placeholder="email@aracom-conseil.fr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Input
+              placeholder="+(689) XX XX XX XX"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={saving}
+              className="w-full h-7 text-[11px] bg-blue-600 hover:bg-blue-700"
+            >
+              {saving ? '…' : '💾 Enregistrer'}
+            </Button>
+            {hasReferent && (
+              <div className="text-[10px] text-slate-500 leading-relaxed pt-1">
+                Ce référent sera automatiquement inséré dans les emails de rappel J-X envoyés depuis le portail exposant.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SitesView() {
   const [venues, setVenues] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -1182,6 +1285,14 @@ function SitesView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  const saveReferent = async (v, ref) => {
+    try {
+      await api(`/api/venues/${v.id}/set-referent`, { method: 'POST', body: JSON.stringify(ref) });
+      toast.success(`Référent enregistré pour ${v.name}`);
+      api('/api/venues').then(setVenues);
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <div className="space-y-4">
       <Card className="border-blue-200 bg-blue-50/40">
@@ -1199,25 +1310,15 @@ function SitesView() {
               const active = v.is_available_2026 !== false;
               const pacific = v.pacific_visible !== false;
               return (
-                <div key={v.id} className={`p-2 rounded-md border ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{v.name}</span>
-                      <Badge variant="secondary" className="text-[10px]">{v.code}</Badge>
-                    </div>
-                    <Switch checked={active} onCheckedChange={() => toggleAvailability(v)} />
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
-                    <span className="text-slate-600 flex items-center gap-1">
-                      {pacific ? '👁️' : '🙈'} Pacific Centers
-                    </span>
-                    <Switch
-                      checked={pacific}
-                      onCheckedChange={() => togglePacificVisible(v)}
-                      className="data-[state=checked]:bg-violet-500 scale-75"
-                    />
-                  </div>
-                </div>
+                <VenueAdminCard
+                  key={v.id}
+                  venue={v}
+                  active={active}
+                  pacific={pacific}
+                  onToggleAvailability={() => toggleAvailability(v)}
+                  onTogglePacific={() => togglePacificVisible(v)}
+                  onSaveReferent={(ref) => saveReferent(v, ref)}
+                />
               );
             })}
           </div>
@@ -2557,50 +2658,86 @@ function openReport(r) {
     body = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
   }
 
+  const logoUrl = `${window.location.origin}/aracom-logo.png`;
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${titleLabel}</title><style>
-    @page { margin: 20mm; }
+    @page { margin: 18mm 20mm 28mm 20mm; }
     *{box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px;max-width:900px;margin:auto;color:#0f172a;background:#fff;line-height:1.5}
-    .header{border-bottom:3px solid #2563eb;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:start}
-    .header-left h1{font-size:24px;margin:0 0 4px;color:#0f172a;font-weight:700}
-    .header-left .subtitle{color:#64748b;font-size:14px}
-    .header-right{text-align:right;font-size:12px;color:#64748b}
-    .header-right .logo{background:#2563eb;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;margin-bottom:8px;font-size:13px;letter-spacing:.05em}
-    .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;padding:40px;max-width:900px;margin:auto;color:#0f172a;background:#fff;line-height:1.55}
+    .magazine-header{display:flex;align-items:center;justify-content:space-between;gap:24px;border-bottom:4px solid #2563eb;padding-bottom:18px;margin-bottom:8px;position:relative}
+    .magazine-header::after{content:'';position:absolute;left:0;right:0;bottom:-8px;height:2px;background:linear-gradient(90deg,#2563eb 0%,#7c3aed 50%,#10b981 100%);border-radius:2px}
+    .brand{display:flex;align-items:center;gap:14px}
+    .brand img{height:64px;width:auto;display:block}
+    .brand-block{display:flex;flex-direction:column}
+    .brand-block .edition{font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:#64748b;font-weight:600}
+    .brand-block .ev-name{font-size:14px;font-weight:700;color:#1e293b;margin-top:2px}
+    .meta-block{text-align:right;font-size:11px;color:#64748b;line-height:1.6}
+    .meta-block .badge-status{display:inline-block;background:#2563eb;color:#fff;padding:4px 10px;border-radius:14px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px}
+    .doc-title{margin:24px 0 6px;font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-.02em}
+    .doc-subtitle{color:#64748b;font-size:14px;margin-bottom:24px;font-style:italic}
+    .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:28px}
     .kpis.grid3{grid-template-columns:repeat(3,1fr)}.kpis.grid4{grid-template-columns:repeat(4,1fr)}
-    .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px}
+    .kpi{background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);border:1px solid #e2e8f0;border-radius:10px;padding:14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
     .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;font-weight:600}
-    .kpi-value{font-size:18px;font-weight:700;color:#0f172a;margin-top:4px;word-break:break-word}
-    .kpi-hint{font-size:11px;color:#94a3b8;margin-top:2px}
+    .kpi-value{font-size:20px;font-weight:800;color:#0f172a;margin-top:6px;word-break:break-word;letter-spacing:-.01em}
+    .kpi-hint{font-size:11px;color:#94a3b8;margin-top:3px}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-    section{margin-bottom:24px;page-break-inside:avoid}
-    section h3{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;font-weight:700}
-    table{border-collapse:collapse;width:100%;font-size:12px}
-    th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top}
-    th{background:#f1f5f9;font-weight:600;color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-    .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+    section{margin-bottom:28px;page-break-inside:avoid}
+    section h3{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:#1e293b;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #2563eb;font-weight:800;display:inline-block;padding-right:20px}
+    table{border-collapse:collapse;width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
+    th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+    tbody tr:nth-child(even){background:#fafbfc}
+    th{background:#f1f5f9;font-weight:700;color:#1e293b;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+    .badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
     .badge-confirme{background:#d1fae5;color:#065f46}.badge-a_confirmer{background:#fef3c7;color:#92400e}.badge-a_relancer{background:#fed7aa;color:#9a3412}.badge-prospect{background:#e2e8f0;color:#475569}.badge-haute,.badge-critique{background:#fee2e2;color:#991b1b}.badge-moyenne{background:#fef3c7;color:#92400e}.badge-basse{background:#e0e7ff;color:#3730a3}
-    ul{margin:4px 0;padding-left:20px}li{margin:2px 0}
-    .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px;text-align:center}
-    pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow:auto;font-size:11px}
-    .print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:600;box-shadow:0 4px 10px rgba(37,99,235,.3)}
-    @media print{.print-btn{display:none}body{padding:0}}
+    ul{margin:6px 0;padding-left:22px}li{margin:3px 0}
+    .footer{margin-top:48px;padding-top:18px;border-top:2px solid #2563eb;font-size:11px;color:#475569;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+    .footer-left{flex:1;min-width:240px}
+    .footer-left .signed{font-weight:800;color:#0f172a;font-size:14px;letter-spacing:.01em;margin-bottom:4px}
+    .footer-left .role{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+    .footer-left .contact-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#475569}
+    .footer-left .contact-line a{color:#2563eb;text-decoration:none;font-weight:600}
+    .footer-left .contact-line .sep{color:#cbd5e1}
+    .footer-right{text-align:right;font-size:10px;color:#94a3b8;line-height:1.6}
+    .footer-right .conf{display:inline-block;padding:2px 8px;border-radius:8px;background:#fef3c7;color:#92400e;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+    pre{background:#f1f5f9;padding:14px;border-radius:8px;overflow:auto;font-size:11px;border:1px solid #e2e8f0}
+    .print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:8px;background:#2563eb;color:#fff;border:0;cursor:pointer;font-weight:700;box-shadow:0 4px 14px rgba(37,99,235,.35);font-size:13px}
+    .print-btn:hover{background:#1d4ed8}
+    @media print{.print-btn{display:none}body{padding:0}.magazine-header{break-after:avoid}}
   </style></head><body>
     <button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button>
-    <div class="header">
-      <div class="header-left">
-        <h1>${titleLabel}</h1>
-        <div class="subtitle">${subtitle}</div>
+    <div class="magazine-header">
+      <div class="brand">
+        <img src="${logoUrl}" alt="ARACOM" onerror="this.style.display='none'" />
+        <div class="brand-block">
+          <span class="edition">Forum de la Rentrée · Édition 2026</span>
+          <span class="ev-name">14 & 15 août 2026 · Polynésie française</span>
+        </div>
       </div>
-      <div class="header-right">
-        <div class="logo">ARACOM</div>
-        <div>Généré le ${generatedAt}</div>
-        <div>Statut : <b>${r.report_status}</b></div>
+      <div class="meta-block">
+        <span class="badge-status">${r.report_status}</span><br>
+        Généré le<br><b>${generatedAt}</b>
       </div>
     </div>
+    <h1 class="doc-title">${titleLabel}</h1>
+    <div class="doc-subtitle">${subtitle}</div>
     <div class="kpis ${type === 'bilan_exposant' ? 'grid4' : ''}">${kpis}</div>
     ${body}
-    <div class="footer">Forum de la Rentrée 2026 — Document confidentiel généré automatiquement par la plateforme ARACOM.</div>
+    <div class="footer">
+      <div class="footer-left">
+        <div class="signed">Teva GEROS</div>
+        <div class="role">ARACOM Conseil — Organisateur du Forum</div>
+        <div class="contact-line">
+          <a href="mailto:contact@aracom-conseil.fr">contact@aracom-conseil.fr</a>
+          <span class="sep">·</span>
+          <a href="tel:+68987210444">+(689) 87 210 444</a>
+        </div>
+      </div>
+      <div class="footer-right">
+        <span class="conf">Confidentiel</span><br>
+        Document généré par la plateforme<br>
+        de pilotage ARACOM Conseil
+      </div>
+    </div>
   </body></html>`;
 
   w.document.write(html);
@@ -4995,6 +5132,210 @@ function DeadlinesView() {
 // =====================================================================
 // ⭐ BILAN + RDV restitution caution (UI ARACOM dans la fiche exposant)
 // =====================================================================
+function JxReminderTrigger({ registration, organization, venue }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button onClick={() => setOpen(true)} size="sm" className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+        <Sparkles className="w-3.5 h-3.5" /> Rédiger & envoyer
+      </Button>
+      {open && (
+        <JxReminderDialog
+          registration={registration}
+          organization={organization}
+          venue={venue}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function JxReminderDialog({ registration, organization, venue, onClose }) {
+  const [stepKey, setStepKey] = useState('documents');
+  const [customInstruction, setCustomInstruction] = useState('');
+  const [subject, setSubject] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [meta, setMeta] = useState(null);
+
+  const STEPS = [
+    { key: 'profile', label: '👤 Profil exposant', desc: 'Coordonnées, description, contact' },
+    { key: 'stand', label: '🗺️ Choix du site / stand', desc: 'Pré-réservation d\'un emplacement' },
+    { key: 'animation', label: '🎭 Créneaux d\'animation', desc: 'Planification vendredi / samedi' },
+    { key: 'documents', label: '📄 Documents officiels', desc: 'Assurance, RIB, etc.' },
+    { key: 'caution', label: '💰 Caution 20 000 XPF', desc: 'Versement de la caution' },
+    { key: 'convention', label: '✍️ Convention', desc: 'Signature du document' },
+  ];
+
+  const currentReferent = venue?.referent_aracom || {};
+  const hasReferent = Boolean(currentReferent.name || currentReferent.email || currentReferent.phone);
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const r = await api(`/api/registrations/${registration.id}/generate-jx-reminder`, {
+        method: 'POST',
+        body: JSON.stringify({ step_key: stepKey, custom_instruction: customInstruction }),
+      });
+      setSubject(r.subject || '');
+      setBodyHtml(r.body_html || '');
+      setMeta({ days_remaining: r.days_remaining, deadline_iso: r.deadline_iso, llm_source: r.llm_source });
+      setGenerated(true);
+      toast.success('✨ Email généré par IA');
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const send = async () => {
+    if (!subject.trim() || !bodyHtml.trim()) {
+      toast.error('Subject et corps requis');
+      return;
+    }
+    setSending(true);
+    try {
+      const r = await api('/api/mailing/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          subject,
+          body_html: bodyHtml,
+          registration_ids: [registration.id],
+          mail_type: `jx_reminder_${stepKey}`,
+        }),
+      });
+      const sent = r.sent || 0;
+      const failed = r.failed || 0;
+      const redirected = r.redirected_count || 0;
+      let msg = `✉️ Email envoyé (${sent} succès`;
+      if (failed) msg += `, ${failed} échec`;
+      if (redirected) msg += ` — mode TEST : redirigé vers admin`;
+      msg += ')';
+      toast.success(msg);
+      onClose();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            📧 Rappel J-X — {organization?.name}
+          </DialogTitle>
+          <DialogDescription>
+            Génère un email personnalisé via IA, le rend modifiable, puis l'envoie à <b>{organization?.main_email || '—'}</b>.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 mt-2">
+          <div>
+            <Label className="mb-2 block">1️⃣ Étape concernée</Label>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {STEPS.map(s => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setStepKey(s.key)}
+                  className={`text-left p-2.5 rounded-md border-2 transition ${stepKey === s.key ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
+                >
+                  <div className="text-sm font-medium">{s.label}</div>
+                  <div className="text-[11px] text-slate-500">{s.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={`rounded-md p-3 text-xs ${hasReferent ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
+            <div className="font-semibold mb-1">{hasReferent ? '👤 Référent qui sera mentionné dans l\'email' : '⚠️ Aucun référent défini sur ce site'}</div>
+            {hasReferent ? (
+              <div className="text-slate-700 leading-relaxed">
+                <b>{currentReferent.name || '—'}</b>
+                {currentReferent.email && <> · <a href={`mailto:${currentReferent.email}`} className="text-blue-700 underline">{currentReferent.email}</a></>}
+                {currentReferent.phone && <> · {currentReferent.phone}</>}
+              </div>
+            ) : (
+              <div className="text-amber-800">
+                Allez dans <b>Configuration → Sites & stands</b> pour définir un référent ARACOM sur le site « {venue?.name || '—'} » avant d'envoyer le rappel.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Label className="mb-1 block">2️⃣ Instructions optionnelles pour l'IA</Label>
+            <Textarea
+              rows={2}
+              placeholder="Ex : insister sur le passage en personne au bureau, mentionner que l'animation est unique..."
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+            />
+          </div>
+
+          <Button
+            onClick={generate}
+            disabled={generating}
+            className="w-full bg-violet-600 hover:bg-violet-700 gap-2"
+          >
+            <Sparkles className="w-4 h-4" />
+            {generating ? 'Génération en cours…' : (generated ? '🔄 Régénérer' : '✨ Générer l\'email avec IA')}
+          </Button>
+
+          {generated && (
+            <>
+              {meta?.days_remaining != null && (
+                <div className={`text-xs p-2 rounded-md ${meta.days_remaining > 7 ? 'bg-emerald-50 text-emerald-800' : meta.days_remaining > 0 ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-800'}`}>
+                  ⏰ Échéance : {meta.days_remaining > 0 ? `J-${meta.days_remaining}` : meta.days_remaining === 0 ? 'AUJOURD\'HUI' : `dépassée (${Math.abs(meta.days_remaining)}j)`}
+                  {meta.deadline_iso && ` · ${new Date(meta.deadline_iso).toLocaleDateString('fr-FR')}`}
+                  {meta.llm_source && ` · IA: ${meta.llm_source}`}
+                </div>
+              )}
+              <div>
+                <Label className="mb-1 block">3️⃣ Objet de l'email <span className="text-xs text-slate-400">(éditable)</span></Label>
+                <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="font-medium" />
+              </div>
+              <div>
+                <Label className="mb-1 block">4️⃣ Corps HTML <span className="text-xs text-slate-400">(éditable)</span></Label>
+                <Textarea
+                  rows={10}
+                  value={bodyHtml}
+                  onChange={(e) => setBodyHtml(e.target.value)}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block">👁️ Aperçu</Label>
+                <div
+                  className="border rounded-md p-4 bg-white max-h-[300px] overflow-y-auto text-sm"
+                  dangerouslySetInnerHTML={{ __html: bodyHtml }}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button variant="outline" onClick={onClose}>Annuler</Button>
+                <Button
+                  onClick={send}
+                  disabled={sending || !subject.trim() || !bodyHtml.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  {sending ? 'Envoi…' : 'Envoyer le rappel'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BilanRDVAdminBlock({ registrationId, onRefresh }) {
   const [survey, setSurvey] = useState(null);
   const [loading, setLoading] = useState(true);

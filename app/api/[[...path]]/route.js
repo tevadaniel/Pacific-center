@@ -4079,6 +4079,145 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       return json({ ok: true, receipt_number: receiptNumber, document_id: docId });
     }
 
+    // ============ AI Email Reminder J-X (manuel par étape) ============
+    // POST /api/registrations/:id/generate-jx-reminder
+    // Body: { step_key: 'profile'|'stand'|'animation'|'documents'|'caution'|'convention', custom_instruction?: string }
+    // → Génère un email de rappel personnalisé pour l'exposant avec :
+    //   - le décompte J-X jusqu'à la date butoir de l'étape
+    //   - les coordonnées du référent ARACOM sur le site (si défini)
+    //   - les actions concrètes attendues
+    // Retourne { ok, subject, body_html }
+    if (route.match(/^registrations\/[^/]+\/generate-jx-reminder$/)) {
+      const regId = p[1];
+      const { step_key, custom_instruction = '' } = body || {};
+      const STEP_LABELS = {
+        profile: 'Compléter le profil exposant (coordonnées, description)',
+        stand: 'Choisir un site et pré-réserver un stand',
+        animation: "Planifier les créneaux d'animation",
+        documents: 'Téléverser les documents officiels (assurance, RIB, etc.)',
+        caution: 'Verser la caution de 20 000 XPF',
+        convention: 'Signer la convention de participation',
+      };
+      if (!step_key || !STEP_LABELS[step_key]) return err('step_key invalide', 400);
+
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+
+      // Read step deadlines
+      const cfg = await db.collection('app_settings').findOne({ key: 'step_deadlines' });
+      const deadlines = cfg?.deadlines || {};
+      const deadlineIso = deadlines[step_key] || null;
+      let jxLabel = 'date à définir';
+      let daysRemaining = null;
+      if (deadlineIso) {
+        const d = new Date(deadlineIso);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        d.setHours(0, 0, 0, 0);
+        daysRemaining = Math.round((d - today) / (1000 * 60 * 60 * 24));
+        const fmt = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        if (daysRemaining > 0) jxLabel = `J-${daysRemaining} (échéance le ${fmt})`;
+        else if (daysRemaining === 0) jxLabel = `🚨 ÉCHÉANCE AUJOURD'HUI (${fmt})`;
+        else jxLabel = `🚨 ÉCHÉANCE DÉPASSÉE depuis ${Math.abs(daysRemaining)} jour(s) — ${fmt}`;
+      }
+
+      const referent = venue?.referent_aracom || {};
+      const referentBlock = (referent.name || referent.email || referent.phone)
+        ? `Référent ARACOM sur le site : ${referent.name || '—'}${referent.email ? ' · ' + referent.email : ''}${referent.phone ? ' · ' + referent.phone : ''}`
+        : 'Aucun référent ARACOM spécifique au site (contact général : agence@aracom-conseil.fr).';
+
+      const contextDescription = `Destinataire : ${org?.name || '—'} (${org?.discipline || '—'}), contact ${org?.contact_name || 'responsable'}.
+Site : ${venue?.name || 'non attribué'}, stand ${reg.stand_code || 'non attribué'}.
+Statut du dossier : ${reg.status}. Complétion : ${reg.completion_percent || 0}%.
+Étape concernée : "${STEP_LABELS[step_key]}".
+Échéance : ${jxLabel}.
+${referentBlock}`;
+
+      const systemPrompt = `Tu es un assistant rédactionnel expert pour ARACOM, l'organisateur du Forum de la Rentrée 2026 en Polynésie française.
+Ton rôle : rédiger un email de rappel J-X chaleureux et factuel à un exposant pour l'inviter à compléter une étape précise de son inscription.
+
+Contexte général :
+- Forum de la Rentrée 2026, vendredi 14 & samedi 15 août 2026
+- Caution de 20 000 XPF par exposant requise
+- Organisé par ARACOM, en partenariat avec Pacific Centers
+
+Règles de rédaction :
+- Français soigné, vouvoiement, ton "professionnel chaleureux".
+- 3 à 5 paragraphes courts. HTML inline (<p>, <b>, <a>).
+- Mets en évidence l'échéance (J-X) en début de mail.
+- Indique clairement l'action attendue.
+- Si un référent ARACOM est défini sur le site, donne ses coordonnées dans un encart à la fin du mail (<p style="background:#f1f5f9;border-left:3px solid #2563eb;padding:10px 14px;border-radius:4px;font-size:13px"><b>Votre contact local :</b> ...</p>).
+- Termine par "Bien cordialement,<br>L'équipe ARACOM".
+
+🛡️ RÈGLE ABSOLUE — BOUTONS ET LIENS :
+Tu n'utilises QUE les placeholders ci-dessous comme href. Aucun autre lien.
+- href="[[MON_ESPACE]]"              → page d'accueil de l'espace exposant
+- href="[[MON_ESPACE_PROFIL]]"       → onglet Profil
+- href="[[MON_ESPACE_SITES]]"        → onglet Sites & plan
+- href="[[MON_ESPACE_ANIMATION]]"    → onglet Animations
+- href="[[MON_ESPACE_DOCS]]"         → onglet Documents
+- href="[[MON_ESPACE_ASSURANCE]]"    → focus assurance
+- href="[[MON_ESPACE_CONVENTION]]"   → focus convention
+- href="[[MON_ESPACE_CAUTION]]"      → focus caution
+
+Choisis le placeholder le plus pertinent selon l'étape :
+- step=profile → [[MON_ESPACE_PROFIL]]
+- step=stand → [[MON_ESPACE_SITES]]
+- step=animation → [[MON_ESPACE_ANIMATION]]
+- step=documents → [[MON_ESPACE_DOCS]]
+- step=caution → [[MON_ESPACE_CAUTION]]
+- step=convention → [[MON_ESPACE_CONVENTION]]
+
+Tu retournes UNIQUEMENT un JSON valide : {"subject": "...", "body_html": "..."}
+Pas de markdown, pas de backticks, pas d'explication.`;
+
+      const userPrompt = `Rédige un email de rappel J-X pour cet exposant.
+
+Contexte :
+${contextDescription}
+
+${custom_instruction ? `Instructions spécifiques : ${custom_instruction}\n` : ''}
+Contraintes :
+- Subject : court, percutant, mentionne J-X ou l'urgence si dépassé. 60 caractères max.
+- Body : HTML inline. 3-5 paragraphes max.
+- Inclus 1 bouton d'action (placeholder de la liste autorisée).
+- Inclus l'encart "Votre contact local" SEULEMENT si un référent est défini.
+- Pas d'autre footer, il sera ajouté côté serveur.
+
+Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
+
+      const result = await emergentChat({
+        model: DEFAULT_MODEL_CLAUDE,
+        system: systemPrompt,
+        user: userPrompt,
+        max_tokens: 2000,
+        temperature: 0.7,
+      });
+      if (!result.ok) {
+        console.error('[generate-jx-reminder] LLM error:', result.error);
+        return err('Erreur IA : ' + (result.error || 'inconnue'), 500);
+      }
+      const text = result.text || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
+      let parsed;
+      try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
+      const cleanedBodyHtml = sanitizeEmailHtml(parsed.body_html || '');
+      return json({
+        ok: true,
+        subject: parsed.subject,
+        body_html: cleanedBodyHtml,
+        step_key,
+        days_remaining: daysRemaining,
+        deadline_iso: deadlineIso,
+        referent: referent,
+        usage: result.usage,
+        llm_source: result.source || 'unknown',
+      });
+    }
+
     // ============ AI INSIGHT — Synthèse IA du comportement historique d'un exposant ============
     // Génère un texte court d'aide à la décision pour l'admin :
     //   - fidélité (nb éditions passées),
