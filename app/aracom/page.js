@@ -48,6 +48,36 @@ const TABS = [
   { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
 
+// Regroupement intelligent des onglets en menus déroulants
+const TAB_GROUPS = [
+  { key: 'dashboard', label: 'Dashboard', icon: '📊', single: true }, // Direct
+  {
+    key: 'pilotage',
+    label: 'Pilotage',
+    icon: '🎯',
+    items: ['anomalies', 'validations', 'bilans'],
+  },
+  {
+    key: 'exposants_grp',
+    label: 'Exposants',
+    icon: '👥',
+    items: ['exposants', 'cautions', 'relances', 'prospection'],
+  },
+  {
+    key: 'communication',
+    label: 'Communication',
+    icon: '✉️',
+    items: ['mailing', 'documents-officiels', 'access'],
+  },
+  {
+    key: 'configuration',
+    label: 'Configuration',
+    icon: '⚙️',
+    items: ['sites', 'deadlines', 'backup', 'import'],
+  },
+  { key: 'satisfaction', label: 'Post-événement', icon: '⭐', single: true, redirectTo: 'satisfaction' },
+];
+
 export default function AracomPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null });
@@ -83,6 +113,8 @@ export default function AracomPage() {
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
+      tabGroups={TAB_GROUPS}
+      onTabClick={setTab}
       right={
         <div className="flex items-center gap-2">
           {mailStatus.test_mode_active && (
@@ -1136,6 +1168,15 @@ function SitesView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  const togglePacificVisible = async (v) => {
+    const newVal = !(v.pacific_visible !== false);
+    try {
+      await api(`/api/venues/${v.id}/set-pacific-visible`, { method: 'POST', body: JSON.stringify({ pacific_visible: newVal }) });
+      toast.success(`Site ${v.name} ${newVal ? '👁️ visible Pacific' : '🙈 masqué pour Pacific'}`);
+      api('/api/venues').then(setVenues);
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <div className="space-y-4">
       <Card className="border-blue-200 bg-blue-50/40">
@@ -1145,18 +1186,32 @@ function SitesView() {
             <div className="flex-1">
               <h3 className="font-bold text-blue-900">Sites disponibles pour l&apos;édition 2026</h3>
               <p className="text-xs text-blue-800">Activez ou désactivez chaque site. Les sites désactivés ne sont plus visibles côté exposant.</p>
+              <p className="text-xs text-violet-800 mt-1">👁️ <b>Visibilité Pacific Centers</b> : contrôlez quels sites apparaissent dans le portail Pacific.</p>
             </div>
           </div>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
             {venues.map(v => {
               const active = v.is_available_2026 !== false;
+              const pacific = v.pacific_visible !== false;
               return (
-                <div key={v.id} className={`flex items-center justify-between p-2 rounded-md border ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">{v.name}</span>
-                    <Badge variant="secondary" className="text-[10px]">{v.code}</Badge>
+                <div key={v.id} className={`p-2 rounded-md border ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{v.name}</span>
+                      <Badge variant="secondary" className="text-[10px]">{v.code}</Badge>
+                    </div>
+                    <Switch checked={active} onCheckedChange={() => toggleAvailability(v)} />
                   </div>
-                  <Switch checked={active} onCheckedChange={() => toggleAvailability(v)} />
+                  <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
+                    <span className="text-slate-600 flex items-center gap-1">
+                      {pacific ? '👁️' : '🙈'} Pacific Centers
+                    </span>
+                    <Switch
+                      checked={pacific}
+                      onCheckedChange={() => togglePacificVisible(v)}
+                      className="data-[state=checked]:bg-violet-500 scale-75"
+                    />
+                  </div>
                 </div>
               );
             })}

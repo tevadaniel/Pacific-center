@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getSession, clearSession, api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { LogOut, MapPin } from 'lucide-react';
+import { LogOut, MapPin, ChevronDown } from 'lucide-react';
 
-export function Shell({ children, title, subtitle, right, allowedRoles, activeTab, tabs = [] }) {
+export function Shell({ children, title, subtitle, right, allowedRoles, activeTab, tabs = [], tabGroups = null, onTabClick }) {
   const router = useRouter();
   const [session, setSession] = useState(null);
   useEffect(() => {
@@ -58,7 +58,9 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
             <Button variant="ghost" size="sm" onClick={logout}><LogOut className="w-4 h-4" /></Button>
           </div>
         </div>
-        {tabs.length > 0 && (
+        {tabGroups && tabGroups.length > 0 ? (
+          <NavWithGroups tabs={tabs} tabGroups={tabGroups} activeTab={activeTab} onTabClick={onTabClick} />
+        ) : tabs.length > 0 ? (
           <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex gap-1 overflow-x-auto">
             {tabs.map(t => {
               const cls = `px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${activeTab === t.key ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900'}`;
@@ -69,7 +71,7 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
               );
             })}
           </div>
-        )}
+        ) : null}
       </header>
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
         {subtitle && <p className="text-sm text-slate-500 mb-4">{subtitle}</p>}
@@ -81,6 +83,86 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
 
 function roleLabel(role) {
   return { aracom_admin: 'ARACOM admin', exposant: 'Exposant', pacific_centers_readonly: 'Pacific Centers' }[role] || role;
+}
+
+// Navigation à 5 groupes principaux avec dropdowns
+function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
+  const tabsByKey = Object.fromEntries(tabs.map(t => [t.key, t]));
+  const [openMenu, setOpenMenu] = useState(null);
+  const closeRef = useRef(null);
+
+  const handleClick = (key) => {
+    setOpenMenu(null);
+    if (onTabClick) onTabClick(key);
+    else tabsByKey[key]?.onClick?.();
+  };
+
+  const isGroupActive = (group) => {
+    if (group.single) return activeTab === (group.redirectTo || group.key);
+    return group.items?.includes(activeTab);
+  };
+
+  // Trouve le label du tab actif au sein d'un groupe (pour afficher le sous-titre)
+  const activeChildLabel = (group) => {
+    if (!group.items) return null;
+    if (!group.items.includes(activeTab)) return null;
+    return tabsByKey[activeTab]?.label;
+  };
+
+  return (
+    <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex flex-wrap gap-1 overflow-x-auto relative">
+      {tabGroups.map(group => {
+        const active = isGroupActive(group);
+        const cls = `flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${active ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`;
+
+        if (group.single) {
+          return (
+            <button key={group.key} onClick={() => handleClick(group.redirectTo || group.key)} className={cls}>
+              <span className="text-base">{group.icon}</span>
+              <span>{group.label}</span>
+            </button>
+          );
+        }
+
+        const subLabel = activeChildLabel(group);
+        return (
+          <div key={group.key} className="relative">
+            <button
+              onClick={() => setOpenMenu(openMenu === group.key ? null : group.key)}
+              onBlur={() => setTimeout(() => setOpenMenu(prev => prev === group.key ? null : prev), 150)}
+              className={cls}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === group.key}
+            >
+              <span className="text-base">{group.icon}</span>
+              <span>{group.label}</span>
+              {subLabel && <span className="text-xs text-blue-500 font-normal">· {subLabel}</span>}
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openMenu === group.key ? 'rotate-180' : ''}`} />
+            </button>
+            {openMenu === group.key && (
+              <div className="absolute left-0 top-full mt-1 z-50 w-56 bg-white rounded-md border border-slate-200 shadow-lg py-1.5 animate-in fade-in slide-in-from-top-1 duration-100">
+                {group.items.map(itemKey => {
+                  const t = tabsByKey[itemKey];
+                  if (!t) return null;
+                  const itemActive = activeTab === itemKey;
+                  return (
+                    <button
+                      key={itemKey}
+                      onMouseDown={(e) => { e.preventDefault(); handleClick(itemKey); }}
+                      className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {t.label}
+                      {itemActive && <span className="ml-auto text-blue-500">●</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function KpiCard({ label, value, accent = 'blue', hint, icon: Icon }) {

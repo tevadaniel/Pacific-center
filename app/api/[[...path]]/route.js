@@ -514,7 +514,14 @@ export async function GET(request, { params }) {
       return json(kpis);
     }
     if (route === 'dashboard/by-site') {
+      const userRole = request.headers.get('x-user-role');
       const sites = await computeBySite(db);
+      // 🆕 Filtre Pacific : ne renvoie que les sites visibles ET disponibles
+      if (userRole === 'pacific_centers_readonly') {
+        const allVenues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+        const allowedIds = new Set(allVenues.filter(v => v.is_available_2026 !== false && v.pacific_visible !== false).map(v => v.id));
+        return json(sites.filter(s => allowedIds.has(s.venue_id)));
+      }
       return json(sites);
     }
 
@@ -522,7 +529,11 @@ export async function GET(request, { params }) {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
       const userRole = request.headers.get('x-user-role');
       // Hide unavailable venues for non-admin roles
-      const visible = userRole === 'aracom_admin' ? venues : venues.filter(v => v.is_available_2026 !== false);
+      let visible = userRole === 'aracom_admin' ? venues : venues.filter(v => v.is_available_2026 !== false);
+      // 🆕 Filtre supplémentaire pour Pacific Centers : seuls les sites avec pacific_visible=true (ou non défini = true par défaut)
+      if (userRole === 'pacific_centers_readonly') {
+        visible = visible.filter(v => v.pacific_visible !== false);
+      }
       return json(visible.map(v => { delete v._id; return v; }));
     }
 
@@ -725,9 +736,17 @@ export async function GET(request, { params }) {
     if (route === 'animation-slots') {
       const venue_id = url.searchParams.get('venue_id');
       const day = url.searchParams.get('day');
+      const userRole = request.headers.get('x-user-role');
       const q = {};
       if (venue_id) q.venue_id = venue_id;
       if (day) q.day_label = day;
+      // 🆕 Filtre Pacific : ne renvoie que les slots des sites visibles Pacific
+      if (userRole === 'pacific_centers_readonly') {
+        const allowedVenues = await db.collection('venues').find({ edition_id: EDITION_ID, pacific_visible: { $ne: false }, is_available_2026: { $ne: false } }).toArray();
+        const allowedIds = allowedVenues.map(v => v.id);
+        if (q.venue_id && !allowedIds.includes(q.venue_id)) return json([]);
+        if (!q.venue_id) q.venue_id = { $in: allowedIds };
+      }
       const slots = await db.collection('animation_slots').find(q).toArray();
       const regIds = [...new Set(slots.map(s => s.registration_id))];
       const regs = await db.collection('registrations').find({ id: { $in: regIds } }).toArray();
@@ -2795,6 +2814,15 @@ export async function POST(request, { params }) {
       const { is_available_2026 } = body;
       await db.collection('venues').updateOne({ id }, { $set: { is_available_2026: Boolean(is_available_2026), updated_at: new Date() } });
       return json({ ok: true });
+    }
+
+    // 🆕 Toggle visibility côté Pacific Centers (admin only)
+    if (route.match(/^venues\/[^/]+\/set-pacific-visible$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const id = p[1];
+      const { pacific_visible } = body;
+      await db.collection('venues').updateOne({ id }, { $set: { pacific_visible: Boolean(pacific_visible), updated_at: new Date() } });
+      return json({ ok: true, pacific_visible: Boolean(pacific_visible) });
     }
 
     // One-time migration : set is_available_2026 + disable exposant/pacific passwords
