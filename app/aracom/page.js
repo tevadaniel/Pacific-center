@@ -821,12 +821,13 @@ function FicheExposant({ id, onClose }) {
             </div>
 
             <Tabs defaultValue="resume">
-              <TabsList className="w-full grid grid-cols-7">
+              <TabsList className="w-full grid grid-cols-9">
                 <TabsTrigger value="resume">Résumé</TabsTrigger>
                 <TabsTrigger value="animation">Animation</TabsTrigger>
                 <TabsTrigger value="docs">Documents</TabsTrigger>
                 <TabsTrigger value="caution">Caution</TabsTrigger>
                 <TabsTrigger value="terrain">Terrain</TabsTrigger>
+                <TabsTrigger value="bilan" className="data-[state=active]:bg-violet-100 data-[state=active]:text-violet-900">⭐ Bilan</TabsTrigger>
                 <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="histo">Historique</TabsTrigger>
                 <TabsTrigger value="aracom" className="data-[state=active]:bg-amber-100 data-[state=active]:text-amber-900">🔒 ARACOM</TabsTrigger>
@@ -956,6 +957,10 @@ function FicheExposant({ id, onClose }) {
                   </div>
                 )}
                 <Button onClick={generateBilan} variant="outline" className="w-full gap-2"><Sparkles className="w-4 h-4" /> Générer un brouillon de bilan exposant</Button>
+              </TabsContent>
+
+              <TabsContent value="bilan" className="space-y-2">
+                <BilanRDVAdminBlock registrationId={id} onRefresh={load} />
               </TabsContent>
 
               <TabsContent value="timeline" className="space-y-2">
@@ -4986,5 +4991,218 @@ function DeadlinesView() {
     </div>
   );
 }
+
+// =====================================================================
+// ⭐ BILAN + RDV restitution caution (UI ARACOM dans la fiche exposant)
+// =====================================================================
+function BilanRDVAdminBlock({ registrationId, onRefresh }) {
+  const [survey, setSurvey] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [confirmedRdv, setConfirmedRdv] = useState('');
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showFillForm, setShowFillForm] = useState(false);
+  const [adminForm, setAdminForm] = useState({
+    overall_rating: 0, organization_rating: 0, stand_rating: 0, visitors_rating: 0, communication_rating: 0,
+    nps_score: null, will_participate_next: '',
+    positive_points: '', improvement_points: '', free_comment: '',
+  });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const arr = await api(`/api/satisfaction?registration_id=${registrationId}`);
+      const s = arr?.[0] || null;
+      setSurvey(s);
+      if (s?.caution_return_rdv_confirmed) {
+        setConfirmedRdv(new Date(s.caution_return_rdv_confirmed).toISOString().slice(0, 16));
+      } else if (s?.caution_return_rdv_proposed) {
+        setConfirmedRdv(new Date(s.caution_return_rdv_proposed).toISOString().slice(0, 16));
+      }
+      if (s?.validation_comment) setComment(s.validation_comment);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, [registrationId]);
+
+  const validateBilan = async () => {
+    if (!confirmedRdv) { toast.error('Définissez la date de RDV restitution caution'); return; }
+    if (!window.confirm(`Valider ce bilan et confirmer le RDV du ${new Date(confirmedRdv).toLocaleString('fr-FR')} pour la restitution de la caution ?`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/satisfaction/${survey.id}/aracom-validate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          validated: true,
+          caution_return_rdv_confirmed: new Date(confirmedRdv).toISOString(),
+          validation_comment: comment || null,
+        }),
+      });
+      toast.success('✅ Bilan validé et RDV confirmé');
+      load();
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const markCautionReturned = async () => {
+    if (!window.confirm('Confirmer que la caution a été restituée à l\'exposant ?')) return;
+    setBusy(true);
+    try {
+      await api(`/api/satisfaction/${survey.id}/mark-caution-returned`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('💰 Caution marquée comme restituée');
+      load();
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const adminFill = async () => {
+    setBusy(true);
+    try {
+      await api('/api/satisfaction', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, ...adminForm, filled_by_aracom: true }) });
+      toast.success('Bilan rempli pour l\'exposant');
+      setShowFillForm(false);
+      load();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  if (loading) return <div className="p-4 text-sm text-slate-500">Chargement…</div>;
+
+  if (!survey) {
+    if (showFillForm) {
+      return (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Remplir le bilan pour cet exposant</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-slate-500">Vous remplissez ce questionnaire au nom de l&apos;exposant. Il pourra ensuite voir le bilan dans son portail.</p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <StarRow label="Note globale" value={adminForm.overall_rating} onChange={v => setAdminForm({ ...adminForm, overall_rating: v })} />
+              <StarRow label="Organisation" value={adminForm.organization_rating} onChange={v => setAdminForm({ ...adminForm, organization_rating: v })} />
+              <StarRow label="Stand" value={adminForm.stand_rating} onChange={v => setAdminForm({ ...adminForm, stand_rating: v })} />
+              <StarRow label="Visiteurs" value={adminForm.visitors_rating} onChange={v => setAdminForm({ ...adminForm, visitors_rating: v })} />
+              <StarRow label="Communication" value={adminForm.communication_rating} onChange={v => setAdminForm({ ...adminForm, communication_rating: v })} />
+              <div>
+                <Label className="text-xs uppercase">NPS (0-10)</Label>
+                <Input type="number" min={0} max={10} value={adminForm.nps_score ?? ''} onChange={e => setAdminForm({ ...adminForm, nps_score: e.target.value === '' ? null : Number(e.target.value) })} />
+              </div>
+            </div>
+            <div><Label>Points positifs</Label><Textarea rows={2} value={adminForm.positive_points} onChange={e => setAdminForm({ ...adminForm, positive_points: e.target.value })} /></div>
+            <div><Label>À améliorer</Label><Textarea rows={2} value={adminForm.improvement_points} onChange={e => setAdminForm({ ...adminForm, improvement_points: e.target.value })} /></div>
+            <div><Label>Commentaire libre</Label><Textarea rows={2} value={adminForm.free_comment} onChange={e => setAdminForm({ ...adminForm, free_comment: e.target.value })} /></div>
+            <div className="flex gap-2">
+              <Button onClick={adminFill} disabled={busy} className="bg-violet-600 hover:bg-violet-700"><CheckCircle2 className="w-4 h-4 mr-1" /> Enregistrer le bilan</Button>
+              <Button variant="outline" onClick={() => setShowFillForm(false)} disabled={busy}>Annuler</Button>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+    return (
+      <Card className="border-dashed">
+        <CardContent className="p-5 text-center space-y-3">
+          <span className="text-4xl">📋</span>
+          <p className="text-sm text-slate-600">Aucun bilan saisi pour le moment.</p>
+          <p className="text-xs text-slate-500">L&apos;exposant peut le compléter via son portail (si phase post-événement activée), ou vous pouvez le remplir directement ici.</p>
+          <Button onClick={() => setShowFillForm(true)} variant="outline" className="gap-2">
+            <Sparkles className="w-4 h-4" /> Remplir le bilan pour l&apos;exposant
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const cautionReturned = survey.caution_return_status === 'completed';
+  const validated = survey.validation_status === 'validated_by_aracom';
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-500 fill-amber-400" /> Bilan de l&apos;exposant
+            {survey.filled_by_aracom_at && <Badge variant="secondary" className="text-[10px]">Rempli par ARACOM</Badge>}
+            {validated && <Badge className="bg-emerald-100 text-emerald-700 ml-auto">✅ Validé</Badge>}
+            {cautionReturned && <Badge className="bg-blue-100 text-blue-700">💰 Caution rendue</Badge>}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid sm:grid-cols-3 gap-2 text-sm">
+          <Info label="Note globale" value={survey.overall_rating ? `${survey.overall_rating}/5 ⭐` : '—'} />
+          <Info label="Organisation" value={survey.organization_rating ? `${survey.organization_rating}/5` : '—'} />
+          <Info label="Stand" value={survey.stand_rating ? `${survey.stand_rating}/5` : '—'} />
+          <Info label="Visiteurs" value={survey.visitors_rating ? `${survey.visitors_rating}/5` : '—'} />
+          <Info label="Communication" value={survey.communication_rating ? `${survey.communication_rating}/5` : '—'} />
+          <Info label="NPS" value={survey.nps_score != null ? `${survey.nps_score}/10` : '—'} />
+        </CardContent>
+        {(survey.positive_points || survey.improvement_points || survey.free_comment) && (
+          <CardContent className="border-t pt-3 space-y-2 text-xs">
+            {survey.positive_points && <div><b>👍 Points positifs :</b> {survey.positive_points}</div>}
+            {survey.improvement_points && <div><b>✏️ À améliorer :</b> {survey.improvement_points}</div>}
+            {survey.free_comment && <div className="italic text-slate-600">💬 « {survey.free_comment} »</div>}
+          </CardContent>
+        )}
+      </Card>
+
+      <Card className={cautionReturned ? 'border-emerald-300 bg-emerald-50/30' : validated ? 'border-blue-300 bg-blue-50/30' : 'border-violet-300 bg-violet-50/30'}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4" /> RDV restitution de la caution</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {survey.caution_return_rdv_proposed && !validated && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+              <b className="text-amber-900">Date proposée par l&apos;exposant :</b><br />
+              {new Date(survey.caution_return_rdv_proposed).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}
+            </div>
+          )}
+          {cautionReturned ? (
+            <div className="text-sm text-emerald-800">
+              ✅ Caution restituée le {new Date(survey.caution_returned_at).toLocaleDateString('fr-FR')}
+            </div>
+          ) : (
+            <>
+              <div>
+                <Label>Date du RDV (confirmée ARACOM)</Label>
+                <Input type="datetime-local" value={confirmedRdv} onChange={e => setConfirmedRdv(e.target.value)} />
+              </div>
+              <div>
+                <Label>Commentaire (visible côté exposant)</Label>
+                <Textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} placeholder="Ex: Merci de venir au siège ARACOM avec votre pièce d'identité..." />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {!validated && (
+                  <Button onClick={validateBilan} disabled={busy} className="bg-violet-600 hover:bg-violet-700 gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> Valider bilan + Confirmer RDV
+                  </Button>
+                )}
+                {validated && (
+                  <Button onClick={markCautionReturned} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 gap-1.5">
+                    <Wallet className="w-4 h-4" /> Marquer caution comme restituée
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function StarRow({ label, value, onChange }) {
+  return (
+    <div>
+      <Label className="text-xs uppercase">{label}</Label>
+      <div className="flex gap-1 mt-1">
+        {[1,2,3,4,5].map(n => (
+          <button key={n} type="button" onClick={() => onChange(n)}>
+            <Star className={`w-6 h-6 ${n <= value ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 

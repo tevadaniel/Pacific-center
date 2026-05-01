@@ -2449,7 +2449,17 @@ export async function POST(request, { params }) {
 
     if (route === 'satisfaction') {
       // Exposant submit/update satisfaction survey (upsert par registration_id)
-      const { registration_id, nps_score, overall_rating, organization_rating, stand_rating, visitors_rating, communication_rating, will_participate_next, positive_points, improvement_points, free_comment } = body;
+      // 🆕 Workflow étendu : bilan + RDV restitution caution + validation ARACOM
+      const {
+        registration_id, nps_score, overall_rating, organization_rating, stand_rating,
+        visitors_rating, communication_rating, will_participate_next, positive_points,
+        improvement_points, free_comment,
+        // 🆕 Soumission finale + RDV restitution caution
+        validated_by_exposant,           // boolean — true = bilan finalisé par l'exposant
+        caution_return_rdv_proposed,     // ISO date — RDV proposé par l'exposant pour reprendre la caution
+        // 🆕 Mode "rempli par ARACOM pour le compte de l'exposant"
+        filled_by_aracom,                // boolean
+      } = body;
       if (!registration_id) return err('registration_id requis', 400);
       const reg = await db.collection('registrations').findOne({ id: registration_id });
       if (!reg) return err('Inscription introuvable', 404);
@@ -2468,6 +2478,22 @@ export async function POST(request, { params }) {
         free_comment: free_comment || null,
         submitted_at: new Date(), updated_at: new Date(),
       };
+      // 🆕 Conserve les champs de workflow s'ils sont fournis (sinon on garde existing)
+      if (validated_by_exposant === true) {
+        doc.validated_by_exposant_at = new Date();
+        doc.validation_status = 'pending_aracom_review';
+      }
+      if (caution_return_rdv_proposed) {
+        const d = new Date(caution_return_rdv_proposed);
+        if (!isNaN(d.getTime())) {
+          doc.caution_return_rdv_proposed = d.toISOString();
+          doc.caution_return_status = 'proposed';
+        }
+      }
+      if (filled_by_aracom && ctx.role === 'aracom_admin') {
+        doc.filled_by_aracom_at = new Date();
+        doc.filled_by_aracom_user = ctx.userId || null;
+      }
       if (existing) {
         await db.collection('satisfaction_surveys').updateOne({ id: existing.id }, { $set: doc });
         await logActivity(db, ctx.userId, 'satisfaction_survey', existing.id, 'update', null, null);
@@ -2483,6 +2509,57 @@ export async function POST(request, { params }) {
         return json(created, 201);
       }
     }
+
+    // 🆕 ARACOM valide le bilan + confirme/modifie le RDV restitution caution
+    if (route.match(/^satisfaction\/[^/]+\/aracom-validate$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const surveyId = p[1];
+      const { caution_return_rdv_confirmed, validated, validation_comment } = body || {};
+      const survey = await db.collection('satisfaction_surveys').findOne({ id: surveyId });
+      if (!survey) return err('Bilan introuvable', 404);
+      const update = { updated_at: new Date() };
+      if (validated === true) {
+        update.validation_status = 'validated_by_aracom';
+        update.validated_by_aracom_at = new Date();
+        update.validated_by_aracom_user = ctx.userId || null;
+      }
+      if (validation_comment !== undefined) update.validation_comment = validation_comment || null;
+      if (caution_return_rdv_confirmed) {
+        const d = new Date(caution_return_rdv_confirmed);
+        if (!isNaN(d.getTime())) {
+          update.caution_return_rdv_confirmed = d.toISOString();
+          update.caution_return_status = 'confirmed';
+        }
+      }
+      await db.collection('satisfaction_surveys').updateOne({ id: surveyId }, { $set: update });
+      const r = await db.collection('satisfaction_surveys').findOne({ id: surveyId });
+      delete r._id;
+      return json(r);
+    }
+
+    // 🆕 ARACOM marque la caution comme rendue (RDV honoré)
+    if (route.match(/^satisfaction\/[^/]+\/mark-caution-returned$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const surveyId = p[1];
+      const survey = await db.collection('satisfaction_surveys').findOne({ id: surveyId });
+      if (!survey) return err('Bilan introuvable', 404);
+      const update = {
+        caution_return_status: 'completed',
+        caution_returned_at: new Date(),
+        caution_returned_by: ctx.userId || null,
+        updated_at: new Date(),
+      };
+      await db.collection('satisfaction_surveys').updateOne({ id: surveyId }, { $set: update });
+      // Optionnel : reflète sur le deposit
+      await db.collection('deposits').updateOne(
+        { registration_id: survey.registration_id, edition_id: EDITION_ID },
+        { $set: { status: 'restituee', returned_at: new Date(), updated_at: new Date() } }
+      );
+      const r = await db.collection('satisfaction_surveys').findOne({ id: surveyId });
+      delete r._id;
+      return json(r);
+    }
+
 
     // ---- Recompute completion % for all registrations (ARACOM tool) ----
     if (route === 'tools/recompute-completion') {

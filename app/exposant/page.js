@@ -1559,42 +1559,74 @@ function SatisfactionBlock({ registration }) {
     positive_points: '', improvement_points: '', free_comment: '',
   });
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [rdvProposed, setRdvProposed] = useState('');
 
-  useEffect(() => {
-    api(`/api/satisfaction?registration_id=${registration.id}`)
-      .then(arr => {
-        if (arr.length > 0) {
-          const s = arr[0];
-          setSurvey(s);
-          setForm({
-            overall_rating: s.overall_rating || 0,
-            organization_rating: s.organization_rating || 0,
-            stand_rating: s.stand_rating || 0,
-            visitors_rating: s.visitors_rating || 0,
-            communication_rating: s.communication_rating || 0,
-            nps_score: s.nps_score,
-            will_participate_next: s.will_participate_next || '',
-            positive_points: s.positive_points || '',
-            improvement_points: s.improvement_points || '',
-            free_comment: s.free_comment || '',
-          });
+  const reload = async () => {
+    try {
+      const arr = await api(`/api/satisfaction?registration_id=${registration.id}`);
+      if (arr.length > 0) {
+        const s = arr[0];
+        setSurvey(s);
+        setForm({
+          overall_rating: s.overall_rating || 0,
+          organization_rating: s.organization_rating || 0,
+          stand_rating: s.stand_rating || 0,
+          visitors_rating: s.visitors_rating || 0,
+          communication_rating: s.communication_rating || 0,
+          nps_score: s.nps_score,
+          will_participate_next: s.will_participate_next || '',
+          positive_points: s.positive_points || '',
+          improvement_points: s.improvement_points || '',
+          free_comment: s.free_comment || '',
+        });
+        if (s.caution_return_rdv_proposed) {
+          setRdvProposed(new Date(s.caution_return_rdv_proposed).toISOString().slice(0, 16));
         }
-      })
-      .catch(() => {});
-  }, [registration.id]);
+      }
+    } catch {}
+  };
+  useEffect(() => { reload(); }, [registration.id]);
 
-  const submit = async () => {
+  const isLocked = survey?.validation_status === 'validated_by_aracom' || survey?.caution_return_status === 'completed';
+  const isPendingReview = survey?.validation_status === 'pending_aracom_review';
+  const rdvConfirmed = survey?.caution_return_rdv_confirmed;
+  const cautionReturned = survey?.caution_return_status === 'completed';
+
+  const save = async () => {
     setSaving(true);
+    try {
+      await api('/api/satisfaction', { method: 'POST', body: JSON.stringify({ registration_id: registration.id, ...form }) });
+      toast.success('Réponses enregistrées (brouillon)');
+      reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const submitFinal = async () => {
+    if (!form.overall_rating || !form.nps_score == null) {
+      toast.error('Merci de noter au moins la note globale et le NPS avant de valider');
+      return;
+    }
+    if (!rdvProposed) {
+      toast.error('Proposez une date pour la restitution de la caution');
+      return;
+    }
+    if (!window.confirm(`Valider votre bilan et proposer le RDV du ${new Date(rdvProposed).toLocaleString('fr-FR')} pour la restitution de votre caution ?\n\nUne fois soumis, ARACOM examinera vos réponses puis confirmera ou modifiera la date.`)) return;
+    setSubmitting(true);
     try {
       await api('/api/satisfaction', {
         method: 'POST',
-        body: JSON.stringify({ registration_id: registration.id, ...form }),
+        body: JSON.stringify({
+          registration_id: registration.id, ...form,
+          validated_by_exposant: true,
+          caution_return_rdv_proposed: new Date(rdvProposed).toISOString(),
+        }),
       });
-      toast.success(survey ? 'Réponses mises à jour ✅' : 'Merci pour votre retour ! 🙏');
-      const arr = await api(`/api/satisfaction?registration_id=${registration.id}`);
-      if (arr[0]) setSurvey(arr[0]);
+      toast.success('✅ Bilan soumis à ARACOM. Vous serez notifié de la confirmation du RDV.');
+      reload();
     } catch (e) { toast.error(e.message); }
-    finally { setSaving(false); }
+    finally { setSubmitting(false); }
   };
 
   const StarRating = ({ value, onChange, label }) => (
@@ -1602,8 +1634,8 @@ function SatisfactionBlock({ registration }) {
       <Label className="text-xs uppercase">{label}</Label>
       <div className="flex gap-1 mt-1">
         {[1,2,3,4,5].map(n => (
-          <button key={n} type="button" onClick={() => onChange(n)}>
-            <Star className={`w-7 h-7 transition ${n <= value ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-amber-200'}`} />
+          <button key={n} type="button" disabled={isLocked || isPendingReview} onClick={() => onChange(n)}>
+            <Star className={`w-7 h-7 transition ${n <= value ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-amber-200'} ${(isLocked || isPendingReview) ? 'opacity-60' : ''}`} />
           </button>
         ))}
       </div>
@@ -1671,15 +1703,83 @@ function SatisfactionBlock({ registration }) {
       <Card>
         <CardHeader><CardTitle className="text-base">Vos commentaires</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <div><Label>Points positifs</Label><Textarea rows={2} value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ce qui a particulièrement bien fonctionné…" /></div>
-          <div><Label>À améliorer</Label><Textarea rows={2} value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Suggestions pour améliorer le Forum…" /></div>
-          <div><Label>Commentaire libre</Label><Textarea rows={3} value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Toute remarque libre…" /></div>
+          <div><Label>Points positifs</Label><Textarea rows={2} disabled={isLocked || isPendingReview} value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ce qui a particulièrement bien fonctionné…" /></div>
+          <div><Label>À améliorer</Label><Textarea rows={2} disabled={isLocked || isPendingReview} value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Suggestions pour améliorer le Forum…" /></div>
+          <div><Label>Commentaire libre</Label><Textarea rows={3} disabled={isLocked || isPendingReview} value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Toute remarque libre…" /></div>
         </CardContent>
       </Card>
 
-      <Button onClick={submit} disabled={saving} className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
-        <Send className="w-4 h-4" /> {saving ? 'Envoi…' : (survey ? 'Mettre à jour mes réponses' : 'Envoyer mes réponses')}
-      </Button>
+      {/* 🆕 Bloc Validation finale + RDV restitution caution */}
+      {cautionReturned ? (
+        <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+          <CardContent className="p-5 text-center">
+            <span className="text-5xl">✅</span>
+            <p className="text-lg font-bold text-emerald-900 mt-2">Caution restituée — Édition terminée</p>
+            <p className="text-sm text-emerald-700 mt-1">Votre caution vous a été rendue le {new Date(survey.caution_returned_at).toLocaleDateString('fr-FR')}. Merci pour votre participation au Forum 2026 !</p>
+          </CardContent>
+        </Card>
+      ) : isLocked ? (
+        <Card className="border-blue-300 bg-gradient-to-br from-blue-50 to-sky-50">
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <span className="text-4xl">📅</span>
+              <div className="flex-1">
+                <p className="text-lg font-bold text-blue-900">Bilan validé par ARACOM ✅</p>
+                {rdvConfirmed ? (
+                  <>
+                    <p className="text-sm text-blue-800 mt-1">RDV confirmé pour la restitution de votre caution :</p>
+                    <p className="text-base font-bold text-blue-900 mt-1">{new Date(rdvConfirmed).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</p>
+                    {survey.validation_comment && <p className="text-xs text-blue-700 mt-2 italic">💬 {survey.validation_comment}</p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-blue-800 mt-1">Date de RDV en cours de confirmation par ARACOM. Vous serez notifié(e).</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : isPendingReview ? (
+        <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50">
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <span className="text-4xl">⏳</span>
+              <div className="flex-1">
+                <p className="text-lg font-bold text-amber-900">Bilan en cours de validation</p>
+                <p className="text-sm text-amber-800 mt-1">Votre bilan a été soumis le {new Date(survey.validated_by_exposant_at).toLocaleDateString('fr-FR')}. ARACOM examine vos réponses.</p>
+                {survey.caution_return_rdv_proposed && (
+                  <p className="text-sm text-amber-800 mt-1">RDV proposé : <b>{new Date(survey.caution_return_rdv_proposed).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</b></p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-violet-300 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+          <CardContent className="p-5 space-y-3">
+            <div className="flex items-start gap-3">
+              <Wallet className="w-6 h-6 text-violet-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold text-violet-900">📅 Proposer un rendez-vous pour la restitution de la caution</p>
+                <p className="text-xs text-violet-700 mt-1">Une fois votre bilan validé par ARACOM, votre caution de 20 000 XPF vous sera restituée à cette date (sous réserve de confirmation par ARACOM).</p>
+              </div>
+            </div>
+            <Input
+              type="datetime-local"
+              value={rdvProposed}
+              onChange={(e) => setRdvProposed(e.target.value)}
+              className="bg-white"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={save} disabled={saving} variant="outline" className="gap-2">
+                <Send className="w-4 h-4" /> {saving ? 'Sauvegarde…' : 'Enregistrer brouillon'}
+              </Button>
+              <Button onClick={submitFinal} disabled={submitting || !rdvProposed} className="gap-2 bg-violet-600 hover:bg-violet-700">
+                <CheckCircle2 className="w-4 h-4" /> {submitting ? 'Envoi…' : 'Valider mon bilan + Soumettre RDV'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
