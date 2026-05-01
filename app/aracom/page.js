@@ -1191,6 +1191,7 @@ function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onToggle
           type="button"
           onClick={() => setOpen(o => !o)}
           className="w-full flex items-center justify-between text-[11px] text-slate-700 hover:text-blue-700 transition"
+          data-testid={`referent-toggle-${venue.code}`}
         >
           <span className="flex items-center gap-1">
             👤 <span className="font-medium">Référent ARACOM</span>
@@ -1209,24 +1210,28 @@ function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onToggle
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="h-7 text-xs"
+              data-testid={`referent-name-input-${venue.code}`}
             />
             <Input
               placeholder="email@aracom-conseil.fr"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="h-7 text-xs"
+              data-testid={`referent-email-input-${venue.code}`}
             />
             <Input
               placeholder="+(689) XX XX XX XX"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="h-7 text-xs"
+              data-testid={`referent-phone-input-${venue.code}`}
             />
             <Button
               size="sm"
               onClick={save}
               disabled={saving}
               className="w-full h-7 text-[11px] bg-blue-600 hover:bg-blue-700"
+              data-testid={`referent-save-${venue.code}`}
             >
               {saving ? '…' : '💾 Enregistrer'}
             </Button>
@@ -2980,9 +2985,9 @@ function AccessTokensView() {
             <b>Comment ça marche :</b> Chaque exposant et chaque Pacific Centers reçoit par email un <i>lien personnel permanent</i> qui ouvre directement son espace, sans mot de passe. Vous pouvez aussi générer un <i>lien d&apos;inscription</i> pour démarcher un nouveau prospect (formulaire vierge).
           </div>
           <div className="flex gap-2 shrink-0 flex-wrap">
-            <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5"><Send className="w-4 h-4" /> Lien d&apos;accès exposant</Button>
-            <Button size="sm" onClick={() => setShowCreate('new_exposant')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Plus className="w-4 h-4" /> Créer & inviter exposant</Button>
-            <Button size="sm" onClick={() => setShowCreate('pacific')} className="bg-cyan-600 hover:bg-cyan-700 gap-1.5"><Eye className="w-4 h-4" /> Lien Pacific Centers</Button>
+            <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5" data-testid="generate-magic-link-exposant"><Send className="w-4 h-4" /> Lien d&apos;accès exposant</Button>
+            <Button size="sm" onClick={() => setShowCreate('new_exposant')} className="bg-violet-600 hover:bg-violet-700 gap-1.5" data-testid="generate-magic-link-new-exposant"><Plus className="w-4 h-4" /> Créer & inviter exposant</Button>
+            <Button size="sm" onClick={() => setShowCreate('pacific')} className="bg-cyan-600 hover:bg-cyan-700 gap-1.5" data-testid="generate-magic-link-pacific"><Eye className="w-4 h-4" /> Lien Pacific Centers</Button>
           </div>
         </CardContent>
       </Card>
@@ -5136,7 +5141,12 @@ function JxReminderTrigger({ registration, organization, venue }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" className="bg-blue-600 hover:bg-blue-700 gap-1.5">
+      <Button
+        onClick={() => setOpen(true)}
+        size="sm"
+        className="bg-blue-600 hover:bg-blue-700 gap-1.5"
+        data-testid="jx-reminder-button"
+      >
         <Sparkles className="w-3.5 h-3.5" /> Rédiger & envoyer
       </Button>
       {open && (
@@ -5283,6 +5293,7 @@ function JxReminderDialog({ registration, organization, venue, onClose }) {
             onClick={generate}
             disabled={generating}
             className="w-full bg-violet-600 hover:bg-violet-700 gap-2"
+            data-testid="jx-reminder-generate"
           >
             <Sparkles className="w-4 h-4" />
             {generating ? 'Génération en cours…' : (generated ? '🔄 Régénérer' : '✨ Générer l\'email avec IA')}
@@ -5299,7 +5310,7 @@ function JxReminderDialog({ registration, organization, venue, onClose }) {
               )}
               <div>
                 <Label className="mb-1 block">3️⃣ Objet de l'email <span className="text-xs text-slate-400">(éditable)</span></Label>
-                <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="font-medium" />
+                <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="font-medium" data-testid="jx-reminder-subject" />
               </div>
               <div>
                 <Label className="mb-1 block">4️⃣ Corps HTML <span className="text-xs text-slate-400">(éditable)</span></Label>
@@ -5308,6 +5319,7 @@ function JxReminderDialog({ registration, organization, venue, onClose }) {
                   value={bodyHtml}
                   onChange={(e) => setBodyHtml(e.target.value)}
                   className="font-mono text-xs"
+                  data-testid="jx-reminder-body"
                 />
               </div>
               <div>
@@ -5318,11 +5330,12 @@ function JxReminderDialog({ registration, organization, venue, onClose }) {
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t">
-                <Button variant="outline" onClick={onClose}>Annuler</Button>
+                <Button variant="outline" onClick={onClose} data-testid="jx-reminder-cancel">Annuler</Button>
                 <Button
                   onClick={send}
                   disabled={sending || !subject.trim() || !bodyHtml.trim()}
                   className="bg-blue-600 hover:bg-blue-700 gap-2"
+                  data-testid="jx-reminder-send"
                 >
                   <Send className="w-4 h-4" />
                   {sending ? 'Envoi…' : 'Envoyer le rappel'}
