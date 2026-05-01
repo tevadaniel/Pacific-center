@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { ChatbotFloating } from '@/components/chatbot-widget';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -54,6 +55,7 @@ export default function PacificCentersPage() {
           <TabsContent value="reporting" className="space-y-6 mt-4"><ReportingView /></TabsContent>
         </Tabs>
       </div>
+      <ChatbotFloating role="pacific_centers_readonly" />
     </Shell>
   );
 }

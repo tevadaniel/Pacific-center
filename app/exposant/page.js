@@ -16,6 +16,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
+import { ChatbotFloating } from '@/components/chatbot-widget';
 import { toast } from 'sonner';
 import {
   Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
@@ -333,6 +334,7 @@ export default function ExposantPortal() {
           </TabsContent>
         </Tabs>
       </div>
+      <ChatbotFloating role="exposant" />
     </Shell>
   );
 }

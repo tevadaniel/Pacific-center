@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
 import HelpCard from '@/components/help-card';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
+import { ChatbotFloating, ChatbotCard } from '@/components/chatbot-widget';
 import { api, getSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -148,6 +149,7 @@ export default function AracomPage() {
       {activeTab === 'satisfaction' && <SatisfactionAdminView />}
       {activeTab === 'backup' && <BackupView />}
       {activeTab === 'import' && <ImportExcelView />}
+      <ChatbotFloating role="aracom_admin" />
     </Shell>
   );
 }
@@ -292,6 +294,9 @@ function DashboardView({ onGoto }) {
           </Card>
         </div>
       )}
+
+      {/* 🤖 Assistant IA intégré dans le dashboard */}
+      <ChatbotCard role="aracom_admin" />
 
       <Card>
         <CardHeader>

@@ -4275,6 +4275,284 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       });
     }
 
+    // ============ 🤖 CHATBOT IA — Assistant contextuel role-aware ============
+    // POST /api/chatbot
+    // Body: { message: string, history?: [{role, content}] }
+    // Le backend construit un contexte data ADAPTÉ au rôle de l'utilisateur :
+    //  - aracom_admin : accès complet (KPIs, exposants, sites, mailing, caution, bilans, anomalies…)
+    //  - exposant : accès UNIQUEMENT à son profil + infos événement génériques
+    //  - pacific_centers_readonly : accès aux venues pacific_visible + stats agrégées + aide outils
+    // 🛡️ Isolation stricte : impossible pour un exposant de voir d'autres données via le chat.
+    // 🔒 Sessions volatiles (pas de persistance — reconstruit le contexte à chaque requête)
+    if (route === 'chatbot') {
+      const { message, history = [] } = body || {};
+      if (!message || typeof message !== 'string' || !message.trim()) {
+        return err('Message requis', 400);
+      }
+      if (!ctx.userId) return err('Non authentifié', 401);
+
+      const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+      const dayRemaining = (iso) => {
+        if (!iso) return null;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const d = new Date(iso); d.setHours(0, 0, 0, 0);
+        return Math.round((d - today) / (1000 * 60 * 60 * 24));
+      };
+
+      // ---- Infos événement communes à tous ----
+      const EVENT_INFO = `Événement : Forum de la Rentrée 2026
+Dates : vendredi 14 août 2026 (11h-17h) et samedi 15 août 2026 (9h-17h)
+Organisateur : ARACOM Conseil (Teva GEROS · contact@aracom-conseil.fr · +(689) 87 210 444)
+Sites : 6 centres commerciaux Pacific Centers en Polynésie française (Faaa, Punaauia, Arue, Taravao, Mahina, Moorea)
+Caution exposant : 20 000 XPF (restituée après l'événement si le stand est rendu en état)
+Animations : 1 créneau d'animation maximum par jour par exposant (créneaux d'1 heure)`;
+
+      let systemPrompt = '';
+      let contextData = '';
+
+      if (ctx.role === 'aracom_admin') {
+        // ==== ADMIN : accès total ====
+        const [regs, venues, deadlinesCfg, alerts, stats] = await Promise.all([
+          db.collection('registrations').find({ edition_id: EDITION_ID }).toArray(),
+          db.collection('venues').find({ edition_id: EDITION_ID }).toArray(),
+          db.collection('app_settings').findOne({ key: 'step_deadlines' }),
+          db.collection('registration_anomalies').find({ resolved: { $ne: true } }).toArray(),
+          db.collection('deposit_transactions').find({ edition_id: EDITION_ID }).toArray(),
+        ]);
+        const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+        const orgMap = Object.fromEntries(orgs.map(o => [o.id, o]));
+
+        const byStatus = regs.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+        const cautionsReceived = stats.filter(s => s.type === 'caution_received').length;
+        const cautionsTotal = stats.filter(s => s.type === 'caution_received').reduce((a, s) => a + (s.amount || 0), 0);
+        const avgCompletion = regs.length ? Math.round(regs.reduce((a, r) => a + (r.completion_percent || 0), 0) / regs.length) : 0;
+
+        // Top 10 exposants à risque
+        const atRisk = regs
+          .filter(r => (r.completion_percent || 0) < 50 && r.status !== 'confirme')
+          .sort((a, b) => (a.completion_percent || 0) - (b.completion_percent || 0))
+          .slice(0, 10)
+          .map(r => `• ${orgMap[r.organization_id]?.name || '?'} (${orgMap[r.organization_id]?.discipline || '?'}) — ${r.completion_percent || 0}% · ${r.status}`);
+
+        // Top exposants confirmés par site
+        const byVenue = venues.map(v => {
+          const vregs = regs.filter(r => r.venue_id === v.id);
+          return `${v.name} : ${vregs.length} inscrit(s), ${vregs.filter(r => r.status === 'confirme').length} confirmé(s)`;
+        });
+
+        const deadlines = deadlinesCfg?.deadlines || {};
+        const deadlineLines = Object.entries(deadlines).map(([k, v]) => {
+          const d = dayRemaining(v);
+          return `• ${k} : ${fmtDate(v)} (${d > 0 ? `J-${d}` : d === 0 ? 'aujourd\'hui' : `dépassée de ${Math.abs(d)}j`})`;
+        }).join('\n') || 'Aucune deadline configurée.';
+
+        contextData = `${EVENT_INFO}
+
+═══════════════════════════════════════════════════════════════
+📊 TABLEAU DE BORD ARACOM (temps réel)
+═══════════════════════════════════════════════════════════════
+Inscriptions totales : ${regs.length}
+Statuts : ${Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(', ')}
+Complétion moyenne : ${avgCompletion}%
+
+Cautions : ${cautionsReceived} reçues (total ${cautionsTotal.toLocaleString('fr-FR')} XPF)
+Anomalies ouvertes : ${alerts.length}
+
+RÉPARTITION PAR SITE :
+${byVenue.join('\n')}
+
+DEADLINES ACTUELLES :
+${deadlineLines}
+
+TOP EXPOSANTS À RISQUE (complétion < 50%) :
+${atRisk.join('\n') || 'Aucun.'}`;
+
+        systemPrompt = `Tu es l'assistant IA d'ARACOM pour le Forum de la Rentrée 2026.
+Tu aides Teva GEROS et son équipe admin à piloter l'événement.
+
+Ton ton : professionnel, synthétique, factuel. Tu utilises les données fournies. Si une donnée manque, dis-le simplement.
+Tu peux citer des chiffres précis, suggérer des priorités, expliquer les KPIs.
+Tu réponds en markdown court (gras, listes à puces). Pas de HTML.
+Tu ne proposes jamais d'action automatisée (pas d'envoi d'email, pas de modification en base).
+
+Si l'utilisateur te demande des infos sur un exposant précis, cherche-le dans les données. Si introuvable, réponds que tu ne le vois pas dans le contexte actuel.
+Si la question n'est pas liée à l'événement, redirige poliment.`;
+
+      } else if (ctx.role === 'exposant') {
+        // ==== EXPOSANT : UNIQUEMENT son profil ====
+        // Résoudre l'organization depuis le user (getUserContext ne l'expose pas)
+        const userRec = await db.collection('users').findOne({ id: ctx.userId });
+        const organizationId = userRec?.organization_id;
+        if (!organizationId) return err('Organization non liée à votre compte', 403);
+        const org = await db.collection('organizations').findOne({ id: organizationId });
+        const reg = await db.collection('registrations').findOne({ organization_id: organizationId, edition_id: EDITION_ID });
+        const venue = reg?.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+        const deadlinesCfg = await db.collection('app_settings').findOne({ key: 'step_deadlines' });
+        const deadlines = deadlinesCfg?.deadlines || {};
+        const docs = reg ? await db.collection('registration_documents').find({ registration_id: reg.id }).toArray() : [];
+        const animSlots = reg ? await db.collection('animation_slots').find({ registration_id: reg.id }).toArray() : [];
+        const deposits = reg ? await db.collection('deposit_transactions').find({ registration_id: reg.id }).toArray() : [];
+        const cautionReceived = deposits.some(d => d.type === 'caution_received');
+
+        const docsSummary = docs.length
+          ? docs.map(d => `• ${d.category || d.filename} : ${d.status || 'en attente'}`).join('\n')
+          : 'Aucun document déposé pour le moment.';
+
+        const deadlineLines = Object.entries(deadlines).map(([k, v]) => {
+          const d = dayRemaining(v);
+          const label = {
+            profile: 'Compléter le profil',
+            stand: 'Choisir son site/stand',
+            animation: 'Planifier une animation',
+            documents: 'Déposer les documents',
+            caution: 'Payer la caution',
+            convention: 'Signer la convention',
+          }[k] || k;
+          return `• ${label} : ${fmtDate(v)} (${d > 0 ? `dans ${d} jours` : d === 0 ? 'aujourd\'hui !' : `échéance dépassée de ${Math.abs(d)}j`})`;
+        }).join('\n') || 'Aucune deadline configurée pour le moment.';
+
+        const animList = animSlots.length
+          ? animSlots.map(a => `• ${a.day} ${a.start_time}–${a.end_time} : ${a.title || 'Animation'}`).join('\n')
+          : 'Aucune animation planifiée pour le moment.';
+
+        contextData = `${EVENT_INFO}
+
+═══════════════════════════════════════════════════════════════
+🎪 VOTRE DOSSIER EXPOSANT
+═══════════════════════════════════════════════════════════════
+Structure : ${org?.name || '—'} (${org?.discipline || '—'})
+Contact : ${org?.contact_name || '—'} · ${org?.main_email || '—'} · ${org?.main_phone || '—'}
+
+INSCRIPTION 2026 :
+Statut : ${reg?.status || 'non inscrit'}
+Complétion : ${reg?.completion_percent || 0}%
+Site attribué : ${venue?.name || 'non attribué'}
+Stand : ${reg?.stand_code || 'non attribué'}
+Caution (20 000 XPF) : ${cautionReceived ? '✅ reçue par ARACOM' : '⏳ en attente'}
+
+ANIMATIONS PLANIFIÉES :
+${animList}
+
+DOCUMENTS :
+${docsSummary}
+
+DATES LIMITES POUR VOUS :
+${deadlineLines}
+
+═══════════════════════════════════════════════════════════════
+📋 PROCÉDURE D'INSCRIPTION (étapes séquentielles)
+═══════════════════════════════════════════════════════════════
+1. Compléter le profil (infos structure + coordonnées + description)
+2. Choisir un site Pacific Centers et pré-réserver un stand libre sur le plan
+3. Planifier 1 créneau d'animation par jour maximum (vendredi 11h-17h, samedi 9h-17h)
+4. Déposer les documents officiels (assurance responsabilité civile, RIB, etc.)
+5. Verser la caution de 20 000 XPF auprès d'ARACOM (chèque ou espèces)
+6. Signer la convention de participation envoyée par ARACOM
+
+🔒 Verrouillage du stand : votre stand devient définitivement réservé UNIQUEMENT après validation d'ARACOM (caution reçue + convention signée + documents validés). Avant cela, vous pouvez libérer votre pré-réservation à tout moment.
+
+💰 Caution : les 20 000 XPF sont VERSÉS à ARACOM avant l'événement et RESTITUÉS après l'événement si le stand est rendu en bon état et que vous avez respecté les règles de l'événement.`;
+
+        systemPrompt = `Tu es l'assistant IA personnel de l'exposant "${org?.name || 'exposant'}" pour le Forum de la Rentrée 2026.
+
+Tu aides UNIQUEMENT cet exposant. Tu n'as accès qu'à SON dossier — tu ne connais PAS les autres exposants ni les données internes ARACOM.
+
+Ton ton : chaleureux, pédagogique, rassurant. Vouvoiement. Tu expliques clairement les étapes, les échéances, la procédure.
+Tu réponds en markdown court (gras, listes à puces). Pas de HTML.
+
+🛡️ RÈGLE ABSOLUE : si on te demande des infos sur d'autres exposants, d'autres sites, ou des données internes ARACOM, refuse poliment : "Je n'ai accès qu'à votre dossier. Pour toute autre question, contactez ARACOM (contact@aracom-conseil.fr)."
+
+Si la question n'est pas liée à l'événement ou au dossier de l'exposant, redirige poliment.`;
+
+      } else if (ctx.role === 'pacific_centers_readonly') {
+        // ==== PACIFIC : venues visibles + stats agrégées + aide outils ====
+        const venues = await db.collection('venues').find({ edition_id: EDITION_ID, pacific_visible: { $ne: false } }).toArray();
+        const venueIds = venues.map(v => v.id);
+        const regs = await db.collection('registrations').find({ edition_id: EDITION_ID, venue_id: { $in: venueIds } }).toArray();
+        const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
+        const orgMap = Object.fromEntries(orgs.map(o => [o.id, o]));
+
+        const byVenue = venues.map(v => {
+          const vregs = regs.filter(r => r.venue_id === v.id);
+          const confirmed = vregs.filter(r => r.status === 'confirme').length;
+          const disciplines = [...new Set(vregs.map(r => orgMap[r.organization_id]?.discipline).filter(Boolean))];
+          return `${v.name} : ${vregs.length} inscrit(s), ${confirmed} confirmé(s) · disciplines : ${disciplines.slice(0, 8).join(', ') || '—'}`;
+        });
+
+        contextData = `${EVENT_INFO}
+
+═══════════════════════════════════════════════════════════════
+📊 STATISTIQUES PACIFIC CENTERS (lecture seule)
+═══════════════════════════════════════════════════════════════
+Sites visibles : ${venues.length}
+Total exposants engagés sur vos sites : ${regs.length}
+Confirmés : ${regs.filter(r => r.status === 'confirme').length}
+
+DÉTAIL PAR SITE :
+${byVenue.join('\n')}
+
+═══════════════════════════════════════════════════════════════
+🛠️ OUTILS DE VOTRE PORTAIL PACIFIC CENTERS
+═══════════════════════════════════════════════════════════════
+• Dashboard : vue consolidée des KPIs (inscrits, confirmés, disciplines)
+• Filtre par site : affiche uniquement les données du site choisi
+• Graphiques : répartition disciplines, timeline de confirmation, engagement
+• Calendrier des animations : visualise les créneaux programmés vendredi/samedi
+• Export : télécharge les données au format CSV pour vos équipes
+
+Votre portail est en LECTURE SEULE : aucune modification possible. Pour toute action, contactez ARACOM.`;
+
+        systemPrompt = `Tu es l'assistant IA du portail Pacific Centers pour le Forum de la Rentrée 2026.
+
+Tu aides les équipes Pacific Centers à comprendre leurs stats, interpréter les graphiques, et comprendre l'usage des outils de leur portail (en lecture seule).
+
+Ton ton : professionnel, clair, pédagogique. Tu vulgarises les chiffres et expliques les graphiques.
+Tu réponds en markdown court (gras, listes à puces). Pas de HTML.
+
+🛡️ RÈGLE : tu n'as accès qu'aux données AGRÉGÉES des sites Pacific Centers. Tu ne peux pas divulguer d'infos personnelles sur un exposant précis (email, téléphone). Si on te demande ce type d'info, renvoie vers ARACOM.
+
+Si la question n'est pas liée aux outils ou aux stats visibles, redirige poliment.`;
+
+      } else {
+        return err('Rôle non autorisé pour le chatbot', 403);
+      }
+
+      // ---- Construction des messages pour l'IA ----
+      // history = [{role: 'user'|'assistant', content}]  (côté client, volatile)
+      const safeHistory = Array.isArray(history)
+        ? history.filter(m => m && typeof m.role === 'string' && typeof m.content === 'string').slice(-10)
+        : [];
+
+      const userPrompt = `${contextData}
+
+═══════════════════════════════════════════════════════════════
+❓ QUESTION DE L'UTILISATEUR
+═══════════════════════════════════════════════════════════════
+${message.trim()}
+
+Réponds en français, en markdown court, en t'appuyant sur les données du contexte ci-dessus. Si l'info n'y est pas, dis-le.`;
+
+      const result = await emergentChat({
+        model: DEFAULT_MODEL_CLAUDE,
+        system: systemPrompt,
+        user: userPrompt,
+        history: safeHistory,
+        max_tokens: 1500,
+        temperature: 0.5,
+      });
+      if (!result.ok) {
+        console.error('[chatbot] LLM error:', result.error);
+        return err('Assistant IA temporairement indisponible. Réessayez dans quelques instants.', 503);
+      }
+      return json({
+        ok: true,
+        reply: result.text || '',
+        role_context: ctx.role,
+        usage: result.usage,
+        llm_source: result.source || 'unknown',
+      });
+    }
+
     // ============ AI INSIGHT — Synthèse IA du comportement historique d'un exposant ============
     // Génère un texte court d'aide à la décision pour l'admin :
     //   - fidélité (nb éditions passées),
