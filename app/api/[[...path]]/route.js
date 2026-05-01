@@ -3950,16 +3950,39 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
     }
 
     // ---- 🗑️ Effacer toutes les positions des stands d'un site (repartir de zéro) ----
+    // ⚠️ CHANGEMENT DE COMPORTEMENT (session 14) :
+    // L'action "Vider le plan" n'efface PLUS les positions des stands ni les éléments décoratifs.
+    // Elle libère uniquement les stands de leurs exposants assignés (statut "à relancer" sur les inscriptions liées).
+    // → conserve la mise en page visuelle (alignements, kiosques, démos, commerces…)
+    // → permet de réutiliser les positions pour la prochaine édition / la nouvelle vague d'exposants
     if (route === 'venue-stands/clear-positions') {
       const { venue_id } = body;
       if (!venue_id) return err('venue_id requis', 400);
-      const r = await db.collection('venue_stands').updateMany(
-        { venue_id },
-        { $unset: { pos_x: '', pos_y: '' }, $set: { updated_at: new Date() } }
+      // 1) Libère les inscriptions liées à ce venue (stand_code → null, et statut éventuellement remis en "à relancer")
+      const stands = await db.collection('venue_stands').find({ venue_id }).toArray();
+      const standCodes = stands.map(s => s.stand_code).filter(Boolean);
+      const regsRes = await db.collection('registrations').updateMany(
+        { venue_id, stand_code: { $in: standCodes } },
+        { $set: { stand_code: null, updated_at: new Date() } }
       );
-      // Also clear all decorative elements (zones, kiosques, commerces, flèches…) for that venue
-      const r2 = await db.collection('venue_elements').deleteMany({ venue_id });
-      return json({ ok: true, stands_cleared: r.modifiedCount, elements_deleted: r2.deletedCount });
+      // 2) Annule toutes les assignations actives sur les stands de ce venue
+      const standIds = stands.map(s => s.id);
+      const asgRes = await db.collection('stand_assignments').updateMany(
+        { venue_stand_id: { $in: standIds }, status: { $ne: 'annule' } },
+        { $set: { status: 'annule', updated_at: new Date() } }
+      );
+      // 3) Met à jour l'updated_at des stands (pour traçabilité), SANS toucher aux positions
+      await db.collection('venue_stands').updateMany(
+        { venue_id },
+        { $set: { updated_at: new Date() } }
+      );
+      return json({
+        ok: true,
+        stands_freed: regsRes.modifiedCount,
+        assignments_cancelled: asgRes.modifiedCount,
+        positions_kept: stands.length, // info : positions conservées
+        elements_kept: true,
+      });
     }
 
     // ---- Exposant : édition de son profil (org info + reg info) ----

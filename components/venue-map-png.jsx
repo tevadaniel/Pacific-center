@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Move, Plus, Save, Trash2, X, Edit3, RotateCcw, MapPin, Search } from 'lucide-react';
+import { Move, Plus, Save, Trash2, X, Edit3, RotateCcw, MapPin, Search, UserMinus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -197,17 +197,19 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
     setDirty(true);
   };
 
+  // 🆕 Session 14 : "Vider le plan" libère seulement les stands de leurs exposants.
+  // Les positions visuelles et les éléments décoratifs restent INTACTS (la mise en page est préservée).
   const clearAllPositions = async () => {
-    if (!confirm(`⚠️ Effacer DÉFINITIVEMENT toutes les positions des ${stands.length} stands ET tous les éléments décoratifs (kiosques, démos, commerces, flèches) du site ${venue?.name} ?\n\nVous repartirez d'un fond vierge.`)) return;
+    if (!confirm(`🔓 Libérer TOUS les stands du site ${venue?.name} ?\n\nLes ${stands.length} stand(s) seront détachés de leurs exposants actuels (les inscriptions liées passeront en "stand non attribué").\n\n✅ Les positions des stands et les éléments décoratifs (kiosques, démos, commerces, flèches) sont CONSERVÉS — la mise en page reste intacte.`)) return;
     try {
       const r = await api('/api/venue-stands/clear-positions', {
         method: 'POST',
         body: JSON.stringify({ venue_id: venue.id }),
       });
-      toast.success(`✅ Plan vidé — ${r.stands_cleared} positions effacées, ${r.elements_deleted} éléments supprimés`);
+      const freed = r.stands_freed || 0;
+      const cancelled = r.assignments_cancelled || 0;
+      toast.success(`✅ Plan libéré — ${freed} exposant(s) détaché(s), ${cancelled} assignation(s) annulée(s). Positions conservées.`);
       onStandsReload && onStandsReload();
-      // Force le rechargement des éléments décoratifs
-      window.location.reload();
     } catch (e) { toast.error(e.message); }
   };
 
@@ -293,7 +295,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={addStand}><Plus className="w-3.5 h-3.5" /> Ajouter</Button>
                 <Button variant={alignOpen ? 'default' : 'outline'} size="sm" className="gap-1.5" onClick={() => setAlignOpen(!alignOpen)}>📐 Aligner</Button>
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPositions}><RotateCcw className="w-3.5 h-3.5" /> Reset</Button>
-                <Button variant="outline" size="sm" className="gap-1.5 text-red-600 border-red-300 hover:bg-red-50" onClick={clearAllPositions}><Trash2 className="w-3.5 h-3.5" /> Tout effacer</Button>
+                <Button variant="outline" size="sm" className="gap-1.5 text-orange-600 border-orange-300 hover:bg-orange-50" onClick={clearAllPositions} title="Détache tous les exposants des stands. Les positions et les éléments décoratifs sont conservés."><UserMinus className="w-3.5 h-3.5" /> Libérer tous les stands</Button>
                 <Button variant="default" size="sm" className={`gap-1.5 ${dirty ? 'animate-pulse bg-emerald-600 hover:bg-emerald-700' : ''}`} disabled={saving} onClick={savePositions}>
                   <Save className="w-3.5 h-3.5" /> {saving ? 'Sauvegarde…' : dirty ? '💾 Tout sauver (stands + éléments)' : 'Tout sauver'}
                 </Button>
