@@ -560,6 +560,16 @@ export async function GET(request, { params }) {
       return json({ deadlines, updated_at: cfg?.updated_at || null, updated_by: cfg?.updated_by || null });
     }
 
+    // 🆕 Phase post-événement (Bilans / Satisfaction) — débloquée par ARACOM
+    if (route === 'post-event-status') {
+      const cfg = await db.collection('app_settings').findOne({ key: 'post_event_status' });
+      return json({
+        unlocked: Boolean(cfg?.unlocked),
+        unlocked_at: cfg?.unlocked_at || null,
+        unlocked_by: cfg?.unlocked_by || null,
+      });
+    }
+
     // ============ PROSPECTION (Pacific Centers + ARACOM) ============
     // Liste des prospects. Pacific Centers voient uniquement leurs sites.
     if (route === 'prospects') {
@@ -1590,6 +1600,27 @@ export async function POST(request, { params }) {
       return json({ ok: true, deadlines: cleaned });
     }
 
+    // 🆕 Toggle phase post-événement (Bilans / Satisfaction) — admin only
+    if (route === 'post-event-status') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const { unlocked } = body || {};
+      const userId = ctx.userId || request.headers.get('x-user-id');
+      const user = userId ? await db.collection('users').findOne({ id: userId }) : null;
+      await db.collection('app_settings').updateOne(
+        { key: 'post_event_status' },
+        {
+          $set: {
+            key: 'post_event_status',
+            unlocked: Boolean(unlocked),
+            unlocked_at: unlocked ? new Date() : null,
+            unlocked_by: unlocked ? (user?.email || userId || 'admin') : null,
+          },
+        },
+        { upsert: true }
+      );
+      return json({ ok: true, unlocked: Boolean(unlocked) });
+    }
+
     // ============ VALIDATION D'UN DOCUMENT REÇU PAR L'EXPOSANT ============
     // POST /api/registration-documents/:id/validate
     // body : { decision: 'approved'|'rejected', comment }
@@ -2365,6 +2396,15 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'animation-slots') {
+      // 🆕 Vérifs LOT 2 : verrouillage + cohérence avec attending_days
+      const reg = await db.collection('registrations').findOne({ id: body.registration_id });
+      if (reg) {
+        const lockedReq = await db.collection('validation_requests').findOne({ registration_id: body.registration_id, status: 'verrouille' });
+        if (lockedReq) return err('Dossier verrouillé par ARACOM. Modifications impossibles.', 403);
+        if (Array.isArray(reg.attending_days) && reg.attending_days.length > 0 && !reg.attending_days.includes(body.day_label)) {
+          return err(`Vous n'êtes pas inscrit le ${body.day_label}. Sélectionnez ce jour à l'étape 1.`, 400);
+        }
+      }
       const s = {
         id: uuid(),
         registration_id: body.registration_id,
@@ -2823,6 +2863,20 @@ export async function POST(request, { params }) {
       const { pacific_visible } = body;
       await db.collection('venues').updateOne({ id }, { $set: { pacific_visible: Boolean(pacific_visible), updated_at: new Date() } });
       return json({ ok: true, pacific_visible: Boolean(pacific_visible) });
+    }
+
+    // 🆕 Configuration du référent ARACOM sur place (admin only)
+    if (route.match(/^venues\/[^/]+\/set-referent$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const id = p[1];
+      const { name, email, phone } = body || {};
+      const referent = {
+        name: (name || '').trim() || null,
+        email: (email || '').trim() || null,
+        phone: (phone || '').trim() || null,
+      };
+      await db.collection('venues').updateOne({ id }, { $set: { referent_aracom: referent, updated_at: new Date() } });
+      return json({ ok: true, referent });
     }
 
     // One-time migration : set is_available_2026 + disable exposant/pacific passwords
@@ -3449,6 +3503,36 @@ export async function POST(request, { params }) {
     };
 
     // Exposant : demande la validation après avoir choisi site + créneau
+    // 🆕 Sélection des jours de participation (LOT 2 - Étape 1)
+    // Body : { attending_days: ['vendredi'] | ['samedi'] | ['vendredi','samedi'] }
+    // Si on retire un jour, les animations de ce jour sont supprimées automatiquement.
+    if (route.match(/^registrations\/[^/]+\/set-attending-days$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Bloque si verrouillé
+      const lockedReq = await db.collection('validation_requests').findOne({ registration_id: regId, status: 'verrouille' });
+      if (lockedReq) return err('Dossier verrouillé par ARACOM. Modifications impossibles.', 403);
+      const { attending_days } = body || {};
+      if (!Array.isArray(attending_days)) return err('attending_days doit être un tableau', 400);
+      const valid = attending_days.filter(d => ['vendredi', 'samedi'].includes(d));
+      if (valid.length === 0) return err('Sélectionnez au moins un jour', 400);
+      // Cleanup animations des jours retirés
+      const removedDays = ['vendredi', 'samedi'].filter(d => !valid.includes(d));
+      let removedSlots = 0;
+      if (removedDays.length > 0) {
+        const r = await db.collection('animation_slots').deleteMany({ registration_id: regId, day_label: { $in: removedDays } });
+        removedSlots = r.deletedCount;
+      }
+      await db.collection('registrations').updateOne(
+        { id: regId },
+        { $set: { attending_days: valid, updated_at: new Date() } }
+      );
+      // Recompute completion
+      const updated = await db.collection('registrations').findOne({ id: regId });
+      return json({ ok: true, attending_days: valid, removed_animations: removedSlots, registration: updated && (delete updated._id, updated) });
+    }
+
     if (route.match(/^registrations\/[^/]+\/request-validation$/)) {
       const regId = p[1];
       const reg = await db.collection('registrations').findOne({ id: regId });

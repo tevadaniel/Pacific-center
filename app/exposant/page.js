@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { toast } from 'sonner';
@@ -45,15 +46,17 @@ export default function ExposantPortal() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('profil');
+  const [activeTab, setActiveTab] = useState('parcours');
   const [stepDeadlines, setStepDeadlines] = useState({});
+  const [postEvent, setPostEvent] = useState({ unlocked: false });
+  const [validationRequest, setValidationRequest] = useState(null);
 
   // Read ?tab= from URL on mount and when changed externally
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const sync = () => {
       const t = new URLSearchParams(window.location.search).get('tab');
-      const valid = ['profil', 'sites', 'animation', 'docs', 'logistique', 'satisfaction', 'guide'];
+      const valid = ['parcours', 'profil', 'sites', 'animation', 'docs', 'logistique', 'satisfaction', 'guide'];
       if (t && valid.includes(t)) setActiveTab(t);
     };
     sync();
@@ -64,7 +67,7 @@ export default function ExposantPortal() {
   const handleTabChange = (v) => {
     setActiveTab(v);
     if (typeof window !== 'undefined') {
-      const url = v === 'profil' ? '/exposant' : `/exposant?tab=${v}`;
+      const url = v === 'parcours' ? '/exposant' : `/exposant?tab=${v}`;
       window.history.replaceState({}, '', url);
     }
   };
@@ -79,6 +82,12 @@ export default function ExposantPortal() {
       if (!mine) { setData({ me, registration: null }); setLoading(false); return; }
       const full = await api(`/api/registrations/${mine.id}`);
       setData({ me, ...full });
+      // Charge la demande de validation existante (si présente)
+      try {
+        const vrList = await api('/api/validation-requests');
+        const myVr = (Array.isArray(vrList) ? vrList : []).find(x => x.registration_id === mine.id);
+        setValidationRequest(myVr || null);
+      } catch {}
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
@@ -86,6 +95,7 @@ export default function ExposantPortal() {
   // Charge les deadlines globales définies par ARACOM (pour le compte à rebours)
   useEffect(() => {
     api('/api/step-deadlines').then(d => setStepDeadlines(d.deadlines || {})).catch(() => {});
+    api('/api/post-event-status').then(s => setPostEvent(s || { unlocked: false })).catch(() => {});
   }, []);
 
   if (loading) return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><div className="py-20 text-center text-slate-500">Chargement…</div></Shell>;
@@ -211,14 +221,30 @@ export default function ExposantPortal() {
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="w-full grid grid-cols-3 md:grid-cols-7">
-            <TabsTrigger value="profil">Profil</TabsTrigger>
-            <TabsTrigger value="sites">Sites & plan</TabsTrigger>
-            <TabsTrigger value="animation">Animations</TabsTrigger>
-            <TabsTrigger value="docs">Documents</TabsTrigger>
+            <TabsTrigger value="parcours" className="font-bold">🎯 Mon parcours</TabsTrigger>
+            <TabsTrigger value="profil">Mon profil</TabsTrigger>
             <TabsTrigger value="logistique">Logistique</TabsTrigger>
-            <TabsTrigger value="satisfaction">Satisfaction</TabsTrigger>
             <TabsTrigger value="guide">Guide</TabsTrigger>
+            <TabsTrigger value="satisfaction" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
+              ⭐ Satisfaction {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
+            </TabsTrigger>
+            <TabsTrigger value="bilan" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
+              📋 Bilan {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
+            </TabsTrigger>
           </TabsList>
+
+          {/* 🎯 ÉTAPE STRUCTURANTE — Mon parcours en 3 étapes */}
+          <TabsContent value="parcours" className="space-y-4">
+            <ParcoursWizard
+              registration={r}
+              organization={o}
+              venue={v}
+              docs={docs}
+              slots={data.slots}
+              validationRequest={validationRequest}
+              onRefresh={load}
+            />
+          </TabsContent>
 
           <TabsContent value="profil" className="space-y-4">
             <ProfilBlock organization={o} registration={r} onRefresh={load} />
@@ -263,24 +289,43 @@ export default function ExposantPortal() {
             </div>
           </TabsContent>
 
-          <TabsContent value="sites" className="space-y-4">
-            <SiteAndStandPicker registration={r} organization={o} onRefresh={load} />
-          </TabsContent>
-
-          <TabsContent value="animation" className="space-y-4">
-            <AnimationsBlock registrationId={r.id} venueId={r.venue_id} venueName={v?.name} slots={data.slots} onRefresh={load} />
-          </TabsContent>
-
-          <TabsContent value="docs" className="space-y-4">
-            <DocsBlockExposant registrationId={r.id} docs={docs} onRefresh={load} />
-          </TabsContent>
-
           <TabsContent value="logistique" className="space-y-4">
             <LogistiqueBlock registration={r} onRefresh={load} />
           </TabsContent>
 
           <TabsContent value="satisfaction" className="space-y-4">
-            <SatisfactionBlock registration={r} />
+            {postEvent.unlocked ? (
+              <SatisfactionBlock registration={r} />
+            ) : (
+              <Card className="border-slate-200">
+                <CardContent className="p-12 text-center">
+                  <span className="text-5xl">🔒</span>
+                  <p className="text-lg font-bold mt-3">Module Satisfaction verrouillé</p>
+                  <p className="text-sm text-slate-500 mt-2">Ce questionnaire sera <b>activé par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié par email dès qu&apos;il sera disponible.</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="bilan" className="space-y-4">
+            {postEvent.unlocked ? (
+              <Card className="border-emerald-200 bg-emerald-50/30">
+                <CardContent className="p-8 text-center">
+                  <span className="text-4xl">📋</span>
+                  <p className="text-lg font-bold mt-3">Bilan de l&apos;événement</p>
+                  <p className="text-sm text-slate-600 mt-2">Vous pouvez consulter le bilan global de l&apos;édition 2026, ainsi que vos statistiques personnalisées (présence, animations, satisfaction).</p>
+                  <Button variant="outline" className="mt-4 gap-2"><Download className="w-4 h-4" /> Télécharger mon bilan PDF</Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-slate-200">
+                <CardContent className="p-12 text-center">
+                  <span className="text-5xl">🔒</span>
+                  <p className="text-lg font-bold mt-3">Bilan verrouillé</p>
+                  <p className="text-sm text-slate-500 mt-2">Le bilan sera <b>activé par ARACOM</b> après l&apos;événement. Vous y trouverez vos statistiques personnelles, le bilan global et les comptes-rendus.</p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="guide" className="space-y-4">
@@ -294,6 +339,279 @@ export default function ExposantPortal() {
 
 // =====================================================================
 // EXPOSANT STEPPER — 6 étapes visuelles du parcours d'inscription
+// =====================================================================
+// =====================================================================
+// 🎯 PARCOURS WIZARD — Les 3 étapes structurantes (Dates / Animations / Validation)
+// =====================================================================
+function ParcoursWizard({ registration, organization, venue, docs, slots, validationRequest, onRefresh }) {
+  const r = registration;
+  const isLocked = r.status === 'verrouille' || validationRequest?.status === 'verrouille';
+  const isPending = validationRequest?.status === 'en_attente';
+  const hasRdv = validationRequest?.status === 'rdv_fixe';
+
+  // État dérivé des étapes
+  const attendingDays = Array.isArray(r.attending_days) ? r.attending_days : [];
+  const hasDays = attendingDays.length > 0;
+  const hasStand = !!r.stand_code;
+  const hasAnimVendredi = (slots || []).some(s => s.day_label === 'vendredi');
+  const hasAnimSamedi = (slots || []).some(s => s.day_label === 'samedi');
+  const animOk = attendingDays.every(d => (slots || []).some(s => s.day_label === d));
+
+  const step1Ok = hasDays && hasStand;
+  const step2Ok = step1Ok && animOk;
+  const step3Ok = step2Ok && (validationRequest != null);
+
+  return (
+    <div className="space-y-4">
+      {/* Bandeau état global */}
+      {isLocked && (
+        <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="text-4xl">🔒</div>
+            <div className="flex-1">
+              <div className="text-lg font-bold text-emerald-900">Inscription verrouillée par ARACOM ✅</div>
+              <p className="text-sm text-emerald-800">Tout est en ordre ! Votre dossier est définitif. Pour toute modification, contactez ARACOM.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {hasRdv && !isLocked && (
+        <Card className="border-blue-300 bg-gradient-to-br from-blue-50 to-sky-50">
+          <CardContent className="p-5 flex items-start gap-4">
+            <div className="text-4xl">📅</div>
+            <div className="flex-1">
+              <div className="text-lg font-bold text-blue-900">Rendez-vous fixé avec ARACOM</div>
+              <p className="text-sm text-blue-800">
+                {validationRequest.rdv_date && <><b>Date</b> : {new Date(validationRequest.rdv_date).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}<br /></>}
+                {validationRequest.rdv_location && <><b>Lieu</b> : {validationRequest.rdv_location}<br /></>}
+                Préparez les documents à apporter (convention signée, justificatif d&apos;assurance) et la <b>caution de 20 000 XPF</b>.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {isPending && !hasRdv && !isLocked && (
+        <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50">
+          <CardContent className="p-5 flex items-start gap-4">
+            <div className="text-4xl">⏳</div>
+            <div className="flex-1">
+              <div className="text-lg font-bold text-amber-900">Demande de validation en cours</div>
+              <p className="text-sm text-amber-800">Votre demande a été envoyée à ARACOM le {new Date(validationRequest.requested_at).toLocaleDateString('fr-FR')}. Nous vous fixerons un rendez-vous très prochainement.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ÉTAPE 1 — Dates + Stand */}
+      <Step1Card
+        registration={r}
+        venue={venue}
+        attendingDays={attendingDays}
+        isLocked={isLocked}
+        done={step1Ok}
+        onRefresh={onRefresh}
+      />
+
+      {/* ÉTAPE 2 — Animations */}
+      <Step2Card
+        registration={r}
+        venue={venue}
+        slots={slots || []}
+        attendingDays={attendingDays}
+        isLocked={isLocked}
+        unlocked={step1Ok}
+        done={step2Ok}
+        onRefresh={onRefresh}
+      />
+
+      {/* ÉTAPE 3 — Documents + Soumettre */}
+      <Step3Card
+        registration={r}
+        docs={docs}
+        validationRequest={validationRequest}
+        isLocked={isLocked}
+        unlocked={step2Ok}
+        done={step3Ok}
+        onRefresh={onRefresh}
+      />
+    </div>
+  );
+}
+
+function StepHeader({ n, title, done, unlocked = true, locked }) {
+  return (
+    <CardHeader className={`pb-3 ${done ? 'bg-emerald-50/40' : unlocked ? 'bg-violet-50/40' : 'bg-slate-50'}`}>
+      <CardTitle className="text-base flex items-center gap-3">
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-white ${done ? 'bg-emerald-500' : unlocked ? 'bg-violet-500' : 'bg-slate-300'}`}>
+          {done ? '✓' : n}
+        </div>
+        <span className={!unlocked ? 'text-slate-400' : ''}>{title}</span>
+        {locked && <Badge className="bg-slate-200 text-slate-600 ml-auto">🔒 Verrouillé</Badge>}
+        {!unlocked && !locked && <Badge variant="secondary" className="ml-auto">À débloquer</Badge>}
+      </CardTitle>
+    </CardHeader>
+  );
+}
+
+function Step1Card({ registration, venue, attendingDays, isLocked, done, onRefresh }) {
+  const r = registration;
+  const [busy, setBusy] = useState(false);
+
+  const toggleDay = async (day) => {
+    if (isLocked) { toast.error('Dossier verrouillé'); return; }
+    const newDays = attendingDays.includes(day) ? attendingDays.filter(d => d !== day) : [...attendingDays, day];
+    if (newDays.length === 0) { toast.error('Vous devez participer au moins à un jour.'); return; }
+    if (attendingDays.includes(day) && !newDays.includes(day)) {
+      if (!window.confirm(`Désélectionner ${day} ? Vos animations de ce jour seront supprimées automatiquement.`)) return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${r.id}/set-attending-days`, { method: 'POST', body: JSON.stringify({ attending_days: newDays }) });
+      toast.success('Jours mis à jour');
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <Card className={done ? 'border-emerald-300' : 'border-violet-300 ring-2 ring-violet-100'}>
+      <StepHeader n={1} title="Mes jours de présence + mon stand" done={done} locked={isLocked} />
+      <CardContent className="space-y-3 pt-4">
+        <p className="text-sm text-slate-600">Sélectionnez le ou les jours où votre association sera présente. Décochez un jour pour vous désinscrire (vos animations associées seront supprimées).</p>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { key: 'vendredi', label: 'Vendredi 14 août', sub: '11h – 17h', color: 'amber' },
+            { key: 'samedi', label: 'Samedi 15 août', sub: '9h – 17h', color: 'sky' },
+          ].map(d => {
+            const checked = attendingDays.includes(d.key);
+            return (
+              <button
+                key={d.key}
+                disabled={busy || isLocked}
+                onClick={() => toggleDay(d.key)}
+                className={`relative p-4 rounded-lg border-2 text-left transition ${checked ? `bg-${d.color}-50 border-${d.color}-400 shadow-sm` : 'bg-white border-slate-200 hover:border-slate-400'} ${(busy || isLocked) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                <div className="flex items-start gap-2">
+                  <Checkbox checked={checked} className="mt-0.5 pointer-events-none" />
+                  <div>
+                    <div className="font-semibold text-sm">{d.label}</div>
+                    <div className="text-xs text-slate-500">{d.sub}</div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Stand */}
+        <div className="pt-3 border-t">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div>
+              <div className="font-medium text-sm">📍 Mon site & mon stand</div>
+              <p className="text-xs text-slate-500">Choisissez votre site puis cliquez sur un stand libre du plan.</p>
+            </div>
+            {r.stand_code && (
+              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                {venue?.name} · Stand {r.stand_code}
+              </Badge>
+            )}
+          </div>
+          <SiteAndStandPicker registration={r} organization={null} onRefresh={onRefresh} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Step2Card({ registration, venue, slots, attendingDays, isLocked, unlocked, done, onRefresh }) {
+  if (!unlocked) {
+    return (
+      <Card className="border-slate-200 opacity-70">
+        <StepHeader n={2} title="Mes animations (1 par jour)" unlocked={false} done={false} />
+        <CardContent className="pt-4">
+          <p className="text-sm text-slate-500">⚠️ Validez d&apos;abord vos jours et votre stand à l&apos;étape 1.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card className={done ? 'border-emerald-300' : 'border-violet-300'}>
+      <StepHeader n={2} title="Mes animations (1 par jour minimum)" done={done} locked={isLocked} />
+      <CardContent className="pt-4">
+        {isLocked && <p className="text-sm text-amber-700 mb-3">🔒 Vos animations sont verrouillées par ARACOM.</p>}
+        <AnimationsBlock
+          registrationId={registration.id}
+          venueId={registration.venue_id}
+          venueName={venue?.name}
+          slots={slots}
+          onRefresh={onRefresh}
+          attendingDays={attendingDays}
+          readOnly={isLocked}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function Step3Card({ registration, docs, validationRequest, isLocked, unlocked, done, onRefresh }) {
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitValidation = async () => {
+    if (!window.confirm('Soumettre votre demande de validation à ARACOM ?\n\nUne fois soumise, ARACOM vous fixera un rendez-vous pour récupérer vos documents et la caution.')) return;
+    setSubmitting(true);
+    try {
+      await api(`/api/registrations/${registration.id}/request-validation`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('✅ Votre demande a été envoyée à ARACOM');
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+    setSubmitting(false);
+  };
+
+  if (!unlocked) {
+    return (
+      <Card className="border-slate-200 opacity-70">
+        <StepHeader n={3} title="Validation finale + Documents" unlocked={false} done={false} />
+        <CardContent className="pt-4">
+          <p className="text-sm text-slate-500">⚠️ Complétez les étapes 1 et 2 pour débloquer la soumission.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className={done ? 'border-emerald-300' : 'border-violet-300'}>
+      <StepHeader n={3} title="Documents + Soumission de ma demande" done={done} locked={isLocked} />
+      <CardContent className="pt-4 space-y-4">
+        <DocsBlockExposant registrationId={registration.id} docs={docs} onRefresh={onRefresh} />
+
+        {/* Bouton de soumission */}
+        {!validationRequest && !isLocked && (
+          <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 border-2 border-violet-300 rounded-lg p-5">
+            <div className="flex items-start gap-3">
+              <Send className="w-6 h-6 text-violet-600 shrink-0 mt-1" />
+              <div className="flex-1">
+                <h4 className="font-bold text-violet-900">Prêt à soumettre votre demande ?</h4>
+                <p className="text-sm text-violet-800 mt-1">
+                  Une fois soumise, ARACOM vous fixera un <b>rendez-vous</b> pour récupérer :
+                </p>
+                <ul className="text-xs text-violet-700 mt-2 ml-4 list-disc space-y-0.5">
+                  <li>Convention signée (téléchargeable plus haut)</li>
+                  <li>Justificatif d&apos;assurance responsabilité civile</li>
+                  <li>Caution de <b>20 000 XPF</b> (chèque, virement ou espèces)</li>
+                </ul>
+                <p className="text-xs text-violet-700 mt-2">Une fois le rendez-vous honoré, votre stand sera <b>définitivement verrouillé</b> et vous recevrez un email de confirmation avec le guide de l&apos;exposant.</p>
+                <Button onClick={submitValidation} disabled={submitting} className="mt-3 bg-violet-600 hover:bg-violet-700 gap-2">
+                  <Send className="w-4 h-4" /> {submitting ? 'Envoi en cours…' : 'Soumettre ma demande à ARACOM'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // =====================================================================
 const STEPS = [
   { key: 'profile', n: 1, label: 'Compléter mon profil', desc: 'Contact, téléphone, description', tab: 'profil', dl_key: 'profile' },
@@ -779,7 +1097,7 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
 // =====================================================================
 // ANIMATIONS — créneaux fixes ; site obligatoire ; stand vs zone démo
 // =====================================================================
-function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRefresh }) {
+function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRefresh, attendingDays, readOnly = false }) {
   const [allSlots, setAllSlots] = useState([]);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null); // {day, start, end, location_type}
@@ -892,9 +1210,9 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
         </CardContent>
       </Card>
 
-      {/* Daily completeness summary */}
+      {/* Daily completeness summary - filtré par les jours sélectionnés */}
       <div className="grid grid-cols-2 gap-3">
-        {EVENT_DATES.map(d => {
+        {EVENT_DATES.filter(d => !attendingDays || attendingDays.length === 0 || attendingDays.includes(d.label)).map(d => {
           const dc = dayCompleteness(d.label);
           return (
             <div key={d.label} className={`rounded-md border-2 p-3 ${dc.ok ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-300'}`}>
@@ -908,8 +1226,8 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
         })}
       </div>
 
-      {EVENT_DATES.map(d => (
-        <Card key={d.label}>
+      {EVENT_DATES.filter(d => !attendingDays || attendingDays.length === 0 || attendingDays.includes(d.label)).map(d => (
+        <Card key={d.label} className={readOnly ? 'opacity-70' : ''}>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Calendar className="w-4 h-4 text-blue-600" /> {d.display}
