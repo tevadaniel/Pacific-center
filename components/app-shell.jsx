@@ -89,12 +89,56 @@ function roleLabel(role) {
 function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
   const tabsByKey = Object.fromEntries(tabs.map(t => [t.key, t]));
   const [openMenu, setOpenMenu] = useState(null);
-  const closeRef = useRef(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const buttonRefs = useRef({});
+
+  // Recalcule la position du menu (fixed) quand on l'ouvre, ou au scroll/resize
+  const updateMenuPos = (key) => {
+    const btn = buttonRefs.current[key];
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const menuWidth = 224; // w-56 = 14rem = 224px
+    let left = rect.left;
+    // Empêcher le menu de déborder à droite de la fenêtre
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - menuWidth - 8);
+    }
+    setMenuPos({ top: rect.bottom + 4, left });
+  };
+
+  useEffect(() => {
+    if (!openMenu) return;
+    updateMenuPos(openMenu);
+    const onScrollOrResize = () => updateMenuPos(openMenu);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    // Click outside / Escape pour fermer
+    const onDocMouseDown = (e) => {
+      const btn = buttonRefs.current[openMenu];
+      const menu = document.getElementById('app-shell-dropdown-menu');
+      if (btn?.contains(e.target)) return;
+      if (menu?.contains(e.target)) return;
+      setOpenMenu(null);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpenMenu(null); };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openMenu]);
 
   const handleClick = (key) => {
     setOpenMenu(null);
     if (onTabClick) onTabClick(key);
     else tabsByKey[key]?.onClick?.();
+  };
+
+  const toggleMenu = (key) => {
+    setOpenMenu(prev => prev === key ? null : key);
   };
 
   const isGroupActive = (group) => {
@@ -109,27 +153,30 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
     return tabsByKey[activeTab]?.label;
   };
 
+  const activeGroup = openMenu ? tabGroups.find(g => g.key === openMenu) : null;
+
   return (
-    <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex flex-wrap gap-1 overflow-x-auto relative">
-      {tabGroups.map(group => {
-        const active = isGroupActive(group);
-        const cls = `flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${active ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`;
+    <>
+      <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex flex-wrap gap-1">
+        {tabGroups.map(group => {
+          const active = isGroupActive(group);
+          const cls = `flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${active ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`;
 
-        if (group.single) {
+          if (group.single) {
+            return (
+              <button key={group.key} onClick={() => handleClick(group.redirectTo || group.key)} className={cls}>
+                <span className="text-base">{group.icon}</span>
+                <span>{group.label}</span>
+              </button>
+            );
+          }
+
+          const subLabel = activeChildLabel(group);
           return (
-            <button key={group.key} onClick={() => handleClick(group.redirectTo || group.key)} className={cls}>
-              <span className="text-base">{group.icon}</span>
-              <span>{group.label}</span>
-            </button>
-          );
-        }
-
-        const subLabel = activeChildLabel(group);
-        return (
-          <div key={group.key} className="relative">
             <button
-              onClick={() => setOpenMenu(openMenu === group.key ? null : group.key)}
-              onBlur={() => setTimeout(() => setOpenMenu(prev => prev === group.key ? null : prev), 150)}
+              key={group.key}
+              ref={(el) => { buttonRefs.current[group.key] = el; }}
+              onClick={() => toggleMenu(group.key)}
               className={cls}
               aria-haspopup="menu"
               aria-expanded={openMenu === group.key}
@@ -139,29 +186,35 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
               {subLabel && <span className="text-xs text-blue-500 font-normal">· {subLabel}</span>}
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openMenu === group.key ? 'rotate-180' : ''}`} />
             </button>
-            {openMenu === group.key && (
-              <div className="absolute left-0 top-full mt-1 z-50 w-56 bg-white rounded-md border border-slate-200 shadow-lg py-1.5 animate-in fade-in slide-in-from-top-1 duration-100">
-                {group.items.map(itemKey => {
-                  const t = tabsByKey[itemKey];
-                  if (!t) return null;
-                  const itemActive = activeTab === itemKey;
-                  return (
-                    <button
-                      key={itemKey}
-                      onMouseDown={(e) => { e.preventDefault(); handleClick(itemKey); }}
-                      className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      {t.label}
-                      {itemActive && <span className="ml-auto text-blue-500">●</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+      {openMenu && activeGroup && !activeGroup.single && (
+        <div
+          id="app-shell-dropdown-menu"
+          className="fixed z-[1000] w-56 bg-white rounded-md border border-slate-200 shadow-2xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-100"
+          style={{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }}
+          role="menu"
+        >
+          {activeGroup.items.map(itemKey => {
+            const t = tabsByKey[itemKey];
+            if (!t) return null;
+            const itemActive = activeTab === itemKey;
+            return (
+              <button
+                key={itemKey}
+                onClick={() => handleClick(itemKey)}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                role="menuitem"
+              >
+                {t.label}
+                {itemActive && <span className="ml-auto text-blue-500">●</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
