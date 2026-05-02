@@ -274,6 +274,7 @@ async function doSeed(force = false) {
   // Users (demo accounts)
   const users = [
     { id: 'u-admin', email: 'admin@aracom.pf', full_name: 'ARACOM Admin', phone: null, role_id: 'role-admin', role_code: 'aracom_admin', password: 'demo', is_active: true, created_at: new Date(), updated_at: new Date() },
+    { id: 'u-teva', email: 'teva.geros@aracom-conseil.fr', full_name: 'Teva Geros', phone: '+(689) 87 210 444', role_id: 'role-admin', role_code: 'aracom_admin', password: 'Projetaracom12', is_active: true, created_at: new Date(), updated_at: new Date() },
     { id: 'u-pc', email: 'pacific@centers.pf', full_name: 'Pacific Centers', phone: null, role_id: 'role-pc', role_code: 'pacific_centers_readonly', password: 'demo', is_active: true, created_at: new Date(), updated_at: new Date() },
   ];
 
