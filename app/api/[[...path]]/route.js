@@ -1243,6 +1243,97 @@ export async function GET(request, { params }) {
       return json(timeline);
     }
 
+    if (route === 'exposant/briefing') {
+      // 🎯 BRIEFING EXPOSANT — calcule la prochaine étape, ce qui reste à faire, et propose une action concrète
+      // Accessible UNIQUEMENT au rôle exposant ou à un admin (filtré par organization_id du user connecté)
+      if (ctx.role !== 'exposant' && ctx.role !== 'aracom_admin') return err('Accès refusé', 403);
+      const userRec = await db.collection('users').findOne({ id: ctx.userId });
+      const organizationId = userRec?.organization_id;
+      if (!organizationId) return err('Organization non liée à votre compte', 403);
+
+      const [org, reg, deadlinesCfg, docs, animSlots, deposits] = await Promise.all([
+        db.collection('organizations').findOne({ id: organizationId }),
+        db.collection('registrations').findOne({ organization_id: organizationId, edition_id: EDITION_ID }),
+        db.collection('app_settings').findOne({ key: 'step_deadlines' }),
+        db.collection('registration_documents').find({ organization_id: organizationId }).toArray(),
+        db.collection('animation_slots').find({ organization_id: organizationId, edition_id: EDITION_ID }).toArray(),
+        db.collection('deposit_transactions').find({ organization_id: organizationId, edition_id: EDITION_ID }).toArray(),
+      ]);
+      const venueDoc = reg?.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const deadlines = deadlinesCfg?.deadlines || {};
+
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const dayRemaining = (iso) => {
+        if (!iso) return null;
+        const d = new Date(iso); d.setHours(0, 0, 0, 0);
+        return Math.round((d - today) / (1000 * 60 * 60 * 24));
+      };
+
+      const cautionReceived = (deposits || []).some(d => d.type === 'caution_received');
+      const conventionDoc = (docs || []).find(d => (d.category || '').toLowerCase().includes('convention'));
+      const conventionSigned = !!(conventionDoc && conventionDoc.status === 'valide');
+      const validatedDocs = (docs || []).filter(d => d.status === 'valide').length;
+      const hasInsurance = (docs || []).some(d => (d.category || '').toLowerCase().includes('assurance'));
+
+      const STEPS = [
+        { key: 'profile', label: 'Compléter votre profil', done: !!(org?.contact_name && org?.main_email && org?.discipline && (reg?.completion_percent || 0) >= 50), action_label: 'Aller au profil', target_tab: 'profil', deadline_key: 'profile', why: 'Permet à ARACOM de vous identifier et de communiquer avec vous.' },
+        { key: 'stand', label: 'Choisir votre site et pré-réserver un stand', done: !!(reg?.venue_id && reg?.stand_code), action_label: 'Choisir mon stand', target_tab: 'parcours', target_step: 1, deadline_key: 'stand', why: 'Réserve votre emplacement avant que les autres exposants ne prennent les meilleurs.' },
+        { key: 'animation', label: "Planifier vos créneaux d'animation", done: animSlots.length > 0, action_label: 'Planifier une animation', target_tab: 'parcours', target_step: 2, deadline_key: 'animation', why: "1 créneau d'1 heure maximum par jour. Vendredi 11h-17h ou samedi 9h-17h." },
+        { key: 'documents', label: 'Déposer vos documents officiels', done: hasInsurance && validatedDocs >= 2, action_label: 'Téléverser mes documents', target_tab: 'parcours', target_step: 3, deadline_key: 'documents', why: "L'attestation d'assurance responsabilité civile est obligatoire pour exposer." },
+        { key: 'caution', label: 'Verser votre caution (20 000 XPF)', done: cautionReceived, action_label: 'Voir les modalités de caution', target_tab: 'parcours', target_step: 3, deadline_key: 'caution', why: "Caution restituée intégralement après l'événement. Versement par chèque ou espèces auprès d'ARACOM." },
+        { key: 'convention', label: 'Signer la convention de participation', done: conventionSigned, action_label: 'Voir la convention', target_tab: 'parcours', target_step: 3, deadline_key: 'convention', why: 'Document contractuel envoyé par ARACOM après validation de votre dossier.' },
+      ];
+
+      const nextStep = STEPS.find(s => !s.done);
+      const completedCount = STEPS.filter(s => s.done).length;
+      const totalSteps = STEPS.length;
+      const percent = Math.round((completedCount / totalSteps) * 100);
+      const remaining = STEPS.filter(s => !s.done).map(s => s.label);
+
+      const urgences = STEPS.filter(s => !s.done && s.deadline_key && deadlines[s.deadline_key]).map(s => {
+        const days = dayRemaining(deadlines[s.deadline_key]);
+        return { step: s.key, label: s.label, days, deadline: deadlines[s.deadline_key] };
+      }).filter(u => u.days != null && u.days <= 14).sort((a, b) => a.days - b.days);
+
+      let nextStepInfo = null;
+      if (nextStep) {
+        const days = nextStep.deadline_key && deadlines[nextStep.deadline_key] ? dayRemaining(deadlines[nextStep.deadline_key]) : null;
+        let urgency = 'normal';
+        if (days != null) {
+          if (days < 0) urgency = 'overdue';
+          else if (days <= 3) urgency = 'critical';
+          else if (days <= 7) urgency = 'warning';
+        }
+        nextStepInfo = {
+          step_key: nextStep.key,
+          label: nextStep.label,
+          why: nextStep.why,
+          action_label: nextStep.action_label,
+          target_tab: nextStep.target_tab,
+          target_step: nextStep.target_step || null,
+          deadline_iso: nextStep.deadline_key ? deadlines[nextStep.deadline_key] : null,
+          days_remaining: days,
+          urgency,
+        };
+      }
+
+      return json({
+        ok: true,
+        organization_name: org?.name || '',
+        progress: { completed: completedCount, total: totalSteps, percent },
+        next_step: nextStepInfo,
+        remaining,
+        urgences,
+        all_steps: STEPS.map(s => ({ key: s.key, label: s.label, done: s.done })),
+        completed: !nextStep,
+        venue_name: venueDoc?.name || null,
+        stand_code: reg?.stand_code || null,
+        status: reg?.status || null,
+        generated_at: new Date().toISOString(),
+      });
+    }
+
+
     if (route === 'dashboard/briefing') {
       // 📊 BRIEFING DYNAMIQUE — synthèse en 3 colonnes (FAIT / RESTE À FAIRE / VIGILANCE)
       // Calculé à la volée à partir de l'état réel de la DB. Aucun appel IA = instantané + gratuit.
@@ -4380,6 +4471,107 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
     //  - pacific_centers_readonly : accès aux venues pacific_visible + stats agrégées + aide outils
     // 🛡️ Isolation stricte : impossible pour un exposant de voir d'autres données via le chat.
     // 🔒 Sessions volatiles (pas de persistance — reconstruit le contexte à chaque requête)
+    if (route === 'satisfaction/ai-enrich') {
+      // ✨ Enrichit ou rédige les commentaires textuels du questionnaire de satisfaction (POST)
+      const { registration_id, ratings = {}, nps_score, will_participate_next = '', current_text = {}, mode = 'enrich' } = body || {};
+      if (!registration_id) return err('registration_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+
+      const ratingLabel = (n) => {
+        if (n == null || n === 0) return 'non noté';
+        if (n >= 4.5) return 'excellent';
+        if (n >= 3.5) return 'bon';
+        if (n >= 2.5) return 'moyen';
+        return 'décevant';
+      };
+      const npsLabel = (n) => {
+        if (n == null) return 'non renseigné';
+        if (n >= 9) return `${n}/10 (Promoteur enthousiaste)`;
+        if (n >= 7) return `${n}/10 (Passif satisfait)`;
+        return `${n}/10 (Détracteur)`;
+      };
+
+      const contextDescription = `Exposant : ${org?.name || '—'} (${org?.discipline || '—'})
+Site : ${venue?.name || '—'}
+Stand : ${reg.stand_code || '—'}
+
+Notes données (sur 5 étoiles) :
+- Note globale : ${ratings.overall || 0}/5 (${ratingLabel(ratings.overall)})
+- Organisation ARACOM : ${ratings.organization || 0}/5 (${ratingLabel(ratings.organization)})
+- Stand & emplacement : ${ratings.stand || 0}/5 (${ratingLabel(ratings.stand)})
+- Affluence visiteurs : ${ratings.visitors || 0}/5 (${ratingLabel(ratings.visitors)})
+- Communication ARACOM : ${ratings.communication || 0}/5 (${ratingLabel(ratings.communication)})
+
+NPS (recommandation) : ${npsLabel(nps_score)}
+Souhaite revenir l'an prochain : ${will_participate_next || 'non précisé'}
+
+${mode === 'enrich' && (current_text.positive || current_text.improvement || current_text.free)
+  ? `Texte déjà rédigé par l'exposant (à ENRICHIR, pas remplacer) :
+- Points positifs : "${current_text.positive || '—'}"
+- Améliorations souhaitées : "${current_text.improvement || '—'}"
+- Commentaire libre : "${current_text.free || '—'}"`
+  : "L'exposant n'a encore rien rédigé — propose un PREMIER JET cohérent avec ses notes."
+}`;
+
+      const systemPrompt = `Tu es un assistant d'écriture pour un exposant du Forum de la Rentrée 2026 en Polynésie française.
+Tu aides l'exposant à rédiger son questionnaire de satisfaction post-événement de façon CONSTRUCTIVE et NUANCÉE.
+
+Règles ABSOLUES :
+- Tu écris à la PREMIÈRE PERSONNE du singulier ("J'ai apprécié…", "J'aurais aimé…", "Je recommande…").
+- Tu produis un texte qui REFLÈTE FIDÈLEMENT les notes données :
+  * Note ≥ 4 : ton positif et reconnaissant
+  * Note 3 : ton nuancé (du positif ET du constructif)
+  * Note ≤ 2 : ton honnête et constructif (pointer ce qui n'a pas marché)
+- Tu RESPECTES le ton de l'exposant : professionnel, jamais agressif.
+- Tu ne mens pas, tu n'inventes pas de faits que tu ne peux pas connaître.
+- Si l'exposant a déjà écrit quelque chose, tu l'ENRICHIS sans le contredire.
+- Tu es CONCIS : 2-3 phrases par section maximum.
+
+Tu retournes UNIQUEMENT un JSON valide : {"positive_points": "...", "improvement_points": "...", "free_comment": "..."}.
+Pas de markdown, pas de backticks, pas d'explication.`;
+
+      const userPrompt = `Rédige (ou enrichis si déjà écrit) les 3 zones de commentaire du questionnaire de satisfaction.
+
+Contexte :
+${contextDescription}
+
+Contraintes :
+- "positive_points" : 2-3 phrases sur ce qui a fonctionné, en accord avec les notes hautes.
+- "improvement_points" : 2-3 phrases sur ce qui pourrait être amélioré, en accord avec les notes basses (ou avec un ton constructif s'il n'y en a pas).
+- "free_comment" : 1-2 phrases de conclusion / mot final / remerciement / souhait pour la prochaine édition.
+
+Retourne UNIQUEMENT le JSON { "positive_points": "...", "improvement_points": "...", "free_comment": "..." }.`;
+
+      const result = await emergentChat({
+        model: DEFAULT_MODEL_CLAUDE,
+        system: systemPrompt,
+        user: userPrompt,
+        max_tokens: 1200,
+        temperature: 0.7,
+      });
+      if (!result.ok) {
+        console.error('[satisfaction/ai-enrich] LLM error:', result.error);
+        return err('Erreur IA : ' + (result.error || 'inconnue'), 500);
+      }
+      const text = result.text || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return err('Réponse IA invalide : ' + text.slice(0, 200), 500);
+      let parsed;
+      try { parsed = JSON.parse(match[0]); } catch { return err('JSON invalide dans la réponse IA', 500); }
+      return json({
+        ok: true,
+        positive_points: parsed.positive_points || '',
+        improvement_points: parsed.improvement_points || '',
+        free_comment: parsed.free_comment || '',
+        usage: result.usage,
+        llm_source: result.source || 'unknown',
+      });
+    }
+
+
     if (route === 'chatbot') {
       const { message, history = [] } = body || {};
       if (!message || typeof message !== 'string' || !message.trim()) {

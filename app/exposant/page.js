@@ -220,17 +220,22 @@ export default function ExposantPortal() {
           </Card>
         )}
 
+        {/* 🎯 BRIEFING EXPOSANT — Prochaine étape + résumé du restant + bouton d'action */}
+        {!isLocked && <ExposantBriefing onAction={(tab, step) => {
+          handleTabChange(tab);
+          if (step != null && typeof window !== 'undefined') {
+            // Notify ParcoursWizard via custom event to jump to specific step
+            setTimeout(() => window.dispatchEvent(new CustomEvent('exposant:goto-step', { detail: { step } })), 50);
+          }
+        }} />}
+
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="w-full grid grid-cols-3 md:grid-cols-7">
+          <TabsList className="w-full grid grid-cols-2 md:grid-cols-4">
             <TabsTrigger value="parcours" className="font-bold">🎯 Mon parcours</TabsTrigger>
-            <TabsTrigger value="profil">Mon profil</TabsTrigger>
-            <TabsTrigger value="logistique">Logistique</TabsTrigger>
-            <TabsTrigger value="guide">Guide</TabsTrigger>
-            <TabsTrigger value="satisfaction" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
-              ⭐ Satisfaction {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
-            </TabsTrigger>
-            <TabsTrigger value="bilan" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
-              📋 Bilan {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
+            <TabsTrigger value="profil">👤 Mon profil</TabsTrigger>
+            <TabsTrigger value="infos">📦 Infos pratiques</TabsTrigger>
+            <TabsTrigger value="postevent" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
+              🏆 Post-événement {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
             </TabsTrigger>
           </TabsList>
 
@@ -290,47 +295,61 @@ export default function ExposantPortal() {
             </div>
           </TabsContent>
 
-          <TabsContent value="logistique" className="space-y-4">
-            <LogistiqueBlock registration={r} onRefresh={load} />
+          <TabsContent value="infos" className="space-y-4">
+            {/* 📦 Section LOGISTIQUE */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">📦</span>
+                <h2 className="text-lg font-semibold">Logistique de votre stand</h2>
+              </div>
+              <LogistiqueBlock registration={r} onRefresh={load} />
+            </div>
+            {/* 📚 Section GUIDE */}
+            <div className="pt-4 border-t border-slate-200">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">📚</span>
+                <h2 className="text-lg font-semibold">Guide pratique de l&apos;exposant</h2>
+              </div>
+              <GuideBlock />
+            </div>
           </TabsContent>
 
-          <TabsContent value="satisfaction" className="space-y-4">
+          <TabsContent value="postevent" className="space-y-4">
             {postEvent.unlocked ? (
-              <SatisfactionBlock registration={r} />
+              <>
+                {/* ⭐ Section SATISFACTION */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xl">⭐</span>
+                    <h2 className="text-lg font-semibold">Votre satisfaction</h2>
+                  </div>
+                  <SatisfactionBlock registration={r} />
+                </div>
+                {/* 📋 Section BILAN */}
+                <div className="pt-4 border-t border-slate-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xl">📋</span>
+                    <h2 className="text-lg font-semibold">Bilan de l&apos;événement</h2>
+                  </div>
+                  <Card className="border-emerald-200 bg-emerald-50/30">
+                    <CardContent className="p-8 text-center">
+                      <span className="text-4xl">📋</span>
+                      <p className="text-lg font-bold mt-3">Bilan de l&apos;événement</p>
+                      <p className="text-sm text-slate-600 mt-2">Vous pouvez consulter le bilan global de l&apos;édition 2026, ainsi que vos statistiques personnalisées (présence, animations, satisfaction).</p>
+                      <Button variant="outline" className="mt-4 gap-2"><Download className="w-4 h-4" /> Télécharger mon bilan PDF</Button>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
             ) : (
               <Card className="border-slate-200">
                 <CardContent className="p-12 text-center">
                   <span className="text-5xl">🔒</span>
-                  <p className="text-lg font-bold mt-3">Module Satisfaction verrouillé</p>
-                  <p className="text-sm text-slate-500 mt-2">Ce questionnaire sera <b>activé par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié par email dès qu&apos;il sera disponible.</p>
+                  <p className="text-lg font-bold mt-3">Espace post-événement verrouillé</p>
+                  <p className="text-sm text-slate-500 mt-2">La satisfaction et le bilan seront <b>activés par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié par email dès qu&apos;ils seront disponibles.</p>
                 </CardContent>
               </Card>
             )}
-          </TabsContent>
-
-          <TabsContent value="bilan" className="space-y-4">
-            {postEvent.unlocked ? (
-              <Card className="border-emerald-200 bg-emerald-50/30">
-                <CardContent className="p-8 text-center">
-                  <span className="text-4xl">📋</span>
-                  <p className="text-lg font-bold mt-3">Bilan de l&apos;événement</p>
-                  <p className="text-sm text-slate-600 mt-2">Vous pouvez consulter le bilan global de l&apos;édition 2026, ainsi que vos statistiques personnalisées (présence, animations, satisfaction).</p>
-                  <Button variant="outline" className="mt-4 gap-2"><Download className="w-4 h-4" /> Télécharger mon bilan PDF</Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="border-slate-200">
-                <CardContent className="p-12 text-center">
-                  <span className="text-5xl">🔒</span>
-                  <p className="text-lg font-bold mt-3">Bilan verrouillé</p>
-                  <p className="text-sm text-slate-500 mt-2">Le bilan sera <b>activé par ARACOM</b> après l&apos;événement. Vous y trouverez vos statistiques personnelles, le bilan global et les comptes-rendus.</p>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-
-          <TabsContent value="guide" className="space-y-4">
-            <GuideBlock />
           </TabsContent>
         </Tabs>
       </div>
@@ -1563,6 +1582,7 @@ function SatisfactionBlock({ registration }) {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rdvProposed, setRdvProposed] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
 
   const reload = async () => {
     try {
@@ -1603,6 +1623,49 @@ function SatisfactionBlock({ registration }) {
       reload();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
+  };
+
+  const enrichWithAi = async () => {
+    // Vérifier qu'au moins quelques notes ont été données
+    const totalRated = (form.overall_rating ? 1 : 0) + (form.organization_rating ? 1 : 0) + (form.stand_rating ? 1 : 0) + (form.visitors_rating ? 1 : 0) + (form.communication_rating ? 1 : 0);
+    if (totalRated < 2) {
+      toast.error('Notez au moins 2 critères avant de demander à l\'IA de rédiger.');
+      return;
+    }
+    const hasText = form.positive_points || form.improvement_points || form.free_comment;
+    setAiBusy(true);
+    try {
+      const r = await api('/api/satisfaction/ai-enrich', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registration.id,
+          ratings: {
+            overall: form.overall_rating,
+            organization: form.organization_rating,
+            stand: form.stand_rating,
+            visitors: form.visitors_rating,
+            communication: form.communication_rating,
+          },
+          nps_score: form.nps_score,
+          will_participate_next: form.will_participate_next,
+          current_text: {
+            positive: form.positive_points,
+            improvement: form.improvement_points,
+            free: form.free_comment,
+          },
+          mode: hasText ? 'enrich' : 'draft',
+        }),
+      });
+      setForm(prev => ({
+        ...prev,
+        positive_points: r.positive_points || prev.positive_points,
+        improvement_points: r.improvement_points || prev.improvement_points,
+        free_comment: r.free_comment || prev.free_comment,
+      }));
+      toast.success(hasText ? '✨ Vos commentaires ont été enrichis !' : '✨ Premier jet généré — libre à vous de modifier !');
+    } catch (e) {
+      toast.error(`Erreur IA : ${e.message}`);
+    } finally { setAiBusy(false); }
   };
 
   const submitFinal = async () => {
@@ -1703,11 +1766,32 @@ function SatisfactionBlock({ registration }) {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Vos commentaires</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle className="text-base">Vos commentaires</CardTitle>
+              <p className="text-xs text-slate-500 mt-1">Vos retours nous aident à améliorer la prochaine édition.</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isLocked || isPendingReview || aiBusy}
+              onClick={enrichWithAi}
+              className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+              data-testid="satisfaction-ai-enrich"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${aiBusy ? 'animate-spin' : ''}`} />
+              {aiBusy ? 'IA en cours…' : ((form.positive_points || form.improvement_points || form.free_comment) ? '✨ Enrichir avec l\'IA' : '✨ M\'aider à rédiger')}
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent className="space-y-3">
-          <div><Label>Points positifs</Label><Textarea rows={2} disabled={isLocked || isPendingReview} value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ce qui a particulièrement bien fonctionné…" /></div>
-          <div><Label>À améliorer</Label><Textarea rows={2} disabled={isLocked || isPendingReview} value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Suggestions pour améliorer le Forum…" /></div>
+          <div><Label>Points positifs</Label><Textarea rows={3} disabled={isLocked || isPendingReview} value={form.positive_points} onChange={e => setForm({ ...form, positive_points: e.target.value })} placeholder="Ce qui a particulièrement bien fonctionné…" /></div>
+          <div><Label>À améliorer</Label><Textarea rows={3} disabled={isLocked || isPendingReview} value={form.improvement_points} onChange={e => setForm({ ...form, improvement_points: e.target.value })} placeholder="Suggestions pour améliorer le Forum…" /></div>
           <div><Label>Commentaire libre</Label><Textarea rows={3} disabled={isLocked || isPendingReview} value={form.free_comment} onChange={e => setForm({ ...form, free_comment: e.target.value })} placeholder="Toute remarque libre…" /></div>
+          {!isLocked && !isPendingReview && (
+            <p className="text-[11px] text-slate-500 italic">💡 L&apos;IA s&apos;appuie sur vos notes ci-dessus pour proposer un texte cohérent. Vous restez libre de tout modifier ensuite.</p>
+          )}
         </CardContent>
       </Card>
 
@@ -1850,37 +1934,127 @@ function GuideBlock() {
 }
 
 // =====================================================================
-// PASSWORD CHANGE
+// 🎯 EXPOSANT BRIEFING — Prochaine étape + résumé du restant + bouton d'action
+// Remplace les anciennes "suggestions" statiques. Auto-calculé côté backend.
 // =====================================================================
-function PasswordButton__deprecated__unused({ user, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
-  const [next2, setNext2] = useState('');
-  const submit = async () => {
-    if (!next || next !== next2) { toast.error('Les mots de passe ne correspondent pas'); return; }
+function ExposantBriefing({ onAction }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
     try {
-      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) });
-      toast.success('Mot de passe mis à jour');
-      setOpen(false); setCurrent(''); setNext(''); setNext2('');
-      if (onChanged) onChanged();
-    } catch (e) { toast.error(e.message); }
+      const r = await api('/api/exposant/briefing');
+      setData(r);
+    } catch (e) {
+      console.error('[exposant briefing]', e?.message);
+    } finally { setLoading(false); }
   };
+  useEffect(() => { load(); }, []);
+
+  if (loading && !data) {
+    return (
+      <Card className="border-slate-200 bg-slate-50">
+        <CardContent className="p-4 text-sm text-slate-500">⏳ Calcul de votre prochaine étape…</CardContent>
+      </Card>
+    );
+  }
+  if (!data) return null;
+
+  const { progress, next_step, remaining, urgences, completed } = data;
+
+  // Cas : tout est terminé
+  if (completed) {
+    return (
+      <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+        <CardContent className="p-5 flex items-center gap-4">
+          <div className="text-4xl">🎉</div>
+          <div className="flex-1">
+            <div className="text-lg font-bold text-emerald-900">Bravo, votre dossier est complet à 100% !</div>
+            <p className="text-sm text-emerald-800">Toutes les étapes sont franchies. ARACOM va valider votre inscription. Vous recevrez la confirmation par email.</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const urgencyColors = {
+    overdue: { bg: 'from-red-50 to-rose-50', border: 'border-red-300', text: 'text-red-900', accent: 'bg-red-600 hover:bg-red-700', emoji: '🚨' },
+    critical: { bg: 'from-orange-50 to-amber-50', border: 'border-orange-300', text: 'text-orange-900', accent: 'bg-orange-600 hover:bg-orange-700', emoji: '⏰' },
+    warning: { bg: 'from-amber-50 to-yellow-50', border: 'border-amber-300', text: 'text-amber-900', accent: 'bg-amber-600 hover:bg-amber-700', emoji: '⚠️' },
+    normal: { bg: 'from-blue-50 to-indigo-50', border: 'border-blue-300', text: 'text-blue-900', accent: 'bg-blue-600 hover:bg-blue-700', emoji: '🎯' },
+  };
+  const u = urgencyColors[next_step?.urgency || 'normal'];
+
+  let deadlineLabel = '';
+  if (next_step?.days_remaining != null) {
+    if (next_step.days_remaining < 0) deadlineLabel = `Échéance dépassée de ${Math.abs(next_step.days_remaining)} jour(s)`;
+    else if (next_step.days_remaining === 0) deadlineLabel = "🚨 Échéance AUJOURD'HUI";
+    else deadlineLabel = `À faire dans ${next_step.days_remaining} jour(s)`;
+  }
+
   return (
-    <div className="relative">
-      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setOpen(!open)}><KeyRound className="w-3.5 h-3.5" /> Mot de passe</Button>
-      {open && (
-        <div className="absolute right-0 top-10 w-72 bg-white border rounded-md shadow-lg p-3 z-50 space-y-2">
-          <div className="font-medium text-sm">Changer mon mot de passe</div>
-          <Input type="password" placeholder="Actuel" value={current} onChange={e => setCurrent(e.target.value)} />
-          <Input type="password" placeholder="Nouveau (6 char min)" value={next} onChange={e => setNext(e.target.value)} />
-          <Input type="password" placeholder="Confirmer" value={next2} onChange={e => setNext2(e.target.value)} />
-          <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Annuler</Button>
-            <Button size="sm" onClick={submit}>OK</Button>
+    <Card className={`border-2 ${u.border} bg-gradient-to-br ${u.bg} shadow-md`}>
+      <CardContent className="p-5">
+        {/* Header avec progression */}
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{u.emoji}</span>
+            <div>
+              <div className={`text-xs font-bold uppercase tracking-wide ${u.text}`}>Votre prochaine étape</div>
+              <div className="text-[10px] text-slate-500">{progress.completed}/{progress.total} étapes terminées · {progress.percent}%</div>
+            </div>
+          </div>
+          <div className="flex-1 max-w-xs ml-auto">
+            <div className="h-2 bg-white/60 rounded-full overflow-hidden">
+              <div className={`h-full transition-all ${u.accent.split(' ')[0]}`} style={{ width: `${progress.percent}%` }} />
+            </div>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Next step principal */}
+        <div className="bg-white/70 backdrop-blur rounded-lg p-4 mb-3">
+          <div className={`text-lg font-bold ${u.text} mb-1`}>{next_step?.label}</div>
+          {deadlineLabel && (
+            <div className={`text-xs font-semibold ${u.text} mb-2 inline-block px-2 py-0.5 rounded bg-white/70`}>
+              📅 {deadlineLabel}
+            </div>
+          )}
+          <p className="text-sm text-slate-700 mb-3">{next_step?.why}</p>
+          <Button
+            onClick={() => onAction(next_step?.target_tab, next_step?.target_step)}
+            className={`${u.accent} text-white gap-2`}
+          >
+            {next_step?.action_label} →
+          </Button>
+        </div>
+
+        {/* Reste à faire (compact) */}
+        {remaining.length > 1 && (
+          <details className="text-sm">
+            <summary className="cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+              📝 Voir tout ce qu&apos;il reste à faire ({remaining.length} étapes)
+            </summary>
+            <ul className="mt-2 space-y-1 ml-5 list-disc text-slate-600">
+              {remaining.map((r, i) => <li key={i} className="leading-snug">{r}</li>)}
+            </ul>
+          </details>
+        )}
+
+        {/* Urgences (si plusieurs deadlines proches) */}
+        {urgences.length > 1 && (
+          <div className="mt-3 pt-3 border-t border-white/60">
+            <div className="text-xs font-bold text-slate-700 mb-1.5">⏳ Échéances à venir :</div>
+            <div className="flex flex-wrap gap-1.5">
+              {urgences.slice(0, 4).map((urg, i) => (
+                <span key={i} className={`text-[11px] px-2 py-0.5 rounded ${urg.days < 0 ? 'bg-red-100 text-red-800' : urg.days <= 3 ? 'bg-orange-100 text-orange-800' : urg.days <= 7 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>
+                  {urg.label.split(' ')[0]} : {urg.days < 0 ? `J+${Math.abs(urg.days)}` : `J-${urg.days}`}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
+

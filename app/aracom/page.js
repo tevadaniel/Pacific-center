@@ -5496,6 +5496,7 @@ function BilanRDVAdminBlock({ registrationId, onRefresh }) {
     nps_score: null, will_participate_next: '',
     positive_points: '', improvement_points: '', free_comment: '',
   });
+  const [adminAiBusy, setAdminAiBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -5577,9 +5578,39 @@ function BilanRDVAdminBlock({ registrationId, onRefresh }) {
                 <Input type="number" min={0} max={10} value={adminForm.nps_score ?? ''} onChange={e => setAdminForm({ ...adminForm, nps_score: e.target.value === '' ? null : Number(e.target.value) })} />
               </div>
             </div>
-            <div><Label>Points positifs</Label><Textarea rows={2} value={adminForm.positive_points} onChange={e => setAdminForm({ ...adminForm, positive_points: e.target.value })} /></div>
-            <div><Label>À améliorer</Label><Textarea rows={2} value={adminForm.improvement_points} onChange={e => setAdminForm({ ...adminForm, improvement_points: e.target.value })} /></div>
-            <div><Label>Commentaire libre</Label><Textarea rows={2} value={adminForm.free_comment} onChange={e => setAdminForm({ ...adminForm, free_comment: e.target.value })} /></div>
+            <div><Label>Points positifs</Label><Textarea rows={3} value={adminForm.positive_points} onChange={e => setAdminForm({ ...adminForm, positive_points: e.target.value })} /></div>
+            <div><Label>À améliorer</Label><Textarea rows={3} value={adminForm.improvement_points} onChange={e => setAdminForm({ ...adminForm, improvement_points: e.target.value })} /></div>
+            <div><Label>Commentaire libre</Label><Textarea rows={3} value={adminForm.free_comment} onChange={e => setAdminForm({ ...adminForm, free_comment: e.target.value })} /></div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={adminAiBusy}
+              onClick={async () => {
+                const totalRated = (adminForm.overall_rating ? 1 : 0) + (adminForm.organization_rating ? 1 : 0) + (adminForm.stand_rating ? 1 : 0) + (adminForm.visitors_rating ? 1 : 0) + (adminForm.communication_rating ? 1 : 0);
+                if (totalRated < 2) { toast.error('Notez au moins 2 critères avant de demander à l\'IA.'); return; }
+                setAdminAiBusy(true);
+                try {
+                  const r = await api('/api/satisfaction/ai-enrich', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      registration_id: registrationId,
+                      ratings: { overall: adminForm.overall_rating, organization: adminForm.organization_rating, stand: adminForm.stand_rating, visitors: adminForm.visitors_rating, communication: adminForm.communication_rating },
+                      nps_score: adminForm.nps_score,
+                      will_participate_next: adminForm.will_participate_next,
+                      current_text: { positive: adminForm.positive_points, improvement: adminForm.improvement_points, free: adminForm.free_comment },
+                      mode: (adminForm.positive_points || adminForm.improvement_points || adminForm.free_comment) ? 'enrich' : 'draft',
+                    }),
+                  });
+                  setAdminForm(prev => ({ ...prev, positive_points: r.positive_points || prev.positive_points, improvement_points: r.improvement_points || prev.improvement_points, free_comment: r.free_comment || prev.free_comment }));
+                  toast.success('✨ Commentaires enrichis par l\'IA');
+                } catch (e) { toast.error(e.message); } finally { setAdminAiBusy(false); }
+              }}
+              className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+              data-testid="admin-satisfaction-ai-enrich"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${adminAiBusy ? 'animate-spin' : ''}`} />
+              {adminAiBusy ? 'IA en cours…' : '✨ Enrichir les commentaires avec l\'IA'}
+            </Button>
             <div className="flex gap-2">
               <Button onClick={adminFill} disabled={busy} className="bg-violet-600 hover:bg-violet-700"><CheckCircle2 className="w-4 h-4 mr-1" /> Enregistrer le bilan</Button>
               <Button variant="outline" onClick={() => setShowFillForm(false)} disabled={busy}>Annuler</Button>
