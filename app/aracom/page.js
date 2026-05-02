@@ -110,7 +110,7 @@ export default function AracomPage() {
   return (
     <Shell
       title="Cockpit ARACOM"
-      subtitle="Source de vérité pour la préparation et l'exploitation terrain du Forum de la Rentrée 2026."
+      subtitle={<AracomBriefing />}
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
@@ -151,6 +151,136 @@ export default function AracomPage() {
       {activeTab === 'import' && <ImportExcelView />}
       <ChatbotFloating role="aracom_admin" />
     </Shell>
+  );
+}
+
+// 📊 BRIEFING DYNAMIQUE — synthèse en 3 colonnes (Fait / Reste à faire / Vigilance)
+// Affiché en sous-titre du Cockpit ARACOM. Données calculées en temps réel côté backend.
+function AracomBriefing() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api('/api/dashboard/briefing');
+      setData(r);
+    } catch (e) {
+      console.error('[briefing]', e?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    // Auto-refresh toutes les 5 minutes
+    const t = setInterval(load, 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const renderItems = (items) => (
+    <ul className="space-y-1.5 text-[13px]">
+      {items.map((it, i) => (
+        <li key={i} className="leading-snug" dangerouslySetInnerHTML={{
+          __html: it.replace(/\*\*(.+?)\*\*/g, '<b class="font-semibold">$1</b>')
+        }} />
+      ))}
+    </ul>
+  );
+
+  if (loading && !data) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+        ⏳ Chargement du briefing temps réel…
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-2.5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-white min-w-0">
+          <span className="text-base shrink-0">📊</span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate">Briefing temps réel · Cockpit ARACOM</div>
+            <div className="text-[11px] opacity-70 truncate">
+              Forum de la Rentrée 2026 · J-{data.days_to_event} · Mis à jour {new Date(data.generated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-white hover:bg-white/10 h-7 px-2 text-[11px]"
+            onClick={load}
+            disabled={loading}
+            title="Recalculer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-white hover:bg-white/10 h-7 px-2 text-[11px]"
+            onClick={() => setCollapsed(!collapsed)}
+            title={collapsed ? 'Développer' : 'Réduire'}
+          >
+            <span className={`text-[10px] inline-block transition-transform ${collapsed ? '-rotate-90' : ''}`}>▼</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Body — 3 colonnes */}
+      {!collapsed && (
+        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+          {/* FAIT */}
+          <div className="p-4">
+            <div className="flex items-center gap-2 mb-2.5 pb-2 border-b border-emerald-100">
+              <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm font-bold">✓</div>
+              <div>
+                <div className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Ce qui est fait</div>
+                <div className="text-[10px] text-slate-500">{data.sections.fait.length} jalons franchis</div>
+              </div>
+            </div>
+            {data.sections.fait.length > 0
+              ? renderItems(data.sections.fait)
+              : <div className="text-xs text-slate-400 italic">Aucun jalon enregistré pour le moment.</div>
+            }
+          </div>
+
+          {/* RESTE */}
+          <div className="p-4 bg-amber-50/30">
+            <div className="flex items-center gap-2 mb-2.5 pb-2 border-b border-amber-200">
+              <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">→</div>
+              <div>
+                <div className="text-xs font-bold text-amber-800 uppercase tracking-wide">Ce qu&apos;il reste à faire</div>
+                <div className="text-[10px] text-slate-500">{data.sections.reste.length} actions ouvertes</div>
+              </div>
+            </div>
+            {data.sections.reste.length > 0
+              ? renderItems(data.sections.reste)
+              : <div className="text-xs text-emerald-600 italic">🎉 Tout est en ordre !</div>
+            }
+          </div>
+
+          {/* VIGILANCE */}
+          <div className="p-4 bg-red-50/30">
+            <div className="flex items-center gap-2 mb-2.5 pb-2 border-b border-red-200">
+              <div className="w-7 h-7 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-sm font-bold">!</div>
+              <div>
+                <div className="text-xs font-bold text-red-800 uppercase tracking-wide">Points de vigilance</div>
+                <div className="text-[10px] text-slate-500">{data.sections.vigilance.length} alerte(s)</div>
+              </div>
+            </div>
+            {renderItems(data.sections.vigilance)}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

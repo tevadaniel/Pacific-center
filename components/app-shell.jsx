@@ -74,7 +74,10 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
         ) : null}
       </header>
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
-        {subtitle && <p className="text-sm text-slate-500 mb-4">{subtitle}</p>}
+        {subtitle && (typeof subtitle === 'string'
+          ? <p className="text-sm text-slate-500 mb-4">{subtitle}</p>
+          : <div className="mb-4">{subtitle}</div>
+        )}
         {children}
       </main>
     </div>

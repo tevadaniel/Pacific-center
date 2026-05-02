@@ -1243,6 +1243,102 @@ export async function GET(request, { params }) {
       return json(timeline);
     }
 
+    if (route === 'dashboard/briefing') {
+      // 📊 BRIEFING DYNAMIQUE — synthèse en 3 colonnes (FAIT / RESTE À FAIRE / VIGILANCE)
+      // Calculé à la volée à partir de l'état réel de la DB. Aucun appel IA = instantané + gratuit.
+      const [regs, venues, deadlinesCfg, anomalies, deposits, eventCfg] = await Promise.all([
+        db.collection('registrations').find({ edition_id: EDITION_ID }).toArray(),
+        db.collection('venues').find({ edition_id: EDITION_ID }).toArray(),
+        db.collection('app_settings').findOne({ key: 'step_deadlines' }),
+        db.collection('registration_anomalies').find({ resolved_status: { $ne: 'resolu' } }).toArray(),
+        db.collection('deposit_transactions').find({ edition_id: EDITION_ID, type: 'caution_received' }).toArray(),
+        db.collection('editions').findOne({ id: EDITION_ID }),
+      ]);
+      const docs = await db.collection('registration_documents').find({ status: 'valide' }).toArray();
+      const venuesWithReferent = venues.filter(v => v.referent_aracom?.name).length;
+      const total = regs.length;
+      const confirmed = regs.filter(r => r.status === 'confirme').length;
+      const aConfirmer = regs.filter(r => r.status === 'a_confirmer').length;
+      const aRelancer = regs.filter(r => r.status === 'a_relancer').length;
+      const prospects = regs.filter(r => r.status === 'prospect').length;
+      const standsAttributed = regs.filter(r => r.stand_code).length;
+      const cautionReceivedCount = deposits.length;
+      const cautionTotal = deposits.reduce((a, d) => a + (d.amount || 0), 0);
+      const docsValidatedCount = docs.length;
+      const animationsPlanned = await db.collection('animation_slots').countDocuments({ edition_id: EDITION_ID });
+
+      const eventDate = eventCfg?.start_date ? new Date(eventCfg.start_date) : new Date('2026-08-14');
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      eventDate.setHours(0, 0, 0, 0);
+      const daysToEvent = Math.round((eventDate - today) / (1000 * 60 * 60 * 24));
+
+      const deadlines = deadlinesCfg?.deadlines || {};
+      const passedDeadlines = Object.entries(deadlines).filter(([, iso]) => {
+        const d = new Date(iso); d.setHours(0, 0, 0, 0);
+        return d < today;
+      }).map(([k]) => k);
+      const upcomingDeadlines = Object.entries(deadlines)
+        .map(([k, iso]) => {
+          const d = new Date(iso); d.setHours(0, 0, 0, 0);
+          const days = Math.round((d - today) / (1000 * 60 * 60 * 24));
+          return { key: k, days, iso };
+        })
+        .filter(x => x.days >= 0 && x.days <= 14)
+        .sort((a, b) => a.days - b.days);
+
+      const criticalAnomalies = anomalies.filter(a => a.priority === 'haute' || a.priority === 'critique').length;
+
+      const fait = [];
+      if (total > 0) fait.push(`**${total}** exposants identifiés sur les ${venues.length} sites Pacific`);
+      if (confirmed > 0) fait.push(`**${confirmed}** dossiers confirmés (${Math.round(confirmed * 100 / Math.max(total, 1))}% du portefeuille)`);
+      if (cautionReceivedCount > 0) fait.push(`**${cautionReceivedCount}** cautions encaissées (${cautionTotal.toLocaleString('fr-FR')} XPF)`);
+      if (standsAttributed > 0) fait.push(`**${standsAttributed}** stands pré-réservés sur le plan`);
+      if (animationsPlanned > 0) fait.push(`**${animationsPlanned}** créneaux d'animation planifiés`);
+      if (docsValidatedCount > 0) fait.push(`**${docsValidatedCount}** documents officiels validés`);
+      if (venuesWithReferent > 0) fait.push(`**${venuesWithReferent}/${venues.length}** sites avec référent ARACOM défini`);
+      if (Object.keys(deadlines).length > 0) fait.push(`Deadlines configurées pour les **${Object.keys(deadlines).length}** étapes clés`);
+
+      const reste = [];
+      if (aRelancer > 0) reste.push(`Relancer les **${aRelancer}** exposants en statut "à relancer"`);
+      if (aConfirmer > 0) reste.push(`Confirmer les **${aConfirmer}** dossiers "à confirmer"`);
+      if (prospects > 0) reste.push(`Convertir les **${prospects}** prospects en inscriptions formelles`);
+      const cautionMissing = total - cautionReceivedCount;
+      if (cautionMissing > 0) reste.push(`Encaisser **${cautionMissing}** cautions restantes (${(cautionMissing * 20000).toLocaleString('fr-FR')} XPF)`);
+      const noStand = total - standsAttributed;
+      if (noStand > 0) reste.push(`Attribuer **${noStand}** stands non encore réservés`);
+      const refMissing = venues.length - venuesWithReferent;
+      if (refMissing > 0) reste.push(`Définir le référent ARACOM sur **${refMissing}** site(s) restant(s)`);
+      if (upcomingDeadlines.length > 0) {
+        const next = upcomingDeadlines[0];
+        const lbl = { profile: 'profil', stand: 'stand', animation: 'animation', documents: 'documents', caution: 'caution', convention: 'convention' }[next.key] || next.key;
+        reste.push(`Prochaine deadline : **${lbl}** (${next.days === 0 ? "aujourd'hui" : `dans ${next.days}j`})`);
+      }
+
+      const vigilance = [];
+      if (daysToEvent <= 0) vigilance.push(`🚨 **L'événement a commencé** (J+${Math.abs(daysToEvent)}) — basculer en Mode Jour J`);
+      else if (daysToEvent <= 30) vigilance.push(`⏰ **J-${daysToEvent}** avant le forum — phase finale critique`);
+      else if (daysToEvent <= 60) vigilance.push(`📅 **J-${daysToEvent}** — phase de consolidation des inscriptions`);
+      else vigilance.push(`📅 **J-${daysToEvent}** avant le forum — préparation en cours`);
+      if (criticalAnomalies > 0) vigilance.push(`⚠️ **${criticalAnomalies}** anomalie(s) à priorité haute non résolue(s)`);
+      if (passedDeadlines.length > 0) vigilance.push(`🔴 **${passedDeadlines.length}** deadline(s) dépassée(s) : ${passedDeadlines.join(', ')}`);
+      if (cautionReceivedCount === 0 && total > 0) vigilance.push(`💰 **Aucune caution encaissée** à ce jour — relance prioritaire`);
+      const lowCompletion = regs.filter(r => (r.completion_percent || 0) < 30 && r.status !== 'prospect').length;
+      if (lowCompletion > 5) vigilance.push(`📉 **${lowCompletion}** dossiers avec moins de 30% de complétion`);
+      if (total > 0 && Math.round(confirmed * 100 / total) < 10 && daysToEvent < 90) {
+        vigilance.push(`📊 Taux de confirmation faible (${Math.round(confirmed * 100 / total)}%) au regard de l'échéance`);
+      }
+      if (vigilance.length === 1 && daysToEvent > 60) vigilance.push(`✨ Aucun signal critique — préparation sereine`);
+
+      return json({
+        ok: true,
+        days_to_event: daysToEvent,
+        stats: { total, confirmed, a_confirmer: aConfirmer, a_relancer: aRelancer, prospects, stands_attributed: standsAttributed, caution_received: cautionReceivedCount, caution_total: cautionTotal, docs_validated: docsValidatedCount, animations_planned: animationsPlanned, venues_with_referent: venuesWithReferent, venues_total: venues.length },
+        sections: { fait, reste, vigilance },
+        generated_at: new Date().toISOString(),
+      });
+    }
+
+
     if (route === 'dashboard/jour-j-live') {
       const event_date = url.searchParams.get('event_date') || '2026-08-14';
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
