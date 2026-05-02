@@ -4418,20 +4418,39 @@ function SatisfactionAdminView() {
   const [surveys, setSurveys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
+  const [postEvent, setPostEvent] = useState({ unlocked: false, unlocked_at: null, unlocked_by: null });
+  const [togglingPE, setTogglingPE] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [s, list] = await Promise.all([
+      const [s, list, pe] = await Promise.all([
         api('/api/satisfaction/stats'),
         api('/api/satisfaction'),
+        api('/api/post-event-status').catch(() => ({ unlocked: false })),
       ]);
       setStats(s);
       setSurveys(list);
+      setPostEvent(pe || { unlocked: false });
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const togglePostEvent = async () => {
+    const next = !postEvent.unlocked;
+    const confirmMsg = next
+      ? '⚠️ Activer la phase post-événement ?\n\nCela débloquera l\'onglet Satisfaction côté Exposants et permettra la collecte des retours. À utiliser après le forum.'
+      : 'Désactiver la phase post-événement ?\n\nLes exposants ne pourront plus répondre au questionnaire de satisfaction.';
+    if (!confirm(confirmMsg)) return;
+    setTogglingPE(true);
+    try {
+      const res = await api('/api/post-event-status', { method: 'POST', body: JSON.stringify({ unlocked: next }) });
+      setPostEvent(p => ({ ...p, unlocked: res.unlocked, unlocked_at: next ? new Date().toISOString() : null }));
+      toast.success(next ? '✅ Phase post-événement activée. Les exposants peuvent désormais répondre.' : 'Phase post-événement désactivée.');
+    } catch (e) { toast.error(e.message); }
+    finally { setTogglingPE(false); }
+  };
 
   if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
   if (!stats) return null;
@@ -4441,6 +4460,40 @@ function SatisfactionAdminView() {
 
   return (
     <div className="space-y-5">
+      {/* Bannière phase post-événement */}
+      <div
+        className={`rounded-xl border-2 p-4 flex items-center justify-between gap-4 flex-wrap ${
+          postEvent.unlocked
+            ? 'bg-emerald-50 border-emerald-300'
+            : 'bg-amber-50 border-amber-300'
+        }`}
+        data-testid="post-event-banner"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl ${postEvent.unlocked ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+            {postEvent.unlocked ? '🟢' : '🔒'}
+          </div>
+          <div>
+            <div className="font-bold text-slate-900">
+              {postEvent.unlocked ? 'Phase post-événement ACTIVE' : 'Phase post-événement verrouillée'}
+            </div>
+            <div className="text-xs text-slate-600">
+              {postEvent.unlocked
+                ? `Les exposants peuvent répondre au questionnaire de satisfaction.${postEvent.unlocked_at ? ` Activée le ${new Date(postEvent.unlocked_at).toLocaleDateString('fr-FR')}.` : ''}`
+                : 'À activer après le forum pour permettre la collecte des retours exposants.'}
+            </div>
+          </div>
+        </div>
+        <Button
+          onClick={togglePostEvent}
+          disabled={togglingPE}
+          className={postEvent.unlocked ? 'bg-rose-600 hover:bg-rose-700 text-white gap-2' : 'bg-emerald-600 hover:bg-emerald-700 text-white gap-2'}
+          data-testid="toggle-post-event"
+        >
+          {togglingPE ? '…' : postEvent.unlocked ? '🔒 Désactiver' : '🚀 Activer post-événement'}
+        </Button>
+      </div>
+
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><ThumbsUp className="w-5 h-5 text-emerald-600" /> Satisfaction des exposants</h2>
