@@ -8,10 +8,41 @@ export default function PwaRegister() {
   const [showBanner, setShowBanner] = useState(false);
 
   useEffect(() => {
-    // Register service worker
+    // Register service worker with auto-update detection
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          // 🔄 Vérifier les mises à jour à chaque chargement (force fetch du sw.js)
+          reg.update().catch(() => {});
+
+          // Si une nouvelle version a été détectée et est en attente d'activation,
+          // demander au SW de prendre le relais immédiatement (skipWaiting)
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+
+          // Détection de nouvelle version arrivante
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // Nouvelle version installée, on lui demande de prendre le contrôle tout de suite
+                newWorker.postMessage({ type: 'SKIP_WAITING' });
+              }
+            });
+          });
+        }).catch(() => {});
+
+        // 🆕 Si le SW change de contrôleur (nouvelle version active), recharger la page
+        // pour servir la version fraîche à l'utilisateur
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          // Petit délai pour laisser les caches se nettoyer avant le reload
+          setTimeout(() => window.location.reload(), 100);
+        });
       });
     }
 
