@@ -906,19 +906,66 @@ function FicheExposant({ id, onClose }) {
     } catch (e) { toast.error(e.message); }
   };
 
-  const resetPassword = async () => {
-    const newPw = prompt("Nouveau mot de passe pour cet exposant :", "forum2026");
-    if (!newPw) return;
-    // Find user linked to this organization
+  // 🔗 Génère + copie le magic link de l'exposant (remplace l'ancien reset password)
+  const copyAccessLink = async () => {
     const orgId = data.registration?.organization_id;
     if (!orgId) { toast.error('Aucun exposant lié'); return; }
-    // Admin reset
     try {
-      // Use the same endpoint with target_user_id
-      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ target_user_id: `u-exp-${orgId}`, new_password: newPw }) });
-      toast.success(`Mot de passe réinitialisé : ${newPw}`);
+      const res = await api('/api/access-tokens', {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: orgId, purpose: 'access', send_email: false }),
+      });
+      if (res?.access_url) {
+        try { await navigator.clipboard?.writeText(res.access_url); toast.success('🔗 Lien d\'accès copié dans le presse-papier'); }
+        catch { toast.success(`Lien d'accès : ${res.access_url}`); }
+      }
     } catch (e) { toast.error(e.message); }
   };
+
+  const sendAccessLinkEmail = async () => {
+    const orgId = data.registration?.organization_id;
+    if (!orgId) { toast.error('Aucun exposant lié'); return; }
+    try {
+      const res = await api('/api/access-tokens', {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: orgId, purpose: 'access', send_email: true, force: false }),
+      });
+      if (res?.email_sent) toast.success('📧 Email envoyé à l\'exposant avec son lien d\'accès');
+      else toast.info(res?.message || 'Lien réutilisé (email non renvoyé — cooldown)');
+    } catch (e) { toast.error(e.message); }
+  };
+
+  // 🧠 Calcul de la prochaine action évidente
+  const nextAction = useMemo(() => {
+    if (!data) return null;
+    const r = data.registration || {};
+    const dep = data.deposit || {};
+    const docs = data.documents || [];
+    const slots = data.slots || [];
+
+    if (r.status === 'confirme' && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
+      return { kind: 'done', label: '✅ Dossier complet et confirmé', tone: 'emerald' };
+    }
+    if (r.status !== 'confirme' && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
+      return { kind: 'confirm', label: 'Tout est en règle — Confirmer l\'inscription', cta: 'Confirmer maintenant', tone: 'emerald', action: confirmReg };
+    }
+    if (!r.is_insurance_uploaded && docs.filter(d => d.document_type === 'attestation_assurance').length === 0) {
+      return { kind: 'reminder_insurance', label: 'Attestation d\'assurance manquante', cta: '✨ Envoyer un rappel IA', tone: 'amber', step: 'documents' };
+    }
+    if (!r.is_convention_signed) {
+      return { kind: 'reminder_convention', label: 'Convention non signée', cta: '✨ Envoyer un rappel IA', tone: 'amber', step: 'convention' };
+    }
+    if (dep.status !== 'recue') {
+      return { kind: 'reminder_caution', label: 'Caution 20 000 XPF non encaissée', cta: '✨ Envoyer un rappel IA', tone: 'orange', step: 'caution' };
+    }
+    if (slots.length === 0) {
+      return { kind: 'reminder_animation', label: 'Aucun créneau d\'animation choisi', cta: '✨ Envoyer un rappel IA', tone: 'blue', step: 'animation' };
+    }
+    if (r.status === 'a_relancer') {
+      return { kind: 'reminder_followup', label: 'Statut "À relancer" — relance recommandée', cta: '✨ Envoyer un rappel IA', tone: 'rose', step: 'profile' };
+    }
+    return { kind: 'idle', label: 'Aucune action urgente — surveiller la complétion du dossier', tone: 'slate' };
+  }, [data]);
 
   return (
     <Sheet open={true} onOpenChange={(o) => !o && onClose()}>
@@ -940,21 +987,17 @@ function FicheExposant({ id, onClose }) {
               </div>
             )}
 
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <div className="font-medium text-sm">Gestion du compte exposant</div>
-                <div className="text-xs text-slate-500">Réinitialiser le mot de passe de l'exposant lié à cette structure.</div>
-              </div>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={resetPassword}><KeyRound className="w-3.5 h-3.5" /> Reset mot de passe</Button>
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50/40 p-3">
-              <div>
-                <div className="font-medium text-blue-900 text-sm flex items-center gap-1.5">📧 Rappel J-X personnalisé</div>
-                <div className="text-xs text-blue-700">Génère un email de rappel par IA avec décompte et coordonnées du référent du site.</div>
-              </div>
-              <JxReminderTrigger registration={data.registration} organization={data.organization} venue={data.venue} />
-            </div>
+            {/* 🧠 SYNTHÈSE INTELLIGENTE + PROCHAINE ACTION */}
+            {nextAction && (
+              <NextActionCard
+                action={nextAction}
+                registration={data.registration}
+                organization={data.organization}
+                venue={data.venue}
+                onCopyLink={copyAccessLink}
+                onSendLinkEmail={sendAccessLinkEmail}
+              />
+            )}
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <KpiCard label="Statut" value={REGISTRATION_STATUS_LABEL[data.registration?.status] || '—'} accent="blue" />
@@ -963,20 +1006,16 @@ function FicheExposant({ id, onClose }) {
               <KpiCard label="Dossier" value={`${data.registration?.completion_percent || 0}%`} accent="violet" />
             </div>
 
-            <Tabs defaultValue="resume">
-              <TabsList className="w-full grid grid-cols-9">
-                <TabsTrigger value="resume">Résumé</TabsTrigger>
-                <TabsTrigger value="animation">Animation</TabsTrigger>
-                <TabsTrigger value="docs">Documents</TabsTrigger>
-                <TabsTrigger value="caution">Caution</TabsTrigger>
-                <TabsTrigger value="terrain">Terrain</TabsTrigger>
-                <TabsTrigger value="bilan" className="data-[state=active]:bg-violet-100 data-[state=active]:text-violet-900">⭐ Bilan</TabsTrigger>
-                <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                <TabsTrigger value="histo">Historique</TabsTrigger>
+            <Tabs defaultValue="profil">
+              <TabsList className="w-full grid grid-cols-4">
+                <TabsTrigger value="profil">📋 Profil</TabsTrigger>
+                <TabsTrigger value="docs">📁 Documents & Caution</TabsTrigger>
+                <TabsTrigger value="terrain">🌍 Terrain & Bilan</TabsTrigger>
                 <TabsTrigger value="aracom" className="data-[state=active]:bg-amber-100 data-[state=active]:text-amber-900">🔒 ARACOM</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="resume" className="space-y-3">
+              {/* ===== ONGLET 1 : PROFIL (résumé + animations) ===== */}
+              <TabsContent value="profil" className="space-y-3">
                 <AiInsightCard registration={data.registration} onRefresh={load} />
                 <Info label="Contact" value={data.organization?.contact_name} />
                 <Info label="Email" value={data.organization?.main_email} />
@@ -1000,140 +1039,135 @@ function FicheExposant({ id, onClose }) {
                   <Label>Notes internes</Label>
                   <Textarea rows={3} defaultValue={data.registration?.internal_notes || ''} onBlur={e => e.target.value !== (data.registration?.internal_notes || '') && updateReg({ internal_notes: e.target.value })} />
                 </div>
-              </TabsContent>
 
-              <TabsContent value="animation" className="space-y-3">
-                {data.slots.length === 0 ? <p className="text-slate-500 text-sm">Aucun créneau planifié.</p> : data.slots.map(s => (
-                  <div key={s.id} className="border rounded-md p-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium text-sm">{s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'} • {s.start_time}–{s.end_time}</div>
-                      <div className="text-xs text-slate-500">{s.title}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{s.status}</Badge>
-                      <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ce créneau ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); load(); }}><Trash2 className="w-3 h-3 text-red-600" /></Button>
-                    </div>
-                  </div>
-                ))}
-                <NewSlotForm registrationId={id} venueId={data.registration?.venue_id} onDone={load} />
-              </TabsContent>
-
-              <TabsContent value="docs" className="space-y-3">
-                <DocsBlock registrationId={id} documents={data.documents} onRefresh={load} />
-              </TabsContent>
-
-              <TabsContent value="caution" className="space-y-3">
-                <div className="rounded-md border p-4 bg-blue-50/40">
-                  <div className="text-sm text-slate-600">Montant de la caution</div>
-                  <div className="text-2xl font-bold text-blue-700">{(data.deposit?.amount_xpf || DEPOSIT_AMOUNT_XPF).toLocaleString('fr-FR')} XPF</div>
-                </div>
-                <div>
-                  <Label>Statut</Label>
-                  <Select value={data.deposit?.status} onValueChange={v => updateDeposit({ status: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label>Mode d'encaissement</Label>
-                    <Select value={data.deposit?.payment_method || ''} onValueChange={v => updateDeposit({ payment_method: v })}>
-                      <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cheque">Chèque</SelectItem>
-                        <SelectItem value="virement">Virement</SelectItem>
-                        <SelectItem value="especes">Espèces</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Date de restitution prévue</Label>
-                    <Input type="date" defaultValue={data.deposit?.expected_return_date} onBlur={e => updateDeposit({ expected_return_date: e.target.value })} />
-                  </div>
-                </div>
-                {data.deposit?.post_event_review_comment && (
-                  <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
-                    <div className="font-medium text-amber-900">Revue post-événement</div>
-                    <div className="text-amber-700 text-xs mt-1">{data.deposit.post_event_review_comment}</div>
-                  </div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="terrain" className="space-y-3">
-                {data.attendance_sessions.length === 0 ? <p className="text-slate-500 text-sm">Pas encore de session de contrôle terrain.</p> : data.attendance_sessions.map(s => (
-                  <div key={s.id} className="border rounded-md p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{s.event_date}</div>
-                      <Badge>{s.presence_status}</Badge>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">Arrivée : {s.actual_arrival_time || '—'} (prévue {s.expected_arrival_time}) • Départ : {s.actual_departure_time || '—'}</div>
-                  </div>
-                ))}
-                {data.anomalies.length > 0 && (
-                  <div>
-                    <div className="font-medium text-sm mb-2">Anomalies</div>
-                    <div className="space-y-2">
-                      {data.anomalies.map(a => (
-                        <div key={a.id} className="border rounded-md p-3 bg-red-50/40">
-                          <div className="flex items-center justify-between">
-                            <div className="font-medium text-sm">{a.title}</div>
-                            <Badge variant="destructive">{a.severity_level}</Badge>
-                          </div>
-                          <div className="text-xs text-slate-600 mt-1">{a.description}</div>
-                          <div className="text-[11px] text-slate-400 mt-1">{a.anomaly_type} • statut : {a.resolved_status}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {data.comments.length > 0 && (
-                  <div>
-                    <div className="font-medium text-sm mb-2">Commentaires terrain</div>
-                    <div className="space-y-2">
-                      {data.comments.map(c => (
-                        <div key={c.id} className="border rounded-md p-3 bg-slate-50">
-                          <div className="text-xs text-slate-500 uppercase tracking-wider">{c.comment_type}</div>
-                          <div className="text-sm mt-1">{c.comment_text}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <Button onClick={generateBilan} variant="outline" className="w-full gap-2"><Sparkles className="w-4 h-4" /> Générer un brouillon de bilan exposant</Button>
-              </TabsContent>
-
-              <TabsContent value="bilan" className="space-y-2">
-                <BilanRDVAdminBlock registrationId={id} onRefresh={load} />
-              </TabsContent>
-
-              <TabsContent value="timeline" className="space-y-2">
-                <TimelineBlock registrationId={id} />
-              </TabsContent>
-
-              <TabsContent value="histo" className="space-y-3">
-                <div>
-                  <div className="font-medium text-sm mb-2">Historique de présence</div>
-                  <div className="flex gap-2">
-                    {data.history.length === 0 ? <div className="text-slate-500 text-sm">Aucun historique.</div> : data.history.map(h => <Badge key={h.id} variant="secondary">{h.year}</Badge>)}
-                  </div>
-                </div>
-                <div>
-                  <div className="font-medium text-sm mb-2">Préférences de sites</div>
-                  <div className="flex flex-wrap gap-2">
-                    {data.preferences.map(p => <Badge key={p.id} variant="outline">Rang {p.preference_rank}</Badge>)}
-                  </div>
-                </div>
-                <div>
-                  <div className="font-medium text-sm mb-2">Emails envoyés</div>
-                  {data.emails.length === 0 ? <div className="text-slate-500 text-sm">Aucun email.</div> : data.emails.map(e => (
-                    <div key={e.id} className="text-xs border rounded-md p-2 mb-1">
-                      <div className="font-medium">{e.subject}</div>
-                      <div className="text-slate-500">{e.send_status} • {e.sent_at && new Date(e.sent_at).toLocaleString('fr-FR')}</div>
+                {/* Animations intégrées dans Profil */}
+                <div className="pt-2 border-t mt-3">
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">🎭 Créneaux d'animation</div>
+                  {data.slots.length === 0 ? <p className="text-slate-500 text-sm">Aucun créneau planifié.</p> : data.slots.map(s => (
+                    <div key={s.id} className="border rounded-md p-3 flex items-center justify-between mb-2">
+                      <div>
+                        <div className="font-medium text-sm">{s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'} • {s.start_time}–{s.end_time}</div>
+                        <div className="text-xs text-slate-500">{s.title}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{s.status}</Badge>
+                        <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ce créneau ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); load(); }}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                      </div>
                     </div>
                   ))}
+                  <NewSlotForm registrationId={id} venueId={data.registration?.venue_id} onDone={load} />
                 </div>
               </TabsContent>
 
+              {/* ===== ONGLET 2 : DOCUMENTS & CAUTION ===== */}
+              <TabsContent value="docs" className="space-y-4">
+                <div>
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">📁 Documents</div>
+                  <DocsBlock registrationId={id} documents={data.documents} onRefresh={load} />
+                </div>
+
+                <div className="pt-3 border-t">
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">💰 Caution</div>
+                  <div className="rounded-md border p-4 bg-blue-50/40 mb-3">
+                    <div className="text-sm text-slate-600">Montant de la caution</div>
+                    <div className="text-2xl font-bold text-blue-700">{(data.deposit?.amount_xpf || DEPOSIT_AMOUNT_XPF).toLocaleString('fr-FR')} XPF</div>
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <Label>Statut</Label>
+                      <Select value={data.deposit?.status} onValueChange={v => updateDeposit({ status: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>{DEPOSIT_STATUS.map(s => <SelectItem key={s} value={s}>{DEPOSIT_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label>Mode d'encaissement</Label>
+                        <Select value={data.deposit?.payment_method || ''} onValueChange={v => updateDeposit({ payment_method: v })}>
+                          <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cheque">Chèque</SelectItem>
+                            <SelectItem value="virement">Virement</SelectItem>
+                            <SelectItem value="especes">Espèces</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Date de restitution prévue</Label>
+                        <Input type="date" defaultValue={data.deposit?.expected_return_date} onBlur={e => updateDeposit({ expected_return_date: e.target.value })} />
+                      </div>
+                    </div>
+                    {data.deposit?.post_event_review_comment && (
+                      <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
+                        <div className="font-medium text-amber-900">Revue post-événement</div>
+                        <div className="text-amber-700 text-xs mt-1">{data.deposit.post_event_review_comment}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* ===== ONGLET 3 : TERRAIN & BILAN (terrain + anomalies + bilan + timeline) ===== */}
+              <TabsContent value="terrain" className="space-y-4">
+                {/* Sessions de présence + anomalies */}
+                <div>
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">📍 Présence Jour J</div>
+                  {data.attendance_sessions.length === 0 ? <p className="text-slate-500 text-sm">Pas encore de session de contrôle terrain.</p> : data.attendance_sessions.map(s => (
+                    <div key={s.id} className="border rounded-md p-3 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium">{s.event_date}</div>
+                        <Badge>{s.presence_status}</Badge>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">Arrivée : {s.actual_arrival_time || '—'} (prévue {s.expected_arrival_time}) • Départ : {s.actual_departure_time || '—'}</div>
+                    </div>
+                  ))}
+                  {data.anomalies.length > 0 && (
+                    <div className="mt-3">
+                      <div className="font-medium text-sm mb-2">⚠️ Anomalies</div>
+                      <div className="space-y-2">
+                        {data.anomalies.map(a => (
+                          <div key={a.id} className="border rounded-md p-3 bg-red-50/40">
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium text-sm">{a.title}</div>
+                              <Badge variant="destructive">{a.severity_level}</Badge>
+                            </div>
+                            <div className="text-xs text-slate-600 mt-1">{a.description}</div>
+                            <div className="text-[11px] text-slate-400 mt-1">{a.anomaly_type} • statut : {a.resolved_status}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {data.comments.length > 0 && (
+                    <div className="mt-3">
+                      <div className="font-medium text-sm mb-2">💬 Commentaires terrain</div>
+                      <div className="space-y-2">
+                        {data.comments.map(c => (
+                          <div key={c.id} className="border rounded-md p-3 bg-slate-50">
+                            <div className="text-xs text-slate-500 uppercase tracking-wider">{c.comment_type}</div>
+                            <div className="text-sm mt-1">{c.comment_text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button onClick={generateBilan} variant="outline" className="w-full gap-2 mt-3"><Sparkles className="w-4 h-4" /> Générer un brouillon de bilan exposant</Button>
+                </div>
+
+                {/* Bilan post-événement */}
+                <div className="pt-3 border-t">
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">⭐ Bilan post-événement</div>
+                  <BilanRDVAdminBlock registrationId={id} onRefresh={load} />
+                </div>
+
+                {/* Timeline */}
+                <div className="pt-3 border-t">
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">📜 Timeline d'activité</div>
+                  <TimelineBlock registrationId={id} />
+                </div>
+              </TabsContent>
+
+              {/* ===== ONGLET 4 : ARACOM (zone privée + historique) ===== */}
               <TabsContent value="aracom" className="space-y-3">
                 <div className="rounded-md bg-amber-50 border-2 border-amber-200 p-3">
                   <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
@@ -1269,6 +1303,31 @@ function FicheExposant({ id, onClose }) {
                     </>
                   );
                 })()}
+
+                {/* Sous-bloc historique applicatif (déplacé depuis l'ancien onglet Historique) */}
+                <div className="pt-3 border-t mt-3 space-y-3">
+                  <div>
+                    <div className="font-medium text-sm mb-2">📅 Historique de présence (DB)</div>
+                    <div className="flex gap-2 flex-wrap">
+                      {data.history.length === 0 ? <div className="text-slate-500 text-xs italic">Aucun historique enregistré.</div> : data.history.map(h => <Badge key={h.id} variant="secondary">{h.year}</Badge>)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-sm mb-2">🌍 Préférences de sites</div>
+                    <div className="flex flex-wrap gap-2">
+                      {data.preferences.length === 0 ? <div className="text-slate-500 text-xs italic">Aucune préférence.</div> : data.preferences.map(p => <Badge key={p.id} variant="outline">Rang {p.preference_rank}</Badge>)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-sm mb-2">📨 Emails envoyés ({data.emails.length})</div>
+                    {data.emails.length === 0 ? <div className="text-slate-500 text-xs italic">Aucun email.</div> : data.emails.slice(0, 8).map(e => (
+                      <div key={e.id} className="text-xs border rounded-md p-2 mb-1 bg-white">
+                        <div className="font-medium">{e.subject}</div>
+                        <div className="text-slate-500">{e.send_status} • {e.sent_at && new Date(e.sent_at).toLocaleString('fr-FR')}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </TabsContent>
             </Tabs>
           </div>
@@ -1280,6 +1339,62 @@ function FicheExposant({ id, onClose }) {
 
 function Info({ label, value }) {
   return <div className="flex items-center justify-between border-b py-2"><div className="text-xs text-slate-500 uppercase tracking-wider">{label}</div><div className="text-sm font-medium text-slate-900">{value || '—'}</div></div>;
+}
+
+// 🧠 Carte synthèse intelligente avec prochaine action évidente
+function NextActionCard({ action, registration, organization, venue, onCopyLink, onSendLinkEmail }) {
+  const tones = {
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-900', sub: 'text-emerald-700', dot: 'bg-emerald-500', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', sub: 'text-amber-700', dot: 'bg-amber-500', btn: 'bg-amber-600 hover:bg-amber-700' },
+    orange: { bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-900', sub: 'text-orange-700', dot: 'bg-orange-500', btn: 'bg-orange-600 hover:bg-orange-700' },
+    rose: { bg: 'bg-rose-50', border: 'border-rose-300', text: 'text-rose-900', sub: 'text-rose-700', dot: 'bg-rose-500', btn: 'bg-rose-600 hover:bg-rose-700' },
+    blue: { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-900', sub: 'text-blue-700', dot: 'bg-blue-500', btn: 'bg-blue-600 hover:bg-blue-700' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-300', text: 'text-slate-900', sub: 'text-slate-600', dot: 'bg-slate-400', btn: 'bg-slate-600 hover:bg-slate-700' },
+  };
+  const t = tones[action.tone] || tones.slate;
+
+  return (
+    <div className={`rounded-xl border-2 ${t.border} ${t.bg} p-4 space-y-3`} data-testid="next-action-card">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`w-2.5 h-2.5 rounded-full ${t.dot} ${action.kind !== 'done' && action.kind !== 'idle' ? 'animate-pulse' : ''} shrink-0`} />
+          <div className="min-w-0">
+            <div className={`text-[10px] uppercase tracking-wider ${t.sub} font-semibold`}>Prochaine action</div>
+            <div className={`font-bold ${t.text} text-base truncate`}>{action.label}</div>
+          </div>
+        </div>
+
+        {/* Bouton CTA principal */}
+        {action.kind === 'confirm' && action.action && (
+          <Button onClick={action.action} className={`${t.btn} text-white gap-2`} size="sm">
+            <CheckCircle2 className="w-4 h-4" /> {action.cta}
+          </Button>
+        )}
+        {action.step && (
+          <JxReminderTrigger
+            registration={registration}
+            organization={organization}
+            venue={venue}
+            defaultStepKey={action.step}
+            buttonClassName={`${t.btn} text-white gap-2`}
+            buttonLabel={action.cta || '✨ Rédiger un rappel IA'}
+            buttonSize="sm"
+          />
+        )}
+      </div>
+
+      {/* Actions secondaires : lien d'accès exposant */}
+      <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-white/40">
+        <span className={`text-xs ${t.sub} font-medium`}>🔗 Lien d'accès exposant :</span>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={onCopyLink}>
+          <KeyRound className="w-3 h-3" /> Copier le lien
+        </Button>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={onSendLinkEmail}>
+          <Mail className="w-3 h-3" /> Renvoyer par email
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onTogglePacific, onSaveReferent }) {
@@ -5325,23 +5440,24 @@ function DeadlinesView() {
 // =====================================================================
 // ⭐ BILAN + RDV restitution caution (UI ARACOM dans la fiche exposant)
 // =====================================================================
-function JxReminderTrigger({ registration, organization, venue }) {
+function JxReminderTrigger({ registration, organization, venue, defaultStepKey, buttonClassName, buttonLabel, buttonSize }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button
         onClick={() => setOpen(true)}
-        size="sm"
-        className="bg-blue-600 hover:bg-blue-700 gap-1.5"
+        size={buttonSize || 'sm'}
+        className={buttonClassName || 'bg-blue-600 hover:bg-blue-700 gap-1.5'}
         data-testid="jx-reminder-button"
       >
-        <Sparkles className="w-3.5 h-3.5" /> Rédiger & envoyer
+        <Sparkles className="w-3.5 h-3.5" /> {buttonLabel || 'Rédiger & envoyer'}
       </Button>
       {open && (
         <JxReminderDialog
           registration={registration}
           organization={organization}
           venue={venue}
+          defaultStepKey={defaultStepKey}
           onClose={() => setOpen(false)}
         />
       )}
@@ -5349,8 +5465,8 @@ function JxReminderTrigger({ registration, organization, venue }) {
   );
 }
 
-function JxReminderDialog({ registration, organization, venue, onClose }) {
-  const [stepKey, setStepKey] = useState('documents');
+function JxReminderDialog({ registration, organization, venue, onClose, defaultStepKey }) {
+  const [stepKey, setStepKey] = useState(defaultStepKey || 'documents');
   const [customInstruction, setCustomInstruction] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
