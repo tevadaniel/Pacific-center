@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Shell, KpiCard } from '@/components/app-shell';
 import HelpCard from '@/components/help-card';
@@ -80,6 +80,53 @@ const TAB_GROUPS = [
   { key: 'satisfaction', label: 'Post-événement', icon: '⭐', single: true, redirectTo: 'satisfaction' },
 ];
 
+// ============================================================
+// 🌐 EXPOSANT PANEL CONTEXT — accès universel au profil exposant
+// Ouverture du profil complet (FicheExposant) depuis n'importe où
+// dans le cockpit via le hook useExposantPanel().open(registrationId)
+// ============================================================
+const ExposantPanelContext = React.createContext({ open: () => {}, close: () => {}, openId: null });
+
+function ExposantPanelProvider({ children }) {
+  const [openId, setOpenId] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const open = useCallback((id) => setOpenId(id), []);
+  const close = useCallback(() => {
+    setOpenId(null);
+    setRefreshTrigger(t => t + 1);
+    // Broadcast un event pour que les listes se rechargent automatiquement
+    try { window.dispatchEvent(new CustomEvent('exposant:closed', { detail: { ts: Date.now() } })); } catch {}
+  }, []);
+  return (
+    <ExposantPanelContext.Provider value={{ open, close, openId, refreshTrigger }}>
+      {children}
+      {/* Rendu global UNIQUE — apparaît en slide-over par-dessus toute vue */}
+      {openId && <FicheExposant id={openId} onClose={close} />}
+    </ExposantPanelContext.Provider>
+  );
+}
+
+function useExposantPanel() {
+  return React.useContext(ExposantPanelContext);
+}
+
+// Composant utilitaire : un nom d'exposant cliquable qui ouvre le profil universel
+function ExposantLink({ id, name, className = '', children, ...rest }) {
+  const { open } = useExposantPanel();
+  if (!id) return <span className={className}>{children || name || '—'}</span>;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); open(id); }}
+      className={`text-left hover:text-blue-600 hover:underline cursor-pointer ${className}`}
+      data-testid={`open-exposant-${id}`}
+      {...rest}
+    >
+      {children || name || '—'}
+    </button>
+  );
+}
+
 export default function AracomPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null });
@@ -109,7 +156,8 @@ export default function AracomPage() {
   const tabs = TABS.map(t => ({ ...t, href: '#', onClick: () => setTab(t.key) }));
 
   return (
-    <Shell
+    <ExposantPanelProvider>
+      <Shell
       title="Cockpit ARACOM"
       subtitle={<AracomBriefing />}
       allowedRoles={['aracom_admin']}
@@ -153,6 +201,7 @@ export default function AracomPage() {
       {activeTab === 'import' && <ImportExcelView />}
       <ChatbotFloating role="aracom_admin" />
     </Shell>
+    </ExposantPanelProvider>
   );
 }
 
@@ -292,6 +341,7 @@ function DashboardView({ onGoto }) {
   const [extended, setExtended] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { open: openExposant } = useExposantPanel();
   const load = async () => {
     setLoading(true);
     try {
@@ -373,19 +423,14 @@ function DashboardView({ onGoto }) {
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-600" /> Top 5 dossiers à risque</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {extended.at_risk.length === 0 ? <p className="text-sm text-slate-400">Aucun dossier à risque 👍</p> : extended.at_risk.map(r => (
-                <div key={r.id} className="border rounded-md p-3 flex items-center gap-3">
+                <div key={r.id} className="border rounded-md p-3 flex items-center gap-3 hover:bg-slate-50 transition-colors">
                   <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 font-bold flex items-center justify-center text-xs">{r.risk_score}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><span className="font-medium truncate">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
+                  <button onClick={() => openExposant(r.id)} className="flex-1 min-w-0 text-left">
+                    <div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><span className="font-medium truncate hover:text-blue-600 hover:underline">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
                     <div className="text-xs text-slate-500">{r.venue_name} · {r.discipline}</div>
                     <div className="flex flex-wrap gap-1 mt-1">{r.missing.map(m => <Badge key={m} className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">❌ {m}</Badge>)}</div>
-                  </div>
-                  <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => {
-                    // 🔗 Navigue vers Exposants avec le registration_id en param → ouvre direct la fiche
-                    const url = `/aracom?tab=exposants&open=${encodeURIComponent(r.id)}`;
-                    window.history.pushState({}, '', url);
-                    onGoto?.('exposants');
-                  }}>Ouvrir</Button>
+                  </button>
+                  <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => openExposant(r.id)}>Ouvrir</Button>
                 </div>
               ))}
             </CardContent>
@@ -706,15 +751,15 @@ function ExposantsView() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
-  const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const { open: openExposant, refreshTrigger } = useExposantPanel();
 
   // 🔗 Ouvre directement la fiche si un registration_id est passé dans l'URL (?open=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const openId = new URLSearchParams(window.location.search).get('open');
     if (openId) {
-      setSelected(openId);
+      openExposant(openId);
       // Nettoie le param pour éviter de rouvrir en boucle sur refresh
       const url = new URL(window.location.href);
       url.searchParams.delete('open');
@@ -733,6 +778,8 @@ function ExposantsView() {
     setLoading(false);
   };
   useEffect(() => { load(); }, [filters]);
+  // Recharge après fermeture d'une fiche pour répercuter les modifications
+  useEffect(() => { if (refreshTrigger) load(); }, [refreshTrigger]);
 
   return (
     <div className="space-y-4">
@@ -825,12 +872,12 @@ function ExposantsView() {
               {loading && <tr><td colSpan="10" className="py-8 text-center text-slate-400">Chargement…</td></tr>}
               {!loading && rows.length === 0 && <tr><td colSpan="10" className="py-8 text-center text-slate-400">Aucun résultat</td></tr>}
               {rows.map(r => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { if (e.target.closest('button,a,input,[role="checkbox"]')) return; openExposant(r.id); }}>
                   <td className="py-2.5 px-4">
                     <div className="flex items-center gap-2">
                       <AiInsightTrigger registration={r} size="xs" />
                       <div>
-                        <div className="font-medium text-slate-900">{r.organization?.name}</div>
+                        <ExposantLink id={r.id} className="font-medium text-slate-900">{r.organization?.name}</ExposantLink>
                         <div className="text-xs text-slate-500">{r.organization?.discipline}</div>
                       </div>
                     </div>
@@ -848,7 +895,7 @@ function ExposantsView() {
                     {r.deposit?.status === 'recue' ? <Badge className="bg-emerald-600 text-[10px] font-normal">reçue</Badge> : <Badge variant="secondary" className="text-[10px] font-normal">{DEPOSIT_STATUS_LABEL[r.deposit?.status] || '—'}</Badge>}
                   </td>
                   <td className="px-2 text-xs text-slate-600 max-w-[180px] truncate">{r.organization?.main_email || r.organization?.main_phone}</td>
-                  <td className="px-2 text-right"><Button size="sm" variant="ghost" onClick={() => setSelected(r.id)}>Ouvrir</Button></td>
+                  <td className="px-2 text-right"><Button size="sm" variant="ghost" onClick={() => openExposant(r.id)}>Ouvrir</Button></td>
                 </tr>
               ))}
             </tbody>
@@ -856,7 +903,7 @@ function ExposantsView() {
         </CardContent>
       </Card>
 
-      {selected && <FicheExposant id={selected} onClose={() => { setSelected(null); load(); }} />}
+      {/* FicheExposant maintenant rendu globalement via ExposantPanelProvider — pas besoin ici */}
     </div>
   );
 }
@@ -1505,6 +1552,7 @@ function SitesView() {
   const [stands, setStands] = useState([]);
   const [regs, setRegs] = useState([]);
   const [editStand, setEditStand] = useState(null);
+  const { open: openExposant } = useExposantPanel();
   useEffect(() => { api('/api/venues').then(v => { setVenues(v); if (v[0]) setSelected(v[0].id); }); api('/api/registrations').then(setRegs); }, []);
   useEffect(() => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); }, [selected]);
   const reload = () => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); api('/api/registrations').then(setRegs); };
@@ -1619,7 +1667,14 @@ function SitesView() {
                     <div className="text-xs text-slate-500 uppercase">Actuellement attribué à</div>
                     <div className="font-medium mt-1">{editStand.organization.name}</div>
                     <div className="text-xs text-slate-500">{editStand.organization.discipline}</div>
-                    <Button variant="outline" size="sm" className="mt-2 text-red-600 border-red-200" onClick={freeStand}><XCircle className="w-4 h-4 mr-1" /> Libérer ce stand</Button>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {editStand.registration_id && (
+                        <Button variant="default" size="sm" className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5" onClick={() => { openExposant(editStand.registration_id); setEditStand(null); }} data-testid="open-exposant-from-stand">
+                          <Eye className="w-3.5 h-3.5" /> Voir la fiche complète
+                        </Button>
+                      )}
+                      <Button variant="outline" size="sm" className="text-red-600 border-red-200" onClick={freeStand}><XCircle className="w-4 h-4 mr-1" /> Libérer ce stand</Button>
+                    </div>
                   </div>
                 ) : (
                   <div className="rounded-md bg-blue-50 border border-blue-100 p-3 text-blue-900 text-sm">Ce stand est libre.</div>
@@ -1806,7 +1861,7 @@ function CautionsView() {
               return (
                 <tr key={r.id} className={`hover:bg-slate-50/50 ${checked ? 'bg-violet-50/30' : ''}`}>
                   <td className="py-2 pl-4"><input type="checkbox" checked={checked} onChange={() => toggleBulk(r.id)} className="w-4 h-4 accent-violet-600" /></td>
-                  <td><div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><div><div className="font-medium">{r.organization?.name}</div><div className="text-xs text-slate-500">{r.organization?.discipline}</div></div></div></td>
+                  <td><div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><div><ExposantLink id={r.id} className="font-medium">{r.organization?.name}</ExposantLink><div className="text-xs text-slate-500">{r.organization?.discipline}</div></div></div></td>
                   <td>{r.venue?.name}</td>
                   <td className="font-mono text-xs">{r.stand_code}</td>
                   <td className="text-xs text-slate-600">{r.organization?.main_email}</td>
@@ -2663,7 +2718,7 @@ function AnomaliesView() {
           <tbody className="divide-y">
             {rows.map(a => (
               <tr key={a.id}>
-                <td className="py-2 px-4 font-medium"><div className="flex items-center gap-1.5">{a.registration_id && <AiInsightTrigger registration={{ id: a.registration_id }} size="xs" />}{a.organization_name}</div></td>
+                <td className="py-2 px-4 font-medium"><div className="flex items-center gap-1.5">{a.registration_id && <AiInsightTrigger registration={{ id: a.registration_id }} size="xs" />}<ExposantLink id={a.registration_id} className="font-medium">{a.organization_name}</ExposantLink></div></td>
                 <td>{a.venue_name}</td>
                 <td className="text-xs">{a.anomaly_type}</td>
                 <td><Badge variant={a.severity_level === 'critique' || a.severity_level === 'haute' ? 'destructive' : 'secondary'}>{a.severity_level}</Badge></td>
@@ -3058,7 +3113,7 @@ function RelancesView() {
               <tr key={t.id} className={t.status === 'termine' ? 'opacity-60' : ''}>
                 <td className="px-4"><input type="checkbox" checked={t.status === 'termine'} onChange={() => toggleDone(t)} /></td>
                 <td className={`py-2 font-medium ${t.status === 'termine' ? 'line-through text-slate-500' : ''}`}>{t.title}<div className="text-xs text-slate-500 font-normal">{t.notes}</div></td>
-                <td className="text-slate-700"><div className="flex items-center gap-1.5">{t.registration_id && <AiInsightTrigger registration={{ id: t.registration_id }} size="xs" />}{t.organization_name} • <span className="font-mono text-xs">{t.stand_code}</span></div></td>
+                <td className="text-slate-700"><div className="flex items-center gap-1.5">{t.registration_id && <AiInsightTrigger registration={{ id: t.registration_id }} size="xs" />}<ExposantLink id={t.registration_id}>{t.organization_name}</ExposantLink> • <span className="font-mono text-xs">{t.stand_code}</span></div></td>
                 <td><Badge variant="secondary">{t.task_type}</Badge></td>
                 <td className="text-xs text-slate-500">{t.due_date || '—'}</td>
                 <td className="pr-4 text-right"><Button size="sm" variant="ghost" onClick={() => del(t.id)}>Supprimer</Button></td>
@@ -3957,7 +4012,7 @@ function PendingValidationsCard({ onGoto }) {
             <div key={r.id} className="bg-white rounded-md border border-violet-200 p-2 flex items-center gap-2">
               <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" />{r.organization?.name || '—'}</div>
+                <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" /><ExposantLink id={r.registration_id || r.id}>{r.organization?.name || '—'}</ExposantLink></div>
                 <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
                 {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
               </div>
@@ -4168,7 +4223,7 @@ function AlertsBadge({ onGoto }) {
                     <Checkbox className="mt-1" checked={selectedIds.has(r.id)} onCheckedChange={() => toggleOne(r.id)} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-sm truncate">{r.organization_name || r.organization?.name || '—'}</span>
+                        <ExposantLink id={r.id} className="font-medium text-sm truncate">{r.organization_name || r.organization?.name || '—'}</ExposantLink>
                         {r.priority_level && <Badge variant="secondary" className="text-[10px] shrink-0">{r.priority_level}</Badge>}
                         <Badge variant="secondary" className={`text-[10px] shrink-0 ${REGISTRATION_STATUS_COLOR[r.status] || ''}`}>{REGISTRATION_STATUS_LABEL[r.status] || r.status}</Badge>
                         {r._anom_count > 0 && <Badge className="bg-red-600 text-white text-[10px]">{r._anom_count} anom.</Badge>}
@@ -4315,7 +4370,7 @@ function ValidationRequestCard({ req, onSetRdv, onLock, onCancel }) {
             <div className="flex items-center gap-2 mb-1">
               <Building2 className="w-4 h-4 text-slate-500" />
               <AiInsightTrigger registration={{ id: req.registration_id || req.id, ai_insight: req.ai_insight, ai_insight_vigilance: req.ai_insight_vigilance, ai_insight_generated_at: req.ai_insight_generated_at }} size="xs" />
-              <h3 className="font-bold text-base">{req.organization?.name || '—'}</h3>
+              <ExposantLink id={req.registration_id || req.id} className="font-bold text-base">{req.organization?.name || '—'}</ExposantLink>
               <Badge variant="secondary" className="text-xs">{req.organization?.discipline || '—'}</Badge>
             </div>
             <div className="text-sm text-slate-600 grid md:grid-cols-3 gap-x-4 gap-y-1">
@@ -4809,6 +4864,7 @@ function RatingInline({ n }) {
 
 // ---------- ConfirmedExposantsPanel: liste des exposants confirmés + caution à jour pour un site ----------
 function ConfirmedExposantsPanel({ stands, venue }) {
+  const { open: openExposant } = useExposantPanel();
   if (!venue) return null;
 
   const exposants = (stands || [])
@@ -4881,9 +4937,9 @@ function ConfirmedExposantsPanel({ stands, venue }) {
             {rows.length === 0 ? (
               <tr><td colSpan={9} className="py-6 text-center text-slate-400 italic">Aucun exposant attribué sur ce site.</td></tr>
             ) : rows.sort((a,b)=> (a.stand_code||'').localeCompare(b.stand_code||'')).map(r => (
-              <tr key={r.stand_code} className="hover:bg-slate-50/50">
+              <tr key={r.stand_code} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => r.registration_id && openExposant(r.registration_id)}>
                 <td className="py-2 px-4 font-mono text-xs font-bold">{r.stand_code}</td>
-                <td className="font-medium">{r.organization.name}</td>
+                <td className="font-medium"><ExposantLink id={r.registration_id} className="font-medium">{r.organization.name}</ExposantLink></td>
                 <td className="text-xs text-slate-600">{r.organization.discipline}</td>
                 <td className="text-xs text-slate-600">{r.main_email || '—'}</td>
                 <td className="text-center">
@@ -5921,7 +5977,7 @@ function AnimationsView() {
   const [filterSearch, setFilterSearch] = useState('');
   const [groupByVenue, setGroupByVenue] = useState(true);
   const [editingSlot, setEditingSlot] = useState(null);
-  const [openExpId, setOpenExpId] = useState(null);
+  const { open: openExposant, refreshTrigger } = useExposantPanel();
 
   const load = async () => {
     setLoading(true);
@@ -6097,7 +6153,7 @@ function AnimationsView() {
                   <div className="font-bold text-slate-900 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> {g.venue_name}</div>
                   <Badge variant="secondary">{g.items.length} créneau{g.items.length > 1 ? 'x' : ''}</Badge>
                 </div>
-                <AnimSlotsTable slots={g.items} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => setOpenExpId(s.registration_id)} />
+                <AnimSlotsTable slots={g.items} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => openExposant(s.registration_id)} />
               </CardContent>
             </Card>
           ))}
@@ -6105,7 +6161,7 @@ function AnimationsView() {
       ) : (
         <Card>
           <CardContent className="p-3">
-            <AnimSlotsTable slots={filteredSlots} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => setOpenExpId(s.registration_id)} />
+            <AnimSlotsTable slots={filteredSlots} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => openExposant(s.registration_id)} />
           </CardContent>
         </Card>
       )}
@@ -6119,10 +6175,7 @@ function AnimationsView() {
         />
       )}
 
-      {/* Ouvre la fiche exposant pour synchro complète */}
-      {openExpId && (
-        <FicheExposant id={openExpId} onClose={() => { setOpenExpId(null); load(); }} />
-      )}
+      {/* FicheExposant ouvert globalement via ExposantPanelProvider */}
     </div>
   );
 }
