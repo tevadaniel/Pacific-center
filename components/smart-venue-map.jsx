@@ -8,13 +8,19 @@ import VenueMapPng from '@/components/venue-map-png';
  */
 export default function SmartVenueMap({ venue, stands, highlightStandCode, highlightRegId, onStandClick, onStandsReload, editable = false, showFilters = true, compact = false }) {
   return (
-    <VenueMapPng
-      venue={venue}
-      stands={stands}
-      highlightStandCode={highlightStandCode}
-      onStandClick={onStandClick}
-      onStandsReload={onStandsReload}
-      editable={editable}
-    />
+    <div className="space-y-1">
+      <VenueMapPng
+        venue={venue}
+        stands={stands}
+        highlightStandCode={highlightStandCode}
+        onStandClick={onStandClick}
+        onStandsReload={onStandsReload}
+        editable={editable}
+      />
+      {/* Mention permanente, discrète mais visible — sur tous les plans (admin, exposant, pacific, jour-j) */}
+      <div className="text-xs italic text-slate-500 text-center pt-1 select-none">
+        Sous réserve de modification le jour J
+      </div>
+    </div>
   );
 }

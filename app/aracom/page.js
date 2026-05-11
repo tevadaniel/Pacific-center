@@ -16,12 +16,12 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, RotateCcw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp } from 'lucide-react';
+import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, RotateCcw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp, Ban, Music, Filter } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, CartesianGrid } from 'recharts';
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, PRIORITY_DEFINITIONS, PROSPECT_STATUS_DEFINITIONS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
@@ -45,6 +45,7 @@ const TABS = [
   { key: 'satisfaction', label: 'Satisfaction', href: '/aracom?tab=satisfaction' },
   { key: 'documents-officiels', label: 'Docs officiels', href: '/aracom?tab=documents-officiels' },
   { key: 'deadlines', label: '⏰ Deadlines', href: '/aracom?tab=deadlines' },
+  { key: 'animations', label: '🎭 Animations', href: '/aracom?tab=animations' },
   { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
   { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
@@ -74,7 +75,7 @@ const TAB_GROUPS = [
     key: 'configuration',
     label: 'Configuration',
     icon: '⚙️',
-    items: ['sites', 'deadlines', 'backup', 'import'],
+    items: ['sites', 'animations', 'deadlines', 'backup', 'import'],
   },
   { key: 'satisfaction', label: 'Post-événement', icon: '⭐', single: true, redirectTo: 'satisfaction' },
 ];
@@ -148,6 +149,7 @@ export default function AracomPage() {
       {activeTab === 'bilans' && <BilansView />}
       {activeTab === 'satisfaction' && <SatisfactionAdminView />}
       {activeTab === 'backup' && <BackupView />}
+      {activeTab === 'animations' && <AnimationsView />}
       {activeTab === 'import' && <ImportExcelView />}
       <ChatbotFloating role="aracom_admin" />
     </Shell>
@@ -3203,6 +3205,18 @@ function AccessTokensView() {
     try { await api(`/api/access-tokens/${t.id}/revoke`, { method: 'POST', body: '{}' }); toast.success('Lien révoqué'); load(); }
     catch (e) { toast.error(e.message); }
   };
+
+  // 🔴 Révocation groupée — invalide tous les liens actifs en une seule action
+  const revokeAll = async () => {
+    const activeCount = tokens.filter(t => !t.is_revoked && !t.is_expired).length;
+    if (activeCount === 0) { toast.info('Aucun lien actif à révoquer'); return; }
+    if (!confirm(`⚠️ RÉVOCATION GROUPÉE\n\nVous allez révoquer ${activeCount} lien${activeCount > 1 ? 's' : ''} actif${activeCount > 1 ? 's' : ''}.\nCette action est irréversible.\n\nLes exposants et Pacific Centers ne pourront plus accéder à leur espace tant qu'un nouveau lien ne leur aura pas été généré.\n\nConfirmer la révocation ?`)) return;
+    try {
+      const res = await api('/api/access-tokens/revoke-all', { method: 'POST', body: '{}' });
+      toast.success(`✅ ${res.revoked} lien${res.revoked > 1 ? 's' : ''} révoqué${res.revoked > 1 ? 's' : ''}`);
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
   const resend = async (t) => {
     try { await api(`/api/access-tokens/${t.id}/resend`, { method: 'POST', body: '{}' }); toast.success('Email renvoyé à ' + t.email); }
     catch (e) { toast.error(e.message); }
@@ -3238,6 +3252,7 @@ function AccessTokensView() {
             <Button size="sm" onClick={() => setShowCreate('access')} className="bg-blue-600 hover:bg-blue-700 gap-1.5" data-testid="generate-magic-link-exposant"><Send className="w-4 h-4" /> Lien d&apos;accès exposant</Button>
             <Button size="sm" onClick={() => setShowCreate('new_exposant')} className="bg-violet-600 hover:bg-violet-700 gap-1.5" data-testid="generate-magic-link-new-exposant"><Plus className="w-4 h-4" /> Créer & inviter exposant</Button>
             <Button size="sm" onClick={() => setShowCreate('pacific')} className="bg-cyan-600 hover:bg-cyan-700 gap-1.5" data-testid="generate-magic-link-pacific"><Eye className="w-4 h-4" /> Lien Pacific Centers</Button>
+            <Button size="sm" onClick={revokeAll} className="bg-rose-600 hover:bg-rose-700 gap-1.5" data-testid="revoke-all-tokens" disabled={tokens.filter(t => !t.is_revoked && !t.is_expired).length === 0}><Ban className="w-4 h-4" /> Révoquer tous les liens</Button>
           </div>
         </CardContent>
       </Card>
@@ -5892,6 +5907,377 @@ function StarRow({ label, value, onChange }) {
     </div>
   );
 }
+
+// ============================================================
+// 🎭 ANIMATIONS — Vue consolidée de toutes les animations exposants
+// ============================================================
+function AnimationsView() {
+  const [slots, setSlots] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterVenue, setFilterVenue] = useState('all');
+  const [filterDay, setFilterDay] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [groupByVenue, setGroupByVenue] = useState(true);
+  const [editingSlot, setEditingSlot] = useState(null);
+  const [openExpId, setOpenExpId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, v] = await Promise.all([
+        api('/api/animation-slots'),
+        api('/api/venues'),
+      ]);
+      setSlots(Array.isArray(s) ? s : []);
+      setVenues(Array.isArray(v) ? v : []);
+    } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // Filtres
+  const filteredSlots = useMemo(() => {
+    return slots.filter(s => {
+      if (filterVenue !== 'all' && s.venue_id !== filterVenue) return false;
+      if (filterDay !== 'all' && s.day_label !== filterDay) return false;
+      if (filterStatus !== 'all' && s.status !== filterStatus) return false;
+      if (filterSearch) {
+        const q = filterSearch.toLowerCase();
+        const haystack = `${s.organization_name || ''} ${s.discipline || ''} ${s.title || ''} ${s.stand_code || ''}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [slots, filterVenue, filterDay, filterStatus, filterSearch]);
+
+  // 🔥 Détection conflits = même venue + même day + chevauchement horaire + (même lieu si dispo)
+  const conflicts = useMemo(() => {
+    const set = new Set();
+    for (let i = 0; i < filteredSlots.length; i++) {
+      for (let j = i + 1; j < filteredSlots.length; j++) {
+        const a = filteredSlots[i], b = filteredSlots[j];
+        if (a.venue_id !== b.venue_id) continue;
+        if (a.day_label !== b.day_label) continue;
+        // Même lieu (location_type+stand si applicable) = conflit potentiel uniquement si même zone partagée
+        if (a.location_type === 'stand' && b.location_type === 'stand' && a.stand_code !== b.stand_code) continue;
+        // Chevauchement
+        const aS = (a.start_time || '00:00'), aE = (a.end_time || '00:00');
+        const bS = (b.start_time || '00:00'), bE = (b.end_time || '00:00');
+        if (aS < bE && bS < aE) { set.add(a.id); set.add(b.id); }
+      }
+    }
+    return set;
+  }, [filteredSlots]);
+
+  const statusBadge = (st) => {
+    const cls = {
+      'planifié': 'bg-amber-100 text-amber-800 border-amber-300',
+      'confirmé': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      'modifié': 'bg-blue-100 text-blue-800 border-blue-300',
+      'annulé': 'bg-rose-100 text-rose-800 border-rose-300',
+    }[st] || 'bg-slate-100 text-slate-700 border-slate-300';
+    return <Badge variant="outline" className={`${cls} text-xs`}>{st || '—'}</Badge>;
+  };
+
+  const saveSlot = async (slotId, patch) => {
+    try {
+      await api(`/api/animation-slots/${slotId}`, { method: 'PUT', body: JSON.stringify(patch) });
+      toast.success('Animation mise à jour');
+      setEditingSlot(null);
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const deleteSlot = async (slot) => {
+    if (!confirm(`Supprimer l'animation "${slot.title || ''}" de ${slot.organization_name} ?\n${slot.day_label} ${slot.start_time}–${slot.end_time}`)) return;
+    try {
+      await api(`/api/animation-slots/${slot.id}`, { method: 'DELETE' });
+      toast.success('Animation supprimée');
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  // Groupement par site
+  const grouped = useMemo(() => {
+    if (!groupByVenue) return null;
+    const map = {};
+    for (const s of filteredSlots) {
+      const k = s.venue_id || 'aucun';
+      if (!map[k]) map[k] = { venue_name: s.venue_name || 'Aucun site', items: [] };
+      map[k].items.push(s);
+    }
+    // Trier par heure dans chaque groupe
+    Object.values(map).forEach(g => g.items.sort((a, b) => {
+      const dayCmp = (a.day_label || '').localeCompare(b.day_label || '');
+      if (dayCmp !== 0) return dayCmp;
+      return (a.start_time || '').localeCompare(b.start_time || '');
+    }));
+    return map;
+  }, [filteredSlots, groupByVenue]);
+
+  // Stats KPIs
+  const stats = useMemo(() => ({
+    total: slots.length,
+    confirmes: slots.filter(s => s.status === 'confirmé').length,
+    planifies: slots.filter(s => s.status === 'planifié').length,
+    modifies: slots.filter(s => s.status === 'modifié').length,
+    conflicts_count: conflicts.size,
+  }), [slots, conflicts]);
+
+  if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Music className="w-5 h-5 text-violet-600" /> Animations exposants</h2>
+          <p className="text-sm text-slate-500">Vue consolidée de toutes les animations déclarées · {stats.total} créneau{stats.total > 1 ? 'x' : ''} · {stats.conflicts_count > 0 && <span className="text-rose-600 font-medium">⚠️ {stats.conflicts_count} conflit{stats.conflicts_count > 1 ? 's' : ''} détecté{stats.conflicts_count > 1 ? 's' : ''}</span>}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={load} className="gap-2"><RefreshCw className="w-4 h-4" /> Actualiser</Button>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCard label="Total" value={stats.total} accent="blue" />
+        <KpiCard label="Confirmées" value={stats.confirmes} accent="emerald" />
+        <KpiCard label="Planifiées" value={stats.planifies} accent="amber" />
+        <KpiCard label="Modifiées" value={stats.modifies} accent="violet" />
+        <KpiCard label="Conflits" value={stats.conflicts_count} accent={stats.conflicts_count > 0 ? 'red' : 'slate'} />
+      </div>
+
+      {/* Filtres */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap gap-2 items-center">
+          <Filter className="w-4 h-4 text-slate-500" />
+          <Input placeholder="Rechercher (exposant, discipline, titre, stand)…" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} className="max-w-xs h-9" />
+          <Select value={filterVenue} onValueChange={setFilterVenue}>
+            <SelectTrigger className="w-[160px] h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les sites</SelectItem>
+              {venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filterDay} onValueChange={setFilterDay}>
+            <SelectTrigger className="w-[140px] h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Vendredi & Samedi</SelectItem>
+              <SelectItem value="vendredi">Vendredi 14/08</SelectItem>
+              <SelectItem value="samedi">Samedi 15/08</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[140px] h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous statuts</SelectItem>
+              <SelectItem value="planifié">Planifié</SelectItem>
+              <SelectItem value="confirmé">Confirmé</SelectItem>
+              <SelectItem value="modifié">Modifié</SelectItem>
+              <SelectItem value="annulé">Annulé</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <Label className="text-xs cursor-pointer flex items-center gap-1.5"><input type="checkbox" checked={groupByVenue} onChange={e => setGroupByVenue(e.target.checked)} className="cursor-pointer" /> Grouper par site</Label>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Liste / groupée */}
+      {filteredSlots.length === 0 ? (
+        <Card><CardContent className="py-10 text-center text-slate-500">Aucune animation ne correspond aux filtres.</CardContent></Card>
+      ) : groupByVenue ? (
+        <div className="space-y-4">
+          {Object.entries(grouped).map(([vid, g]) => (
+            <Card key={vid}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-bold text-slate-900 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> {g.venue_name}</div>
+                  <Badge variant="secondary">{g.items.length} créneau{g.items.length > 1 ? 'x' : ''}</Badge>
+                </div>
+                <AnimSlotsTable slots={g.items} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => setOpenExpId(s.registration_id)} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="p-3">
+            <AnimSlotsTable slots={filteredSlots} conflicts={conflicts} statusBadge={statusBadge} onEdit={setEditingSlot} onDelete={deleteSlot} onOpenExposant={(s) => setOpenExpId(s.registration_id)} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Edition inline */}
+      {editingSlot && (
+        <EditAnimationDialog
+          slot={editingSlot}
+          onClose={() => setEditingSlot(null)}
+          onSave={(patch) => saveSlot(editingSlot.id, patch)}
+        />
+      )}
+
+      {/* Ouvre la fiche exposant pour synchro complète */}
+      {openExpId && (
+        <FicheExposant id={openExpId} onClose={() => { setOpenExpId(null); load(); }} />
+      )}
+    </div>
+  );
+}
+
+function AnimSlotsTable({ slots, conflicts, statusBadge, onEdit, onDelete, onOpenExposant }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-xs text-slate-500 uppercase">
+            <th className="text-left p-2 font-medium">Exposant</th>
+            <th className="text-left p-2 font-medium">Site / Stand</th>
+            <th className="text-left p-2 font-medium">Jour</th>
+            <th className="text-left p-2 font-medium">Horaire</th>
+            <th className="text-left p-2 font-medium">Type / Titre</th>
+            <th className="text-left p-2 font-medium">Statut</th>
+            <th className="text-right p-2 font-medium">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {slots.map(s => {
+            const isConflict = conflicts.has(s.id);
+            return (
+              <tr key={s.id} className={`border-b hover:bg-slate-50 ${isConflict ? 'bg-rose-50/60' : ''}`} data-testid={`anim-row-${s.id}`}>
+                <td className="p-2">
+                  <button onClick={() => onOpenExposant(s)} className="text-left hover:text-blue-600 hover:underline">
+                    <div className="font-medium text-slate-900">{s.organization_name || '—'}</div>
+                    <div className="text-xs text-slate-500">{s.discipline || '—'}</div>
+                  </button>
+                </td>
+                <td className="p-2">
+                  <div className="text-slate-700">{s.venue_name || '—'}</div>
+                  <div className="text-xs text-slate-400">{s.stand_code || '—'}</div>
+                </td>
+                <td className="p-2 text-slate-700">{s.day_label === 'vendredi' ? 'Ven 14/08' : s.day_label === 'samedi' ? 'Sam 15/08' : '—'}</td>
+                <td className="p-2 font-mono text-xs">
+                  {s.start_time}–{s.end_time}
+                  {isConflict && <div className="text-rose-600 font-bold text-[10px] mt-0.5">⚠️ CONFLIT</div>}
+                </td>
+                <td className="p-2">
+                  <div className="text-slate-700">{s.slot_type || 'animation'}</div>
+                  <div className="text-xs text-slate-500 truncate max-w-[200px]">{s.title || '—'}</div>
+                </td>
+                <td className="p-2">{statusBadge(s.status)}</td>
+                <td className="p-2 text-right">
+                  <Button size="sm" variant="ghost" onClick={() => onEdit(s)} className="h-7 w-7 p-0" title="Modifier"><Sparkles className="w-3.5 h-3.5 text-blue-600" /></Button>
+                  <Button size="sm" variant="ghost" onClick={() => onDelete(s)} className="h-7 w-7 p-0" title="Supprimer"><Trash2 className="w-3.5 h-3.5 text-rose-600" /></Button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EditAnimationDialog({ slot, onClose, onSave }) {
+  const [form, setForm] = useState({
+    title: slot.title || '',
+    slot_type: slot.slot_type || 'animation',
+    start_time: slot.start_time || '09:00',
+    end_time: slot.end_time || '10:00',
+    day_label: slot.day_label || 'vendredi',
+    status: slot.status || 'planifié',
+    location_type: slot.location_type || 'stand',
+    description: slot.description || '',
+  });
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Modifier l'animation</DialogTitle>
+          <DialogDescription>{slot.organization_name} · {slot.venue_name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label>Titre</Label>
+            <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Type</Label>
+              <Select value={form.slot_type} onValueChange={v => setForm({ ...form, slot_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="animation">Animation</SelectItem>
+                  <SelectItem value="demonstration">Démonstration</SelectItem>
+                  <SelectItem value="atelier">Atelier</SelectItem>
+                  <SelectItem value="presentation">Présentation</SelectItem>
+                  <SelectItem value="performance">Performance</SelectItem>
+                  <SelectItem value="initiation">Initiation</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Statut</Label>
+              <Select value={form.status} onValueChange={v => setForm({ ...form, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="planifié">Planifié</SelectItem>
+                  <SelectItem value="confirmé">Confirmé</SelectItem>
+                  <SelectItem value="modifié">Modifié</SelectItem>
+                  <SelectItem value="annulé">Annulé</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>Jour</Label>
+              <Select value={form.day_label} onValueChange={v => setForm({ ...form, day_label: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vendredi">Vendredi</SelectItem>
+                  <SelectItem value="samedi">Samedi</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Début</Label>
+              <Input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} />
+            </div>
+            <div>
+              <Label>Fin</Label>
+              <Input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <Label>Lieu</Label>
+            <Select value={form.location_type} onValueChange={v => setForm({ ...form, location_type: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="stand">Sur le stand</SelectItem>
+                <SelectItem value="scene">Scène centrale</SelectItem>
+                <SelectItem value="exterieur">Extérieur</SelectItem>
+                <SelectItem value="autre">Autre</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Description / notes</Label>
+            <Textarea rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annuler</Button>
+          <Button onClick={() => onSave(form)} className="bg-emerald-600 hover:bg-emerald-700">Enregistrer</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 
 
 

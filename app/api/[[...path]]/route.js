@@ -3736,6 +3736,33 @@ export async function POST(request, { params }) {
       return json({ ok: true });
     }
 
+    // ✅ Révocation groupée de tous les liens actifs (non révoqués + non expirés)
+    if (route === 'access-tokens/revoke-all') {
+      // Filtres optionnels : purpose, scope (toutes les actifs par défaut)
+      const purposeFilter = body.purpose; // ex: 'access', 'inscription_exposant', 'pacific'
+      const filter = { revoked_at: null };
+      if (purposeFilter) filter.purpose = purposeFilter;
+      // Liens actifs = non révoqués (l'expiration est calculée à la lecture)
+      const activeTokens = await db.collection('access_tokens').find(filter).toArray();
+      const countBefore = activeTokens.length;
+      if (countBefore === 0) return json({ ok: true, revoked: 0, message: 'Aucun lien actif à révoquer' });
+      await db.collection('access_tokens').updateMany(
+        filter,
+        { $set: { revoked_at: new Date(), updated_at: new Date() } }
+      );
+      // Audit log
+      try {
+        await db.collection('audit_logs').insertOne({
+          id: uuid(),
+          action: 'access_tokens.bulk_revoke',
+          user_id: userId,
+          payload: { count: countBefore, purpose: purposeFilter || 'all' },
+          created_at: new Date(),
+        });
+      } catch {}
+      return json({ ok: true, revoked: countBefore });
+    }
+
     if (route.match(/^access-tokens\/[^/]+\/resend$/)) {
       const id = p[1];
       const tk = await db.collection('access_tokens').findOne({ id });
