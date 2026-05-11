@@ -4600,72 +4600,164 @@ Animations : 1 créneau d'animation maximum par jour par exposant (créneaux d'1
       let contextData = '';
 
       if (ctx.role === 'aracom_admin') {
-        // ==== ADMIN : accès total ====
-        const [regs, venues, deadlinesCfg, alerts, stats] = await Promise.all([
+        // ==== ADMIN : accès TOTAL — liste exhaustive de la base ====
+        const [regs, venues, deadlinesCfg, anomalies, deposits, valReqs, satSurveys, tasks] = await Promise.all([
           db.collection('registrations').find({ edition_id: EDITION_ID }).toArray(),
           db.collection('venues').find({ edition_id: EDITION_ID }).toArray(),
           db.collection('app_settings').findOne({ key: 'step_deadlines' }),
-          db.collection('registration_anomalies').find({ resolved: { $ne: true } }).toArray(),
-          db.collection('deposit_transactions').find({ edition_id: EDITION_ID }).toArray(),
+          db.collection('registration_anomalies').find({ resolved_status: { $ne: 'resolu' } }).toArray(),
+          db.collection('deposit_transactions').find({}).toArray(),
+          db.collection('validation_requests').find({ status: { $in: ['en_attente', 'rdv_fixe'] } }).toArray(),
+          db.collection('satisfaction_surveys').find({}).toArray().catch(() => []),
+          db.collection('tasks_or_followups').find({ status: { $in: ['a_faire', 'en_cours'] } }).toArray().catch(() => []),
         ]);
         const orgs = await db.collection('organizations').find({ id: { $in: regs.map(r => r.organization_id) } }).toArray();
         const orgMap = Object.fromEntries(orgs.map(o => [o.id, o]));
+        const venueMap = Object.fromEntries(venues.map(v => [v.id, v]));
+        const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
 
         const byStatus = regs.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
-        const cautionsReceived = stats.filter(s => s.type === 'caution_received').length;
-        const cautionsTotal = stats.filter(s => s.type === 'caution_received').reduce((a, s) => a + (s.amount || 0), 0);
+        const cautionsRecues = deposits.filter(d => d.status === 'recue').length;
+        const cautionsAttente = deposits.filter(d => d.status !== 'recue' && d.status !== 'restituee').length;
+        const xpfEncaisses = deposits.filter(d => d.status === 'recue').reduce((a, d) => a + (d.amount_xpf || 20000), 0);
         const avgCompletion = regs.length ? Math.round(regs.reduce((a, r) => a + (r.completion_percent || 0), 0) / regs.length) : 0;
+        const convSigned = regs.filter(r => r.is_convention_signed).length;
+        const insurUploaded = regs.filter(r => r.is_insurance_uploaded).length;
 
-        // Top 10 exposants à risque
+        // ===== LISTE EXHAUSTIVE DES EXPOSANTS (format pipe-séparé compact) =====
+        const exposantsRows = regs.map(r => {
+          const o = orgMap[r.organization_id] || {};
+          const v = venueMap[r.venue_id] || {};
+          const dep = depByReg[r.id] || {};
+          return `${o.name || '?'} | ${o.discipline || '?'} | site=${v.name || '—'} | stand=${r.stand_code || '—'} | statut=${r.status} | compl=${r.completion_percent || 0}% | caution=${dep.status || 'non_demandee'} | conv=${r.is_convention_signed ? 'oui' : 'non'} | assur=${r.is_insurance_uploaded ? 'oui' : 'non'} | contact=${o.contact_name || '—'} | email=${o.main_email || '—'} | tel=${o.main_phone || '—'} | prio=${o.priority_level || '—'}`;
+        });
+
+        // ===== Détails par site (vrais chiffres) =====
+        const byVenue = venues.map(v => {
+          const vregs = regs.filter(r => r.venue_id === v.id);
+          const confirmed = vregs.filter(r => r.status === 'confirme').length;
+          const aRelancer = vregs.filter(r => r.status === 'a_relancer').length;
+          const aConfirmer = vregs.filter(r => r.status === 'a_confirmer').length;
+          const cautionsOK = vregs.filter(r => depByReg[r.id]?.status === 'recue').length;
+          const capacity = v.stands_count || v.total_stands || 0;
+          const fillPct = capacity > 0 ? Math.round((vregs.length / capacity) * 100) : 0;
+          return `${v.name} : capacité ${capacity} stands · ${vregs.length} inscrits (${fillPct}%) · ${confirmed} confirmés · ${aConfirmer} à confirmer · ${aRelancer} à relancer · ${cautionsOK} cautions reçues`;
+        });
+
+        // ===== Anomalies ouvertes détaillées =====
+        const anomLines = anomalies.map(a => {
+          const reg = regs.find(r => r.id === a.registration_id);
+          const o = reg ? orgMap[reg.organization_id] : null;
+          const v = reg ? venueMap[reg.venue_id] : null;
+          return `• [${a.severity_level || '?'}] ${a.anomaly_type || '?'} — ${o?.name || '?'} (${v?.name || '?'}) : ${a.title || a.description || '—'}`;
+        });
+
+        // ===== Validations en attente =====
+        const valLines = valReqs.map(vr => {
+          const reg = regs.find(r => r.id === vr.registration_id);
+          const o = reg ? orgMap[reg.organization_id] : null;
+          return `• ${o?.name || '?'} — statut ${vr.status} · paiement ${vr.preferred_payment || '—'} · RDV ${vr.rdv_date || '—'}`;
+        });
+
+        // ===== Top exposants à risque =====
         const atRisk = regs
           .filter(r => (r.completion_percent || 0) < 50 && r.status !== 'confirme')
           .sort((a, b) => (a.completion_percent || 0) - (b.completion_percent || 0))
-          .slice(0, 10)
-          .map(r => `• ${orgMap[r.organization_id]?.name || '?'} (${orgMap[r.organization_id]?.discipline || '?'}) — ${r.completion_percent || 0}% · ${r.status}`);
+          .slice(0, 15)
+          .map(r => `• ${orgMap[r.organization_id]?.name || '?'} — ${r.completion_percent || 0}% · ${r.status} · ${venueMap[r.venue_id]?.name || 'aucun site'}`);
 
-        // Top exposants confirmés par site
-        const byVenue = venues.map(v => {
-          const vregs = regs.filter(r => r.venue_id === v.id);
-          return `${v.name} : ${vregs.length} inscrit(s), ${vregs.filter(r => r.status === 'confirme').length} confirmé(s)`;
-        });
-
+        // ===== Deadlines =====
         const deadlines = deadlinesCfg?.deadlines || {};
         const deadlineLines = Object.entries(deadlines).map(([k, v]) => {
           const d = dayRemaining(v);
           return `• ${k} : ${fmtDate(v)} (${d > 0 ? `J-${d}` : d === 0 ? 'aujourd\'hui' : `dépassée de ${Math.abs(d)}j`})`;
         }).join('\n') || 'Aucune deadline configurée.';
 
+        // ===== Satisfaction (si réponses présentes) =====
+        const satLine = satSurveys.length
+          ? `${satSurveys.length} réponses · moy globale ${(satSurveys.reduce((a, s) => a + (s.overall_rating || 0), 0) / satSurveys.length).toFixed(1)}/5`
+          : 'aucune réponse';
+
+        // ===== Tâches ouvertes =====
+        const tasksOpen = tasks.length;
+
         contextData = `${EVENT_INFO}
 
 ═══════════════════════════════════════════════════════════════
-📊 TABLEAU DE BORD ARACOM (temps réel)
+📊 SNAPSHOT TEMPS RÉEL — Forum 2026 (J-${dayRemaining('2026-08-14') ?? '?'} avant l'événement)
 ═══════════════════════════════════════════════════════════════
 Inscriptions totales : ${regs.length}
 Statuts : ${Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(', ')}
 Complétion moyenne : ${avgCompletion}%
+Conventions signées : ${convSigned}/${regs.length}
+Attestations assurance déposées : ${insurUploaded}/${regs.length}
+Cautions : ${cautionsRecues} reçues · ${cautionsAttente} en attente · ${xpfEncaisses.toLocaleString('fr-FR')} XPF encaissés
+Anomalies ouvertes : ${anomalies.length}
+Validations en attente : ${valReqs.length}
+Tâches ouvertes : ${tasksOpen}
+Satisfaction : ${satLine}
 
-Cautions : ${cautionsReceived} reçues (total ${cautionsTotal.toLocaleString('fr-FR')} XPF)
-Anomalies ouvertes : ${alerts.length}
-
-RÉPARTITION PAR SITE :
+═══════════════════════════════════════════════════════════════
+🌍 RÉPARTITION PAR SITE (${venues.length} sites)
+═══════════════════════════════════════════════════════════════
 ${byVenue.join('\n')}
 
-DEADLINES ACTUELLES :
+═══════════════════════════════════════════════════════════════
+📅 DEADLINES CONFIGURÉES
+═══════════════════════════════════════════════════════════════
 ${deadlineLines}
 
-TOP EXPOSANTS À RISQUE (complétion < 50%) :
-${atRisk.join('\n') || 'Aucun.'}`;
+═══════════════════════════════════════════════════════════════
+⚠️ ANOMALIES OUVERTES (${anomalies.length})
+═══════════════════════════════════════════════════════════════
+${anomLines.join('\n') || 'Aucune anomalie ouverte.'}
 
-        systemPrompt = `Tu es l'assistant IA d'ARACOM pour le Forum de la Rentrée 2026.
-Tu aides Teva GEROS et son équipe admin à piloter l'événement.
+═══════════════════════════════════════════════════════════════
+🔐 VALIDATIONS EN ATTENTE (${valReqs.length})
+═══════════════════════════════════════════════════════════════
+${valLines.join('\n') || 'Aucune demande de validation en attente.'}
 
-Ton ton : professionnel, synthétique, factuel. Tu utilises les données fournies. Si une donnée manque, dis-le simplement.
-Tu peux citer des chiffres précis, suggérer des priorités, expliquer les KPIs.
-Tu réponds en markdown court (gras, listes à puces). Pas de HTML.
-Tu ne proposes jamais d'action automatisée (pas d'envoi d'email, pas de modification en base).
+═══════════════════════════════════════════════════════════════
+🚨 EXPOSANTS À RISQUE (complétion < 50%, top 15)
+═══════════════════════════════════════════════════════════════
+${atRisk.join('\n') || 'Aucun.'}
 
-Si l'utilisateur te demande des infos sur un exposant précis, cherche-le dans les données. Si introuvable, réponds que tu ne le vois pas dans le contexte actuel.
-Si la question n'est pas liée à l'événement, redirige poliment.`;
+═══════════════════════════════════════════════════════════════
+📋 BASE COMPLÈTE DES ${regs.length} EXPOSANTS (chaque ligne = 1 exposant)
+Format : nom | discipline | site | stand | statut | compl% | caution | conv | assur | contact | email | tel | prio
+═══════════════════════════════════════════════════════════════
+${exposantsRows.join('\n')}`;
+
+        systemPrompt = `Tu es l'assistant opérationnel de Teva GEROS, directeur d'ARACOM Conseil, organisateur du Forum de la Rentrée 2026 (6 sites Pacific Centers en Polynésie française).
+
+🎯 RÈGLES ABSOLUES (DO):
+1. Tu as un accès COMPLET aux données de la base MongoDB ci-dessous : 67 exposants, 6 sites, anomalies, cautions, validations, deadlines.
+2. À CHAQUE question, interroge ces données et réponds avec des chiffres RÉELS, des noms RÉELS, des listes RÉELLES.
+3. Réponses COURTES, DIRECTES, OPÉRATIONNELLES — pas de blabla pédagogique, pas d'introduction.
+4. Si une donnée n'existe pas dans le snapshot ci-dessous, dis-le clairement en une phrase. Pas de "va chercher".
+
+🚫 INTERDICTIONS STRICTES (DON'T):
+- ❌ Ne JAMAIS dire "tu peux exporter", "va dans l'interface", "consulte l'onglet", "je n'ai pas accès"
+- ❌ Ne JAMAIS suggérer un export CSV ou un téléchargement
+- ❌ Ne JAMAIS renvoyer Teva vers une page de l'app — il connaît son outil
+- ❌ Ne JAMAIS dire "pour plus d'infos, contactez X"
+
+✅ FORMAT DE RÉPONSE :
+- Chiffres en gras quand pertinent
+- Listes à puces pour énumérer des exposants/sites
+- Markdown court (pas de HTML)
+- Réponse en français
+- Une phrase de synthèse + liste/chiffres bruts si demandé
+
+EXEMPLES :
+Q : "Combien de cautions manquent à Arue ?"
+R : "**14 cautions manquantes à Arue** sur 17 exposants engagés :\n• I Mua Papeete\n• Olympique de Pirae\n• [...]"
+
+Q : "Quels exposants sont prioritaires à relancer ?"
+R : "**15 exposants à risque** (complétion < 50%) :\n• Lotus Bleu — 12% · à relancer · Faaa\n• [...]"
+
+Q : "Statut des conventions ?"
+R : "**4 conventions signées sur 67** (6%). Il en manque 63."`;
 
       } else if (ctx.role === 'exposant') {
         // ==== EXPOSANT : UNIQUEMENT son profil ====
