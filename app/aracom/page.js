@@ -1091,16 +1091,35 @@ function FicheExposant({ id, onClose }) {
 
                 {/* Animations intégrées dans Profil */}
                 <div className="pt-2 border-t mt-3">
-                  <div className="font-medium text-sm mb-2 flex items-center gap-2">🎭 Créneaux d'animation</div>
+                  <div className="font-medium text-sm mb-2 flex items-center gap-2">🎭 Créneaux d&apos;animation</div>
                   {data.slots.length === 0 ? <p className="text-slate-500 text-sm">Aucun créneau planifié.</p> : data.slots.map(s => (
-                    <div key={s.id} className="border rounded-md p-3 flex items-center justify-between mb-2">
-                      <div>
-                        <div className="font-medium text-sm">{s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'} • {s.start_time}–{s.end_time}</div>
-                        <div className="text-xs text-slate-500">{s.title}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{s.status}</Badge>
-                        <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ce créneau ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); load(); }}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                    <div key={s.id} className="border rounded-md p-3 mb-2 bg-violet-50/30">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-slate-900">{s.title || 'Sans nom'}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {s.day_label === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août'} • {s.start_time}–{s.end_time}
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {s.slot_type && <Badge variant="outline" className="text-[10px] border-violet-300 text-violet-700">{s.slot_type}</Badge>}
+                            {s.location_type && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700">{s.location_type === 'sur_stand' || s.location_type === 'stand' ? 'Sur stand' : 'Zone démo'}</Badge>}
+                            {s.target_audience && <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">{s.target_audience}</Badge>}
+                          </div>
+                          {s.description && (
+                            <div className="text-xs text-slate-700 mt-2 italic bg-white/60 rounded p-2 border border-violet-100">
+                              <span className="font-medium text-violet-700">Description :</span> {s.description}
+                            </div>
+                          )}
+                          {s.material_needs && (
+                            <div className="text-[11px] text-slate-500 mt-1.5">
+                              <span className="font-medium">Matériel :</span> {s.material_needs}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant="secondary">{s.status}</Badge>
+                          <Button size="sm" variant="ghost" onClick={async () => { if (!confirm('Supprimer ce créneau ?')) return; await api(`/api/animation-slots/${s.id}`, { method: 'DELETE' }); toast.success('Supprimé'); load(); }}><Trash2 className="w-3 h-3 text-red-600" /></Button>
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -2070,11 +2070,13 @@ export async function POST(request, { params }) {
         if (!a.location_type || !['sur_stand', 'zone_demo'].includes(a.location_type)) errs.push('lieu (sur stand / zone démo)');
         if (!a.slot_type) errs.push('type');
         if (!a.title) errs.push('nom');
+        if (!a.description || String(a.description).trim().length < 10) errs.push('description courte (10 caractères mini)');
+        if (a.description && String(a.description).length > 300) errs.push('description trop longue (300 caractères max)');
         if (!a.target_audience) errs.push('public cible');
         if (!a.start_time || !a.end_time) errs.push('horaire');
         if (a.start_time && a.end_time && a.start_time >= a.end_time) errs.push('horaire (fin > début)');
         if (errs.length) return err(`Animation ${a.day_label || '?'} : ${errs.join(', ')}`, 400);
-        normalized.push(a);
+        normalized.push({ ...a, description: String(a.description).trim() });
       }
 
       // Maximum 1 animation par jour
@@ -2122,6 +2124,7 @@ export async function POST(request, { params }) {
           slot_type: a.slot_type,
           location_type: a.location_type,
           title: a.title,
+          description: a.description,
           target_audience: a.target_audience,
           material_needs: a.material_needs || '',
           status: 'planifié',
@@ -2144,7 +2147,7 @@ export async function POST(request, { params }) {
       const { registration_id } = body;
       if (!registration_id) return err('registration_id requis');
       const valReq = await db.collection('validation_requests').findOne({
-        registration_id, status: { $in: ['rdv_fixe', 'en_attente'] },
+        registration_id, status: { $in: ['rdv_fixe', 'en_attente', 'rdv_confirme'] },
       });
       if (!valReq) return err('Veuillez d\'abord fixer votre rendez-vous caution', 400);
       await db.collection('registrations').updateOne(
@@ -2152,6 +2155,48 @@ export async function POST(request, { params }) {
         { $set: { wizard_step: 5, updated_at: new Date() } }
       );
       return json({ ok: true, next_step: 5 });
+    }
+
+    // Étape 5 — Confirmer le RDV proposé par ARACOM
+    if (route === 'wizard/rdv-confirm') {
+      const { registration_id } = body;
+      if (!registration_id) return err('registration_id requis');
+      const valReq = await db.collection('validation_requests').findOne({
+        registration_id, status: 'rdv_fixe',
+      });
+      if (!valReq) return err('Aucun RDV à confirmer', 404);
+      await db.collection('validation_requests').updateOne(
+        { id: valReq.id },
+        { $set: { status: 'rdv_confirme', confirmed_by_exposant_at: new Date(), updated_at: new Date() } }
+      );
+      return json({ ok: true, validation_request_id: valReq.id, status: 'rdv_confirme' });
+    }
+
+    // Étape 5 — Demander une modification du RDV (renvoie en attente)
+    if (route === 'wizard/rdv-modify') {
+      const { registration_id, new_proposal, new_preferred_payment } = body;
+      if (!registration_id) return err('registration_id requis');
+      if (!new_proposal || String(new_proposal).trim().length < 3) {
+        return err('Indiquez vos nouvelles disponibilités', 400);
+      }
+      const valReq = await db.collection('validation_requests').findOne({
+        registration_id, status: { $in: ['rdv_fixe', 'rdv_confirme'] },
+      });
+      if (!valReq) return err('Aucun RDV à modifier', 404);
+      await db.collection('validation_requests').updateOne(
+        { id: valReq.id },
+        { $set: {
+            status: 'en_attente',
+            rdv_proposal: String(new_proposal).trim(),
+            ...(new_preferred_payment ? { preferred_payment: new_preferred_payment } : {}),
+            rdv_date: null,
+            rdv_location: null,
+            modify_requested_at: new Date(),
+            updated_at: new Date(),
+          }
+        }
+      );
+      return json({ ok: true, validation_request_id: valReq.id, status: 'en_attente' });
     }
 
     // Étape 5 — Finaliser (verrouille tout + envoie email avec badge en pièce jointe)

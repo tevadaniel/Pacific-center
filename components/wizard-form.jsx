@@ -90,6 +90,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                 location_type: a.location_type === 'stand' ? 'sur_stand' : (a.location_type || 'sur_stand'),
                 slot_type: a.slot_type || '',
                 title: a.title || '',
+                description: a.description || '',
                 target_audience: a.target_audience || '',
                 material_needs: a.material_needs || '',
                 start_time: a.start_time || '',
@@ -607,6 +608,7 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
         location_type: 'sur_stand',
         slot_type: '',
         title: '',
+        description: '',
         target_audience: '',
         material_needs: '',
         start_time: '',
@@ -644,6 +646,8 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
       if (!a.location_type) errs.push('lieu');
       if (!a.slot_type) errs.push('type');
       if (!a.title) errs.push('nom');
+      if (!a.description || a.description.trim().length < 10) errs.push('description (10 caractères mini)');
+      if (a.description && a.description.length > 300) errs.push('description trop longue (300 max)');
       if (!a.target_audience) errs.push('public cible');
       if (!a.start_time || !a.end_time) errs.push('horaire');
       if (a.start_time && a.end_time && a.start_time >= a.end_time) errs.push('horaire fin > début');
@@ -782,6 +786,16 @@ function AnimationBlock({ anim, idx, config, occupied, update }) {
       <Field label="Nom de l'animation *" testid={`anim-${a.day_label}-title`}>
         <Input value={a.title || ''} onChange={e => update('title', e.target.value)} placeholder="Ex : Initiation natation enfants" />
       </Field>
+      <Field label="Description courte * (10 à 300 caractères)" testid={`anim-${a.day_label}-description`}>
+        <Textarea
+          rows={2}
+          maxLength={300}
+          value={a.description || ''}
+          onChange={e => update('description', e.target.value)}
+          placeholder="Décrivez votre animation en 1-2 phrases : ce que le public va voir / faire / découvrir."
+        />
+        <div className="text-[10px] text-slate-400 mt-1 text-right">{(a.description || '').length}/300</div>
+      </Field>
       <Field label="Besoins matériels (optionnel)" testid={`anim-${a.day_label}-material`}>
         <Textarea rows={2} value={a.material_needs || ''} onChange={e => update('material_needs', e.target.value)} placeholder="Ex : 2 tapis, sono, projecteur…" />
       </Field>
@@ -881,6 +895,34 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
     finally { setSubmittingRdv(false); }
   };
 
+  const [editingRdv, setEditingRdv] = useState(false);
+  const [modifyForm, setModifyForm] = useState({ new_proposal: '', new_preferred_payment: '' });
+
+  const confirmRdv = async () => {
+    setSubmittingRdv(true);
+    try {
+      await api('/wizard/rdv-confirm', { method: 'POST', body: JSON.stringify({ registration_id: registrationId }) });
+      toast.success('RDV caution confirmé ✓');
+      await reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setSubmittingRdv(false); }
+  };
+
+  const submitModifyRdv = async () => {
+    if (!modifyForm.new_proposal || modifyForm.new_proposal.trim().length < 3) {
+      toast.error('Indiquez vos nouvelles disponibilités'); return;
+    }
+    setSubmittingRdv(true);
+    try {
+      await api('/wizard/rdv-modify', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, ...modifyForm }) });
+      toast.success('Demande de modification envoyée — ARACOM va vous recontacter');
+      setEditingRdv(false);
+      setModifyForm({ new_proposal: '', new_preferred_payment: '' });
+      await reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setSubmittingRdv(false); }
+  };
+
   const hasRdv = !!(state.validation_request?.rdv_date || state.validation_request?.rdv_proposal);
 
   const submit = async () => {
@@ -932,16 +974,60 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
         {/* 1) RDV caution */}
         <div>
           <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-amber-600" /> 1. Rendez-vous caution (obligatoire)</h3>
-          {state.validation_request?.rdv_date ? (
-            <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r">
-              <div className="font-bold text-emerald-900">✓ RDV fixé pour le {new Date(state.validation_request.rdv_date).toLocaleString('fr-FR')}</div>
-              <div className="text-sm text-emerald-700 mt-1">📍 {state.validation_request.rdv_location || 'Lieu à confirmer'}</div>
+          {state.validation_request?.status === 'rdv_confirme' ? (
+            <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r space-y-2">
+              <div className="font-bold text-emerald-900">✓ RDV confirmé pour le {new Date(state.validation_request.rdv_date).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</div>
+              <div className="text-sm text-emerald-700">📍 {state.validation_request.rdv_location || 'Lieu à confirmer'}</div>
+            </div>
+          ) : state.validation_request?.rdv_date && !editingRdv ? (
+            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r space-y-3">
+              <div>
+                <div className="font-bold text-blue-900">📅 ARACOM vous propose un RDV</div>
+                <div className="text-lg font-semibold text-blue-900 mt-2">{new Date(state.validation_request.rdv_date).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}</div>
+                <div className="text-sm text-blue-700 mt-1">📍 {state.validation_request.rdv_location || 'Lieu à confirmer'}</div>
+              </div>
+              <div className="text-xs text-blue-700 bg-blue-100 rounded p-2">Confirmez ce créneau ou demandez une modification (autre date/horaire).</div>
+              <div className="flex gap-2 flex-wrap">
+                <Button onClick={confirmRdv} disabled={submittingRdv} className="bg-emerald-600 hover:bg-emerald-700 gap-1" data-testid="confirm-rdv">
+                  {submittingRdv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmer ce RDV
+                </Button>
+                <Button onClick={() => setEditingRdv(true)} variant="outline" className="gap-1" data-testid="modify-rdv">
+                  <Edit className="w-4 h-4" /> Demander une autre date
+                </Button>
+              </div>
+            </div>
+          ) : state.validation_request?.rdv_date && editingRdv ? (
+            <div className="border-2 border-amber-300 rounded-lg p-4 bg-amber-50/40 space-y-3">
+              <div className="text-sm font-medium text-amber-900">Proposer un autre créneau</div>
+              <Field label="Vos nouvelles disponibilités *" testid="modify-proposal">
+                <Textarea
+                  rows={2}
+                  value={modifyForm.new_proposal}
+                  onChange={e => setModifyForm(f => ({ ...f, new_proposal: e.target.value }))}
+                  placeholder="Ex : mardi 17/05 entre 14h et 17h ou mercredi matin"
+                />
+              </Field>
+              <Field label="Mode de caution (optionnel)">
+                <Select value={modifyForm.new_preferred_payment} onValueChange={v => setModifyForm(f => ({ ...f, new_preferred_payment: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Laisser inchangé" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cheque">Chèque</SelectItem>
+                    <SelectItem value="especes">Espèces</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setEditingRdv(false)}>Annuler</Button>
+                <Button onClick={submitModifyRdv} disabled={submittingRdv} className="bg-amber-600 hover:bg-amber-700">
+                  {submittingRdv ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null} Envoyer la demande
+                </Button>
+              </div>
             </div>
           ) : state.validation_request?.rdv_proposal ? (
             <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r">
               <div className="font-bold text-amber-900">✓ Demande de RDV envoyée</div>
-              <div className="text-sm text-amber-700 mt-1">Vos disponibilités : {state.validation_request.rdv_proposal}</div>
-              <div className="text-xs text-amber-600 mt-1">ARACOM vous contactera pour confirmer le créneau.</div>
+              <div className="text-sm text-amber-700 mt-1">Vos disponibilités : <b>{state.validation_request.rdv_proposal}</b></div>
+              <div className="text-xs text-amber-600 mt-2">ARACOM vous contactera pour confirmer le créneau et le lieu.</div>
             </div>
           ) : (
             <div className="space-y-3 p-4 border-2 border-amber-200 rounded-lg bg-amber-50/30">
@@ -1038,7 +1124,9 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
                   <RecapRow label="Nom" value={a.title} />
                   <RecapRow label="Type" value={a.slot_type} />
                   <RecapRow label="Lieu" value={a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'} />
+                  <RecapRow label="Description" value={a.description} />
                   <RecapRow label="Public cible" value={a.target_audience} />
+                  {a.material_needs ? <RecapRow label="Matériel" value={a.material_needs} /> : null}
                   <RecapRow label="Créneau" value={`${a.start_time} → ${a.end_time}`} locked />
                 </div>
               ))}
