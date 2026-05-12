@@ -10,6 +10,7 @@ import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, u
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
+import { seedVisitSlots, getFullAvailability, bookVisitSlot, releaseVisitSlot, getWizardState, createModificationToken, WIZARD_CONFIG } from '@/lib/wizard-helpers';
 import { restoreVenueLayoutsIfEmpty, restoreVenueLayoutsForce } from '@/lib/venue-layouts-restore';
 
 // 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
@@ -490,6 +491,34 @@ export async function GET(request, { params }) {
     const ctx = getUserContext(request);
 
     if (route === '' || route === 'health') return json({ ok: true, service: 'Forum Rentrée 2026' });
+
+    // ════════════════════════════════════════════════════════════════
+    // 🎯 WIZARD — Endpoints GET (disponibilités + état)
+    // ════════════════════════════════════════════════════════════════
+
+    // Disponibilités complètes (toutes venues + jours + créneaux)
+    if (route === 'wizard/availability') {
+      const data = await getFullAvailability(db);
+      return json(data);
+    }
+
+    // État wizard d'un exposant (reprise)
+    if (route.match(/^wizard\/state\/[^/]+$/)) {
+      const regId = p[2];
+      const state = await getWizardState(db, regId);
+      if (!state) return err('Inscription introuvable', 404);
+      return json(state);
+    }
+
+    // Récupère une modification_token (pour les liens email de modification)
+    if (route.match(/^wizard\/modification-token\/[^/]+$/)) {
+      const tok = p[2];
+      const t = await db.collection('modification_tokens').findOne({ token: tok });
+      if (!t) return err('Lien invalide', 404);
+      if (t.expires_at < new Date()) return err('Lien expiré', 410);
+      const state = await getWizardState(db, t.registration_id);
+      return json({ token: t, state });
+    }
 
     if (route === 'stats/public') {
       // Public stats for landing page — no auth required
@@ -1618,6 +1647,185 @@ export async function POST(request, { params }) {
     const isMultipart = contentType.includes('multipart/form-data');
     let body = {};
     if (!isMultipart) { try { body = await request.json(); } catch {} }
+
+    // ════════════════════════════════════════════════════════════════
+    // 🎯 WIZARD — Tunnel de réservation exposant en 5 étapes
+    // ════════════════════════════════════════════════════════════════
+
+    // Seed des créneaux de passage (admin uniquement)
+    if (route === 'wizard/seed-visit-slots') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const r = await seedVisitSlots(db);
+      return json({ ok: true, ...r });
+    }
+
+    // Étape 1 — Profil
+    if (route === 'wizard/profile') {
+      const { registration_id, profile } = body;
+      if (!registration_id || !profile) return err('registration_id et profile requis');
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Validations
+      const errs = [];
+      if (!profile.name) errs.push('nom de l\'association');
+      if (!profile.discipline) errs.push('secteur d\'activité');
+      if (!profile.contact_name) errs.push('nom du référent');
+      if (!profile.main_email || !/^[^@]+@[^@]+\.[^@]+$/.test(profile.main_email)) errs.push('email valide');
+      if (!profile.main_phone) errs.push('téléphone');
+      const reps = parseInt(profile.representatives_count) || 0;
+      if (reps < 1 || reps > WIZARD_CONFIG.MAX_REPRESENTATIVES) errs.push(`nombre de représentants (1–${WIZARD_CONFIG.MAX_REPRESENTATIVES})`);
+      if (!profile.stand_description) errs.push('description du stand');
+      if (profile.stand_description && profile.stand_description.length > WIZARD_CONFIG.STAND_DESCRIPTION_MAX_CHARS) {
+        errs.push(`description ≤ ${WIZARD_CONFIG.STAND_DESCRIPTION_MAX_CHARS} caractères`);
+      }
+      if (errs.length) return err(`Champs manquants ou invalides : ${errs.join(', ')}`, 400);
+
+      const update = {
+        name: profile.name,
+        discipline: profile.discipline,
+        contact_name: profile.contact_name,
+        contact_function: profile.contact_function || null,
+        main_email: profile.main_email,
+        main_phone: profile.main_phone,
+        representatives_count: reps,
+        stand_description: profile.stand_description,
+        updated_at: new Date(),
+      };
+      await db.collection('organizations').updateOne({ id: reg.organization_id }, { $set: update });
+      await db.collection('registrations').updateOne({ id: registration_id }, { $set: { wizard_step: 2, updated_at: new Date() } });
+      return json({ ok: true, next_step: 2 });
+    }
+
+    // Étape 2 — Réservation site + jour + créneau de passage
+    if (route === 'wizard/booking') {
+      const { registration_id, venue_id, day_label, visit_slot_id } = body;
+      if (!registration_id || !venue_id || !day_label || !visit_slot_id) {
+        return err('registration_id, venue_id, day_label, visit_slot_id requis');
+      }
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Vérifier que le visit_slot est cohérent
+      const vs = await db.collection('visit_slots').findOne({ id: visit_slot_id });
+      if (!vs || vs.venue_id !== venue_id || vs.day_label !== day_label) {
+        return err('Créneau incohérent avec le site/jour', 400);
+      }
+      // Réserver atomiquement
+      try {
+        const r = await bookVisitSlot(db, { visit_slot_id, registration_id });
+        // Mettre à jour la registration avec venue + day
+        await db.collection('registrations').updateOne(
+          { id: registration_id },
+          { $set: { venue_id, visit_day_label: day_label, wizard_step: 3, updated_at: new Date() } }
+        );
+        return json({ ok: true, slot: r.slot, next_step: 3 });
+      } catch (e) { return err(e.message, 400); }
+    }
+
+    // Étape 3 — Réservation animation
+    if (route === 'wizard/animation') {
+      const { registration_id, location_type, slot_type, title, target_audience, material_needs, start_time, end_time } = body;
+      if (!registration_id) return err('registration_id requis');
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (!reg.venue_id || !reg.visit_day_label) return err('Étape 2 (site/jour) manquante', 400);
+      const errs = [];
+      if (!location_type || !['sur_stand', 'zone_demo'].includes(location_type)) errs.push('lieu animation');
+      if (!slot_type) errs.push('type animation');
+      if (!title) errs.push('nom animation');
+      if (!target_audience) errs.push('public cible');
+      if (!start_time || !end_time) errs.push('horaire');
+      if (errs.length) return err(`Champs manquants : ${errs.join(', ')}`, 400);
+
+      // Vérifier qu'aucun autre exposant n'a réservé ce créneau sur ce site+jour
+      const conflict = await db.collection('animation_slots').findOne({
+        venue_id: reg.venue_id,
+        day_label: reg.visit_day_label,
+        registration_id: { $ne: registration_id },
+        status: { $ne: 'annulé' },
+        $or: [
+          { start_time: { $lt: end_time }, end_time: { $gt: start_time } },
+        ],
+      });
+      if (conflict) return err('Ce créneau est déjà pris par un autre exposant. Choisissez-en un autre.', 409);
+
+      // Supprimer toute animation existante de cet exposant (max 1 par stand)
+      await db.collection('animation_slots').deleteMany({ registration_id });
+      const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const slotId = uuid();
+      await db.collection('animation_slots').insertOne({
+        id: slotId,
+        registration_id,
+        venue_id: reg.venue_id,
+        venue_name: venue?.name,
+        organization_name: org?.name,
+        discipline: org?.discipline,
+        stand_code: reg.stand_code,
+        day_label: reg.visit_day_label,
+        start_time, end_time,
+        slot_type,
+        location_type,
+        title,
+        target_audience,
+        material_needs: material_needs || '',
+        status: 'planifié',
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: { wizard_step: 4, updated_at: new Date() } }
+      );
+      return json({ ok: true, slot_id: slotId, next_step: 4 });
+    }
+
+    // Étape 4 — Documents & RDV caution (réutilise les endpoints existants ; ici marquage step)
+    if (route === 'wizard/mark-step-4') {
+      const { registration_id } = body;
+      if (!registration_id) return err('registration_id requis');
+      const valReq = await db.collection('validation_requests').findOne({
+        registration_id, status: { $in: ['rdv_fixe', 'en_attente'] },
+      });
+      if (!valReq) return err('Veuillez d\'abord fixer votre rendez-vous caution', 400);
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: { wizard_step: 5, updated_at: new Date() } }
+      );
+      return json({ ok: true, next_step: 5 });
+    }
+
+    // Étape 5 — Finaliser (verrouille tout + envoie email + génère badge)
+    if (route === 'wizard/finalize') {
+      const { registration_id, regulation_accepted } = body;
+      if (!registration_id) return err('registration_id requis');
+      if (!regulation_accepted) return err('Vous devez accepter le règlement exposant', 400);
+      const state = await getWizardState(db, registration_id);
+      if (!state) return err('Inscription introuvable', 404);
+      // Tous les pré-requis ?
+      const missing = Object.entries(state.step_status).filter(([k, v]) => k !== 'step5_confirmed' && !v).map(([k]) => k);
+      if (missing.length) return err(`Étapes incomplètes : ${missing.join(', ')}`, 400);
+
+      // Génère les tokens de modification (90 jours)
+      const tokVisit = await createModificationToken(db, { registration_id, scope: 'visit_slot' });
+      const tokAnim = await createModificationToken(db, { registration_id, scope: 'animation_slot' });
+
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: {
+            wizard_step: 5,
+            wizard_completed_at: new Date(),
+            wizard_regulation_accepted: true,
+            modification_token_visit: tokVisit,
+            modification_token_animation: tokAnim,
+            updated_at: new Date(),
+          },
+        }
+      );
+      return json({ ok: true, modification_links: {
+        visit_slot: `${process.env.NEXT_PUBLIC_BASE_URL}/modify/visit/${tokVisit}`,
+        animation: `${process.env.NEXT_PUBLIC_BASE_URL}/modify/animation/${tokAnim}`,
+      } });
+    }
 
     // ============ RESET POUR NOUVELLE ÉDITION ============
     // Remet tous les exposants à "a_relancer" + archive leurs documents + décoche les flags
