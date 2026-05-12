@@ -11,6 +11,7 @@ import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import '@/lib/mailing-scheduler'; // Auto-start background scheduler at boot
 import { seedVisitSlots, getFullAvailability, bookVisitSlot, releaseVisitSlot, getWizardState, createModificationToken, WIZARD_CONFIG } from '@/lib/wizard-helpers';
+import { generateBadgePdf } from '@/lib/badge-generator';
 import { restoreVenueLayoutsIfEmpty, restoreVenueLayoutsForce } from '@/lib/venue-layouts-restore';
 
 // 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
@@ -518,6 +519,26 @@ export async function GET(request, { params }) {
       if (t.expires_at < new Date()) return err('Lien expiré', 410);
       const state = await getWizardState(db, t.registration_id);
       return json({ token: t, state });
+    }
+
+    // Télécharge le badge PDF d'un exposant (signé URL ou accès admin)
+    if (route.match(/^wizard\/badge\/[^/]+$/)) {
+      const regId = p[2];
+      const state = await getWizardState(db, regId);
+      if (!state) return err('Inscription introuvable', 404);
+      const buf = await generateBadgePdf({
+        organization: state.organization,
+        registration: state.registration,
+        venue: state.venue,
+        visit_slot: state.visit_slot,
+        animation_slots: state.animation_slots,
+      });
+      return new Response(buf, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `inline; filename="Badge_${(state.organization?.name || 'exposant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf"`,
+        },
+      });
     }
 
     if (route === 'stats/public') {
@@ -1652,6 +1673,49 @@ export async function POST(request, { params }) {
     // 🎯 WIZARD — Tunnel de réservation exposant en 5 étapes
     // ════════════════════════════════════════════════════════════════
 
+    // 🌐 Self-register pour le tunnel public (création registration + organization vides)
+    if (route === 'auth/self-register') {
+      const { email } = body;
+      if (!email || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) return err('Email invalide');
+      // Si une org existe déjà sur cet email, réutiliser
+      let org = await db.collection('organizations').findOne({ main_email: email.toLowerCase() });
+      let reg;
+      if (org) {
+        reg = await db.collection('registrations').findOne({ organization_id: org.id });
+      }
+      if (!reg) {
+        if (!org) {
+          const orgId = `org-pub-${uuid().slice(0, 8)}`;
+          await db.collection('organizations').insertOne({
+            id: orgId,
+            name: '',
+            discipline: '',
+            main_email: email.toLowerCase(),
+            contact_name: '',
+            main_phone: '',
+            created_at: new Date(), updated_at: new Date(),
+            source: 'self_register',
+          });
+          org = await db.collection('organizations').findOne({ id: orgId });
+        }
+        const regId = `reg-pub-${uuid().slice(0, 12)}`;
+        await db.collection('registrations').insertOne({
+          id: regId,
+          edition_id: EDITION_ID,
+          organization_id: org.id,
+          venue_id: null,
+          stand_code: null,
+          status: 'prospect',
+          completion_percent: 5,
+          wizard_step: 1,
+          source: 'self_register',
+          created_at: new Date(), updated_at: new Date(),
+        });
+        reg = await db.collection('registrations').findOne({ id: regId });
+      }
+      return json({ ok: true, registration_id: reg.id, organization_id: org.id });
+    }
+
     // Seed des créneaux de passage (admin uniquement)
     if (route === 'wizard/seed-visit-slots') {
       if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
@@ -1794,18 +1858,17 @@ export async function POST(request, { params }) {
       return json({ ok: true, next_step: 5 });
     }
 
-    // Étape 5 — Finaliser (verrouille tout + envoie email + génère badge)
+    // Étape 5 — Finaliser (verrouille tout + envoie email avec badge en pièce jointe)
     if (route === 'wizard/finalize') {
       const { registration_id, regulation_accepted } = body;
       if (!registration_id) return err('registration_id requis');
       if (!regulation_accepted) return err('Vous devez accepter le règlement exposant', 400);
       const state = await getWizardState(db, registration_id);
       if (!state) return err('Inscription introuvable', 404);
-      // Tous les pré-requis ?
       const missing = Object.entries(state.step_status).filter(([k, v]) => k !== 'step5_confirmed' && !v).map(([k]) => k);
       if (missing.length) return err(`Étapes incomplètes : ${missing.join(', ')}`, 400);
 
-      // Génère les tokens de modification (90 jours)
+      // Tokens modification 90j
       const tokVisit = await createModificationToken(db, { registration_id, scope: 'visit_slot' });
       const tokAnim = await createModificationToken(db, { registration_id, scope: 'animation_slot' });
 
@@ -1815,16 +1878,88 @@ export async function POST(request, { params }) {
             wizard_step: 5,
             wizard_completed_at: new Date(),
             wizard_regulation_accepted: true,
+            status: state.registration.status === 'confirme' ? 'confirme' : 'a_confirmer',
             modification_token_visit: tokVisit,
             modification_token_animation: tokAnim,
             updated_at: new Date(),
           },
         }
       );
-      return json({ ok: true, modification_links: {
-        visit_slot: `${process.env.NEXT_PUBLIC_BASE_URL}/modify/visit/${tokVisit}`,
-        animation: `${process.env.NEXT_PUBLIC_BASE_URL}/modify/animation/${tokAnim}`,
-      } });
+
+      // Génère le badge PDF
+      let badgeBuffer = null;
+      try {
+        badgeBuffer = await generateBadgePdf({
+          organization: state.organization,
+          registration: state.registration,
+          venue: state.venue,
+          visit_slot: state.visit_slot,
+          animation_slots: state.animation_slots,
+        });
+      } catch (e) { console.error('[wizard finalize] badge generation failed:', e.message); }
+
+      // Email avec PJ
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const linkVisit = `${baseUrl}/modify/visit/${tokVisit}`;
+      const linkAnim = `${baseUrl}/modify/animation/${tokAnim}`;
+      const a = state.animation_slots[0];
+      try {
+        await sendMailAuto({
+          to: state.organization.main_email,
+          subject: `🎉 Votre inscription au Forum 2026 est confirmée — ${state.organization.name}`,
+          html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto">
+<h1 style="color:#1e3a8a">🎉 Bienvenue au Forum de la Rentrée 2026 !</h1>
+<p>Bonjour ${state.organization.contact_name},</p>
+<p>Votre inscription est <b style="color:#16a34a">officiellement validée</b>. Voici le récapitulatif de votre participation :</p>
+
+<div style="background:#dbeafe;border-left:4px solid #1d4ed8;padding:14px 18px;border-radius:6px;margin:18px 0">
+  <h3 style="margin:0 0 10px 0;color:#1e3a8a">📍 Votre passage</h3>
+  <div><b>Site :</b> ${state.venue?.name}</div>
+  <div><b>Stand :</b> ${state.registration.stand_code || '—'}</div>
+  <div><b>Jour :</b> ${state.registration.visit_day_label === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026'}</div>
+  ${state.visit_slot ? `<div><b>Créneau de passage :</b> ${state.visit_slot.start_time}–${state.visit_slot.end_time}</div>` : ''}
+</div>
+
+${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px 18px;border-radius:6px;margin:18px 0">
+  <h3 style="margin:0 0 10px 0;color:#166534">🎭 Votre animation</h3>
+  <div><b>Nom :</b> ${a.title}</div>
+  <div><b>Type :</b> ${a.slot_type}</div>
+  <div><b>Lieu :</b> ${a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'}</div>
+  <div><b>Horaire :</b> ${a.start_time}–${a.end_time}</div>
+  <div><b>Public cible :</b> ${a.target_audience || '—'}</div>
+</div>` : ''}
+
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px 18px;border-radius:6px;margin:18px 0">
+  <h3 style="margin:0 0 10px 0;color:#92400e">📎 Votre badge exposant</h3>
+  <p style="margin:0">Votre badge officiel est en <b>pièce jointe</b>. À présenter à l'accueil le jour J.</p>
+</div>
+
+<h3 style="color:#1e3a8a;margin-top:24px">Besoin de modifier vos créneaux ?</h3>
+<p>Si vous devez ajuster votre créneau de passage ou d'animation, utilisez les liens ci-dessous (valides 90 jours) :</p>
+<p>
+  <a href="${linkVisit}" style="display:inline-block;padding:10px 16px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600;margin-right:8px">📅 Modifier mon créneau de passage</a>
+</p>
+<p>
+  <a href="${linkAnim}" style="display:inline-block;padding:10px 16px;background:#7c3aed;color:white;text-decoration:none;border-radius:6px;font-weight:600">🎭 Modifier mon créneau d'animation</a>
+</p>
+
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
+<p style="font-size:13px;color:#64748b">Pour toute question, contactez ARACOM Conseil. À très vite !</p>
+<p style="font-size:13px;color:#64748b">— L'équipe ARACOM × Pacific Centers</p>
+</div>`,
+          attachments: badgeBuffer ? [{
+            filename: `Badge_${(state.organization.name || 'exposant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+            content: badgeBuffer,
+            contentType: 'application/pdf',
+          }] : [],
+        }, db);
+      } catch (e) { console.error('[wizard finalize] email failed:', e.message); }
+
+      return json({
+        ok: true,
+        modification_links: { visit_slot: linkVisit, animation: linkAnim },
+        badge_download_url: `${baseUrl}/api/wizard/badge/${registration_id}`,
+      });
     }
 
     // ============ RESET POUR NOUVELLE ÉDITION ============
