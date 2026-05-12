@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { getDb } from '@/lib/mongo';
 import { ASSOCIATIONS, PLANNING, VENUE_INFO } from '@/lib/seed-data';
 import { sendMail, isSmtpConfigured, verifySmtp } from '@/lib/mailer';
-import { getMailConfig, invalidateMailConfigCache } from '@/lib/mail-config';
+import { getMailConfig, invalidateMailConfigCache, sendMailAuto } from '@/lib/mail-config';
 import { emergentChat, DEFAULT_MODEL_CLAUDE } from '@/lib/llm';
 import { savePushSubscription, deletePushSubscription, pushToRole, getVapidPublicKey, isPushConfigured } from '@/lib/push';
 import { isDriveConfigured, validateAccess as driveValidate, ensureFolderPath, uploadFile as driveUploadFile, makeAnyoneReader, getServiceAccountEmail, safeName as driveSafeName } from '@/lib/drive';
@@ -2103,7 +2103,7 @@ export async function POST(request, { params }) {
 <p>À bientôt,<br/>L'équipe ARACOM</p>`;
       const subject = `🔐 Votre lien de reconnexion — Forum de la Rentrée 2026`;
       // Envoi non-bloquant (le user redirige immédiatement vers /goodbye)
-      sendMail({ to: user.email, subject, html }).then(r => {
+      sendMailAuto({ to: user.email, subject, html }, db).then(r => {
         if (r.ok) {
           db.collection('access_tokens').updateOne({ id: tk.id }, { $set: { last_email_sent_at: new Date(), last_resent_at: new Date(), updated_at: new Date() } }).catch(() => {});
         } else {
@@ -3000,7 +3000,7 @@ export async function POST(request, { params }) {
           const trackedBody = injectTracking(personBody, messageId);
           let sendStatus = 'envoye', errorMsg = null;
           if (smtpReady) {
-            const r2 = await sendMail({ to: o.main_email, subject: personSub, html: trackedBody });
+            const r2 = await sendMailAuto({ to: o.main_email, subject: personSub, html: trackedBody }, db);
             if (!r2.ok) { sendStatus = 'echec'; errorMsg = r2.error; failed++; }
           }
           await db.collection('email_messages').insertOne({
@@ -3559,7 +3559,7 @@ export async function POST(request, { params }) {
 <p style="font-size:12px;color:#64748b">Ce lien est <b>permanent et personnel</b>. Conservez-le précieusement (favoris). Aucun mot de passe à retenir.</p>
 <p>L'équipe ARACOM</p>`;
       try {
-        const r = await sendMail({ to: recipientEmail, subject: subj, html });
+        const r = await sendMailAuto({ to: recipientEmail, subject: subj, html }, db);
         if (!r.ok) console.error('[mail token]', r.error);
         return r;
       } catch (e) { console.error('[mail token]', e?.message); return { ok: false, error: e?.message }; }
@@ -3771,11 +3771,11 @@ export async function POST(request, { params }) {
       if (!tk.email) return err('Aucun email associé à ce lien', 400);
       const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tk.token}`;
       const orgName = tk.label || 'Forum de la Rentrée 2026';
-      sendMail({
+      sendMailAuto({
         to: tk.email,
         subject: `Rappel : votre lien d'accès — ${orgName}`,
         html: `<p>Bonjour,</p><p>Voici à nouveau votre lien personnel d'accès :</p><p><a href="${accessUrl}" style="display:inline-block;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">Accéder à mon espace</a></p><p style="font-size:12px;color:#64748b">Lien permanent jusqu'à révocation.</p><p>L'équipe ARACOM</p>`,
-      }).catch(e => console.error('[mail resend]', e?.message));
+      }, db).catch(e => console.error('[mail resend]', e?.message));
       await db.collection('access_tokens').updateOne({ id }, { $set: { last_resent_at: new Date(), updated_at: new Date() } });
       return json({ ok: true });
     }
@@ -3910,7 +3910,7 @@ export async function POST(request, { params }) {
           const paymentLabel = preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
           // 1) Mail à l'exposant : confirmation de prise en compte
           if (ctx.org.main_email) {
-            sendMail({
+            sendMailAuto({
               to: ctx.org.main_email,
               subject: `Demande de validation reçue — ${exposantName}`,
               html: `<p>Bonjour ${ctx.org.contact_name || exposantName},</p>
@@ -3924,10 +3924,10 @@ export async function POST(request, { params }) {
 <p>L'équipe ARACOM va vous recontacter sous peu pour <b>fixer un rendez-vous</b> de remise de la caution. Une fois la caution réceptionnée, votre stand et vos créneaux d'animation seront <b>verrouillés définitivement</b>.</p>
 <p>📌 <b>Modes acceptés :</b> chèque ou espèces uniquement.</p>
 <p>À très vite,<br/>L'équipe ARACOM</p>`,
-            }).catch(e => console.error('[mail exposant request-validation]', e?.message));
+            }, db).catch(e => console.error('[mail exposant request-validation]', e?.message));
           }
           // 2) Mail à ARACOM : notification nouvelle demande
-          sendMail({
+          sendMailAuto({
             to: aracomEmail,
             subject: `🔔 Nouvelle demande de validation — ${exposantName}`,
             html: `<p>Une nouvelle demande de validation vient d'être soumise.</p>
@@ -3942,7 +3942,7 @@ export async function POST(request, { params }) {
   ${notes ? `<div><b>Notes :</b> ${notes}</div>` : ''}
 </div>
 <p><a href="${baseUrl}/aracom?tab=validations" style="display:inline-block;padding:10px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600">Traiter la demande</a></p>`,
-          }).catch(e => console.error('[mail aracom request-validation]', e?.message));
+          }, db).catch(e => console.error('[mail aracom request-validation]', e?.message));
           // 3) Push ARACOM : notification temps réel
           pushToRole({
             title: `🔔 Nouvelle demande de validation`,
@@ -3975,7 +3975,7 @@ export async function POST(request, { params }) {
       try {
         const ctx = await buildExposantContext(r.registration_id);
         if (ctx?.org?.main_email) {
-          sendMail({
+          sendMailAuto({
             to: ctx.org.main_email,
             subject: `📅 Rendez-vous fixé pour la caution — ${ctx.org.name}`,
             html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
@@ -3994,7 +3994,7 @@ export async function POST(request, { params }) {
 <p>Site : <b>${ctx.venue?.name || '—'}</b> · Stand : <b>${ctx.reg.stand_code}</b></p>
 <p>Une fois la caution réceptionnée, votre inscription sera <b>verrouillée définitivement</b> et vous recevrez votre reçu officiel.</p>
 <p>À très vite,<br/>L'équipe ARACOM</p>`,
-          }).catch(e => console.error('[mail set-rdv]', e?.message));
+          }, db).catch(e => console.error('[mail set-rdv]', e?.message));
         }
       } catch (e) { console.error('[set-rdv emails]', e?.message); }
 
@@ -4091,7 +4091,7 @@ export async function POST(request, { params }) {
         if (ctx?.org?.main_email) {
           const receiptUrl = receiptDocId ? `${baseUrl}/api/documents/${receiptDocId}/download` : '';
           const paymentLabel = payment_mode === 'especes' ? 'Espèces' : 'Chèque';
-          sendMail({
+          sendMailAuto({
             to: ctx.org.main_email,
             subject: `🔒 Inscription verrouillée — ${ctx.org.name}`,
             html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
@@ -4108,7 +4108,7 @@ export async function POST(request, { params }) {
 ${receiptNumber ? `<p>📄 <b>Votre reçu officiel</b> (n° ${receiptNumber}) est disponible dans votre espace exposant. ${receiptUrl ? `<br/><a href="${receiptUrl}" style="display:inline-block;margin-top:8px;padding:10px 18px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;font-weight:600">📥 Télécharger mon reçu de caution</a>` : ''}</p>` : ''}
 <p>Rendez-vous le <b>vendredi 14 et samedi 15 août 2026</b> pour faire de cette édition un succès !</p>
 <p>L'équipe ARACOM</p>`,
-          }).catch(e => console.error('[mail lock]', e?.message));
+          }, db).catch(e => console.error('[mail lock]', e?.message));
         }
       } catch (e) { console.error('[lock emails]', e?.message); }
 
@@ -4131,7 +4131,7 @@ ${receiptNumber ? `<p>📄 <b>Votre reçu officiel</b> (n° ${receiptNumber}) es
       try {
         const ctx = await buildExposantContext(vreq.registration_id);
         if (ctx?.org?.main_email) {
-          sendMail({
+          sendMailAuto({
             to: ctx.org.main_email,
             subject: `Demande de validation annulée — ${ctx.org.name}`,
             html: `<p>Bonjour ${ctx.org.contact_name || ctx.org.name},</p>
@@ -4139,7 +4139,7 @@ ${receiptNumber ? `<p>📄 <b>Votre reçu officiel</b> (n° ${receiptNumber}) es
 ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:16px 0"><b>Motif :</b> ${reason}</div>` : ''}
 <p>Vous pouvez à nouveau ajuster votre site, votre stand ou vos créneaux d'animation puis soumettre une nouvelle demande depuis votre espace exposant.</p>
 <p>L'équipe ARACOM</p>`,
-          }).catch(e => console.error('[mail cancel]', e?.message));
+          }, db).catch(e => console.error('[mail cancel]', e?.message));
         }
       } catch (e) { console.error('[cancel emails]', e?.message); }
 
