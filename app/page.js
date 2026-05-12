@@ -44,15 +44,8 @@ export default function HomePage() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Auto-redirect si déjà connecté
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const s = getSession();
-      if (s?.role === 'aracom_admin') router.replace('/aracom');
-      else if (s?.role === 'pacific_centers_readonly') router.replace('/pacific');
-    } catch {}
-  }, [router]);
+  // Pas d'auto-redirect : on laisse toujours l'utilisateur choisir son portail
+  // et ressaisir le code, même s'il a déjà une session active dans le navigateur.
 
   const submit = async () => {
     if (!selected || !code) return;
