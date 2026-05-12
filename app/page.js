@@ -67,7 +67,7 @@ export default function HomePage() {
               <div className="text-xs text-white/50">14 & 15 août 2026 · Polynésie française</div>
             </div>
           </div>
-          <div className="text-xs text-white/40 hidden sm:block">ARACOM × Pacific Centers</div>
+          <div className="text-xs text-white/40 hidden sm:block">ARACOM Conseil · Édition 2026</div>
         </div>
       </header>
 
