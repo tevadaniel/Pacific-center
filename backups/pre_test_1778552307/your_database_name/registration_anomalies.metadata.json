@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"636eb7d8dc224482ad574b1a0a8c8b78","collectionName":"registration_anomalies","type":"collection"}

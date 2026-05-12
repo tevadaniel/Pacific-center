@@ -28,6 +28,42 @@ async function tryAutoRestoreVenueLayouts() {
   } catch (e) { console.error('[boot] venue layouts restore error:', e?.message); }
 }
 
+// 🛡️ Garde-fou anti-envoi de mails accidentels au démarrage.
+//    Si la collection app_settings.mail_config n'existe pas, ou n'a pas test_mode,
+//    on force test_mode=true (sauf si la var d'env ALLOW_PROD_MAIL=true est définie,
+//    auquel cas on respecte la valeur DB actuelle).
+let __mailGuardRan = false;
+async function tryAutoMailGuard() {
+  if (__mailGuardRan) return;
+  __mailGuardRan = true;
+  try {
+    const db = await getDb();
+    const mc = await db.collection('app_settings').findOne({ key: 'mail_config' });
+    const allowProd = String(process.env.ALLOW_PROD_MAIL || '').toLowerCase() === 'true';
+    if (!mc) {
+      await db.collection('app_settings').insertOne({
+        key: 'mail_config',
+        test_mode: true,
+        redirect_to: process.env.MAIL_REDIRECT_TO || 'tevageros@me.com',
+        allow_list: (process.env.MAIL_ALLOWED_RECIPIENTS || 'tevageros@me.com,teva.geros@aracom-conseil.fr,agence@aracom-conseil.fr,admin@aracom.pf').split(',').map(s => s.trim()).filter(Boolean),
+        updated_at: new Date(),
+        updated_by: 'boot-guard',
+      });
+      console.warn('[boot] 🛡️ mail_config absent → créé en MODE TEST (redirect=' + (process.env.MAIL_REDIRECT_TO || 'tevageros@me.com') + ')');
+    } else if (mc.test_mode === false && !allowProd) {
+      await db.collection('app_settings').updateOne(
+        { key: 'mail_config' },
+        { $set: { test_mode: true, updated_at: new Date(), updated_by: 'boot-guard' } }
+      );
+      console.warn('[boot] 🛡️ mail_config était en PROD → forcé en TEST (set ALLOW_PROD_MAIL=true en env pour autoriser la prod)');
+    } else if (mc.test_mode === true) {
+      console.log('[boot] ✅ mail_config en mode TEST (redirect=' + mc.redirect_to + ')');
+    } else if (allowProd) {
+      console.warn('[boot] ⚠️ mail_config en PRODUCTION (ALLOW_PROD_MAIL=true) — envois réels actifs');
+    }
+  } catch (e) { console.error('[boot] mail guard error:', e?.message); }
+}
+
 // ===== Tracking helpers =====
 function getPublicBaseUrl() {
   return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
@@ -484,6 +520,8 @@ export async function GET(request, { params }) {
   try {
     // 🛟 Auto-restauration des plans au premier hit (idempotent, tourne 1 seule fois)
     tryAutoRestoreVenueLayouts();
+    // 🛡️ Garde-fou anti-envoi mail accidentel (idempotent, tourne 1 seule fois)
+    tryAutoMailGuard();
     const db = await getDb();
     const p = params.path || [];
     const route = p.join('/');

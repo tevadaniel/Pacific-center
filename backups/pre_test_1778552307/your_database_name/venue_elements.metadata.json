@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"3e513fe07ab5431b9a91c0d6c1595636","collectionName":"venue_elements","type":"collection"}
