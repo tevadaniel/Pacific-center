@@ -36,6 +36,19 @@ const ALLOWED_TEST_EMAILS = [
 ];
 const DEFAULT_REDIRECT = 'tevageros@me.com';
 
+// 🚨 RÈGLE ABSOLUE : seuls ces préfixes/noms sont autorisés pour les données de test.
+// Voir /app/memory/RULES.md
+const ALLOWED_TEST_NAME_PATTERN = /\b(teva|aracom|teka)\b/i;
+
+// 🛡️ Liste blanche des exposants RÉELS — toujours préservés
+const PROTECTED_ORG_NAMES = [
+  'I Mua Papeete',
+  'Dream Lab',
+  'ACE Arue',
+  'Budokan Judo Pirae',
+  'Lotus Bleu',
+];
+
 const log = (icon, msg) => console.log(`${icon} ${msg}`);
 const ok = m => log('✅', m);
 const warn = m => log('⚠️ ', m);
@@ -57,7 +70,7 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   let issues = 0;
 
   // ── 1) MAIL CONFIG ────────────────────────────────────────────────
-  console.log('\n[1/6] Mail config (test mode)');
+  console.log('\n[1/7] Mail config (test mode)');
   let mc = await db.collection('app_settings').findOne({ key: 'mail_config' });
   if (!mc) {
     issues++;
@@ -98,7 +111,7 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   }
 
   // ── 2) UTILISATEURS CRITIQUES ─────────────────────────────────────
-  console.log('\n[2/6] Utilisateurs critiques');
+  console.log('\n[2/7] Utilisateurs critiques');
   const adminUser = await db.collection('users').findOne({
     $or: [{ email: 'admin@aracom.pf' }, { role_code: 'aracom_admin' }],
   });
@@ -150,7 +163,7 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   }
 
   // ── 3) VENUES & VISIT SLOTS ───────────────────────────────────────
-  console.log('\n[3/6] Venues & visit slots');
+  console.log('\n[3/7] Venues & visit slots');
   const venuesCount = await db.collection('venues').countDocuments({});
   const slotsCount = await db.collection('visit_slots').countDocuments({});
   if (venuesCount < 6) { issues++; err(`Seulement ${venuesCount}/6 venues`); } else ok(`${venuesCount} venues`);
@@ -162,7 +175,7 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   }
 
   // ── 4) INTÉGRITÉ booked_count ─────────────────────────────────────
-  console.log('\n[4/6] Intégrité visit_slots.booked_count');
+  console.log('\n[4/7] Intégrité visit_slots.booked_count');
   const realBookings = await db.collection('registrations').aggregate([
     { $match: { visit_slot_id: { $ne: null, $exists: true } } },
     { $group: { _id: '$visit_slot_id', count: { $sum: 1 } } },
@@ -183,7 +196,7 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   if (drift) { issues++; warn(`${drift} slot(s) avec compteur incorrect`); } else ok('Tous les compteurs sont cohérents');
 
   // ── 5) TOKENS DE MODIFICATION EXPIRÉS ─────────────────────────────
-  console.log('\n[5/6] Tokens de modification');
+  console.log('\n[5/7] Tokens de modification');
   const expired = await db.collection('modification_tokens').countDocuments({
     expires_at: { $lt: new Date() },
     used_at: null,
@@ -202,20 +215,28 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   }
 
   // ── 6) DONNÉES DE TEST RÉSIDUELLES ────────────────────────────────
-  console.log('\n[6/6] Données de test résiduelles');
-  // Détecte les orgs créées via self-register du wizard public dont l'email contient
-  // un marqueur de test, ou dont le nom est manifestement un test.
-  const testOrgs = await db.collection('organizations').find({
-    $or: [
-      { name: /wizard.test/i },
-      { name: /^test\s/i },
-      { name: /e2e/i },
-      { name: /^demo\s/i },
-      { main_email: /@e2e-test\.local$/i },
-      { main_email: /\+test@/i },
-      { main_email: /wizard.e2e/i },
+  console.log('\n[6/7] Données de test résiduelles');
+  // 🚨 Conditions cumulatives pour pouvoir supprimer automatiquement :
+  //  - Le nom doit contenir teva|aracom|teka (préfixes autorisés)
+  //  - ET l'email doit être manifestement un email de test (pas un vrai mail)
+  // Cela protège le compte de Teva (tevageros@me.com) qui est légitime.
+  const TEST_EMAIL_PATTERN = /(@e2e-test\.local$|\+test@|wizard.?e2e|e2e[-_.]test|@test\.|@example\.)/i;
+  const candidates = await db.collection('organizations').find({
+    $and: [
+      { name: ALLOWED_TEST_NAME_PATTERN },
+      { main_email: TEST_EMAIL_PATTERN },
     ],
   }).toArray();
+  const testOrgs = candidates; // Déjà filtrés par AND
+  // Détecter aussi tout reste suspect non auto-purgeable (pour info uniquement)
+  const suspicious = await db.collection('organizations').find({
+    main_email: TEST_EMAIL_PATTERN,
+    name: { $not: ALLOWED_TEST_NAME_PATTERN },
+  }).toArray();
+  if (suspicious.length > 0) {
+    warn(`${suspicious.length} org(s) avec email de test mais nom non autorisé — IGNORÉES (à traiter manuellement) :`);
+    suspicious.forEach(o => warn(`   · "${o.name}" (${o.main_email}) id=${o.id}`));
+  }
   if (testOrgs.length > 0) {
     issues++;
     warn(`${testOrgs.length} organisation(s) de test détectée(s)`);
@@ -235,6 +256,27 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
     }
   } else {
     ok('Aucune donnée de test résiduelle');
+  }
+
+  // ── 7) INTÉGRITÉ DES EXPOSANTS PROTÉGÉS ───────────────────────────
+  console.log('\n[7/7] Intégrité des exposants protégés (whitelist intouchable)');
+  let missingProtected = 0;
+  for (const protName of PROTECTED_ORG_NAMES) {
+    const o = await db.collection('organizations').findOne({ name: protName });
+    if (!o) {
+      issues++; missingProtected++;
+      err(`Exposant protégé MANQUANT : "${protName}" — possible corruption DB`);
+    } else {
+      // Vérifie aussi qu'il y a une registration + un stand actif
+      const reg = await db.collection('registrations').findOne({ organization_id: o.id });
+      if (!reg) {
+        issues++;
+        err(`Exposant "${protName}" sans inscription`);
+      }
+    }
+  }
+  if (missingProtected === 0) {
+    ok(`Tous les exposants protégés sont présents (${PROTECTED_ORG_NAMES.length}/${PROTECTED_ORG_NAMES.length})`);
   }
 
   // ── RÉCAP ─────────────────────────────────────────────────────────
