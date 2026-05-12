@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast, Toaster } from 'sonner';
 import { Shield, Users, Eye, Lock, Loader2 } from 'lucide-react';
+import { saveSession, getSession } from '@/lib/auth-client';
 
 const ROLES = [
   {
@@ -47,7 +48,7 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const s = JSON.parse(localStorage.getItem('forum_session') || 'null');
+      const s = getSession();
       if (s?.role === 'aracom_admin') router.replace('/aracom');
       else if (s?.role === 'pacific_centers_readonly') router.replace('/pacific');
     } catch {}
@@ -71,7 +72,7 @@ export default function HomePage() {
       }
 
       // Persist session
-      localStorage.setItem('forum_session', JSON.stringify(d.user));
+      saveSession(d.user);
       toast.success(`Bienvenue ${d.user.name}`);
       if (d.user.role === 'aracom_admin') router.push('/aracom');
       else if (d.user.role === 'pacific_centers_readonly') router.push('/pacific');

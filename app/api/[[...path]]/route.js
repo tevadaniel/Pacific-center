@@ -1697,7 +1697,7 @@ export async function POST(request, { params }) {
           });
           u = await db.collection('users').findOne({ id: uid });
         }
-        return json({ ok: true, user: { id: u.id, name: u.name, email: u.email, role: 'pacific_centers_readonly' } });
+        return json({ ok: true, user: { id: u.id, name: u.name || u.full_name || 'Pacific Centers', email: u.email, role: 'pacific_centers_readonly' } });
       }
       // Exposant : pas de user spécifique — redirection vers /inscription pour saisir email
       return json({ ok: true, redirect: '/inscription' });
