@@ -541,6 +541,34 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
+    // 🌐 Liste tous les sites (registrations) d'une organisation (multi-sites)
+    if (route === 'wizard/org-sites') {
+      const orgId = url.searchParams.get('organization_id');
+      if (!orgId) return err('organization_id requis', 400);
+      const regs = await db.collection('registrations').find({ organization_id: orgId }).sort({ created_at: 1 }).toArray();
+      const venues = await db.collection('venues').find({}).toArray();
+      const venueMap = new Map(venues.map(v => [v.id, v]));
+      const regIds = regs.map(r => r.id);
+      const animCounts = {};
+      const anims = await db.collection('animation_slots').find({ registration_id: { $in: regIds } }).toArray();
+      anims.forEach(a => { animCounts[a.registration_id] = (animCounts[a.registration_id] || 0) + 1; });
+      return json({
+        organization_id: orgId,
+        sites: regs.map(r => ({
+          registration_id: r.id,
+          venue_id: r.venue_id,
+          venue_name: r.venue_id ? venueMap.get(r.venue_id)?.name : null,
+          stand_code: r.stand_code,
+          attending_days: r.attending_days || [],
+          attending_day_times: r.attending_day_times || {},
+          animations_count: animCounts[r.id] || 0,
+          status: r.status,
+          wizard_step: r.wizard_step,
+          created_at: r.created_at,
+        })),
+      });
+    }
+
     // État wizard d'un exposant (reprise)
     if (route.match(/^wizard\/state\/[^/]+$/)) {
       const regId = p[2];
@@ -2073,33 +2101,6 @@ export async function POST(request, { params }) {
     }
 
     // Étape 2 — Site + Jours de présence avec horaires (PAS de stand ici)
-    // 🌐 Liste tous les sites (registrations) d'une organisation (multi-sites)
-    if (route === 'wizard/org-sites') {
-      const orgId = q.get('organization_id');
-      if (!orgId) return err('organization_id requis', 400);
-      const regs = await db.collection('registrations').find({ organization_id: orgId }).sort({ created_at: 1 }).toArray();
-      const venues = await db.collection('venues').find({}).toArray();
-      const venueMap = new Map(venues.map(v => [v.id, v]));
-      const regIds = regs.map(r => r.id);
-      const animCounts = {};
-      const anims = await db.collection('animation_slots').find({ registration_id: { $in: regIds } }).toArray();
-      anims.forEach(a => { animCounts[a.registration_id] = (animCounts[a.registration_id] || 0) + 1; });
-      return json({
-        organization_id: orgId,
-        sites: regs.map(r => ({
-          registration_id: r.id,
-          venue_id: r.venue_id,
-          venue_name: r.venue_id ? venueMap.get(r.venue_id)?.name : null,
-          stand_code: r.stand_code,
-          attending_days: r.attending_days || [],
-          attending_day_times: r.attending_day_times || {},
-          animations_count: animCounts[r.id] || 0,
-          status: r.status,
-          wizard_step: r.wizard_step,
-          created_at: r.created_at,
-        })),
-      });
-    }
 
     // ➕ Créer une nouvelle registration (un nouveau site) pour une organisation existante
     if (route === 'wizard/add-site') {

@@ -940,3 +940,32 @@ agent_communication:
 
   - agent: "testing"
     message: "🎯 AUDIT BACKEND SESSION 18 COMPLÉTÉ — 20/21 TESTS PASSÉS ✅ (95%). Validation des corrections Admin Override Panel + non-régression complète. BASE_URL=http://localhost:3000. Credentials admin validés : x-user-role:aracom_admin + x-user-id:u-admin. Mode mail TEST confirmé actif (test_mode_active=true). RÉSULTATS PAR PRIORITÉ : ✅ PRIORITÉ 1 — Admin Override (10/10 - 100%) : POST /admin/registrations/:id/reset avec {reset:'stand'} → 200 stand_released, stand_code unset, wizard_step=3, SA status='annule' ✅. POST reset {reset:'animations'} → 200 animations_cleared, count:2, 0 slots restants ✅. POST reset {reset:'days'} → 200 days_reset, attending_days=[], venue_id/stand_code unset, wizard_step=2 ✅. POST reset {reset:'cancel'} → 200 registration_cancelled, status='annule', cancelled_by='admin_override', cancelled_at présent ✅. POST reset {reset:'foobar'} → 400 'Action de reset inconnue' ✅. POST reset sans auth admin → 403 'Accès admin requis' ✅. POST reset id inexistant → 404 'Inscription introuvable' ✅. POST /admin/registrations/:id/delete-full sur test-reg → 200 fully_deleted, org_also_deleted:true, cascade cleanup SA/animations ✅. POST delete-full sur 'I Mua Papeete' → 403 'Refus de suppression — \"I Mua Papeete\" est un exposant protégé. Utilisez \"Annuler inscription\" à la place.' (garde-fou RULES.md validé) ✅. POST delete-full sans auth admin → 403 ✅. ✅ PRIORITÉ 2 — Wizard/profile non-régression (3/3 - 100%) : POST /auth/self-register → 200 avec registration_id + organization_id ✅. POST /wizard/profile → 200 next_step:2 ✅. Vérification DB : organization updated (name, discipline, contact_name, representatives_count), wizard_step=2 ✅. ✅ PRIORITÉ 3 — Non-régression endpoints critiques (6/7 - 85.7%) : GET /admin/multi-site-alerts → 200 avec overloaded_sites (note: naming différent de 'overbooked_sites' mais fonctionnel) + duplicate_exposants (10 orgs multi-sites détectées) ✅. POST /auth/request-magic-link → 200 mode TEST ✅. POST /wizard/add-site → 200 avec new registration_id, puis delete-full OK ✅. ❌ POST /wizard/org-sites → 500 'q is not defined' (BUG BACKEND : endpoint dans POST handler mais utilise variable 'q' définie uniquement dans GET handler). GET /dashboard/kpis → 200 total=67 ✅. GET /mailing/status → 200 test_mode_active=true (SAFE) ✅. POST /chatbot → 200 avec reply ✅. ✅ Cleanup (1/1 - 100%) : Toutes les test-regs supprimées, 67 registrations réelles intactes, 'I Mua Papeete' intact ✅. 🎯 POINTS CRITIQUES VALIDÉS : ✅ Correction structurelle validée : endpoints admin override déplacés au top-level du POST handler, plus d'interférence avec wizard/profile. ✅ Wizard/profile fonctionne parfaitement (NON-RÉGRESSION CONFIRMÉE). ✅ Garde-fou RULES.md opérationnel : exposants protégés (I Mua Papeete, Dream Lab, ACE Arue, Budokan Judo Pirae, Lotus Bleu) refusent delete-full avec message explicite. ✅ Tous les endpoints admin override fonctionnent avec auth stricte (403 sans role aracom_admin). ✅ Mode mail TEST sécurisé (aucun envoi réel). ⚠️ BUG IDENTIFIÉ : POST /wizard/org-sites retourne 500 'q is not defined' car endpoint placé dans POST handler mais utilise 'q' (query params) définie uniquement dans GET handler. FIX REQUIS : déplacer endpoint vers GET handler OU définir 'q' dans POST handler. 🎯 CONCLUSION : API 95% OPÉRATIONNELLE. Correction Admin Override Panel validée avec succès. Aucune régression sur wizard/profile. 1 bug mineur identifié (wizard/org-sites). Application prête pour déploiement avec correction mineure recommandée. Script de test : /app/backend_test.py."
+
+
+  - task: "Bug fix wizard/org-sites endpoint (GET, was in POST handler) (session 18)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "❌ Bug détecté lors de l'audit session 18 : POST /api/wizard/org-sites retournait 500 'q is not defined' (endpoint utilisait variable q de query params mais placé dans POST handler)."
+      - working: true
+        agent: "main"
+        comment: "✅ FIX : Endpoint déplacé vers GET handler (ligne 545). Utilise désormais url.searchParams.get('organization_id') au lieu de q.get(). Le duplicat POST a été supprimé. Tests : GET /api/wizard/org-sites?organization_id=org-1 → 200 avec liste sites enrichie (venue_name, stand_code, status, animations_count). GET sans organization_id → 400 'organization_id requis'."
+
+  - task: "Profil persistant multi-sites dans le wizard (session 18)"
+    implemented: true
+    working: true
+    file: "components/wizard-form.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ NOUVEAU : Le bandeau profil persistant en haut du wizard (visible à toutes les étapes >1) affiche désormais TOUS les sites réservés par l'organisation. Fonctionnalités : (a) section 'Vos N sites réservés' avec badge 'Multi-sites' quand ≥2 sites. (b) Cartes cliquables par site (venue, stand, jours, animations, status). (c) Badge 'ICI' sur le site courant. (d) Click sur autre site → switch via localStorage + redirect /inscription. (e) Bouton '+ Réserver un site supplémentaire' (toujours visible si multi-sites, ou step≥4 si solo). (f) Action /api/wizard/add-site déclenchée avec confirmation. Vérifié screenshot E2E : multi-site banner OK, switch entre Faaa et Punaauia OK, badge 'ICI' bascule, header se met à jour. Lint clean. Aucune régression sur step 1 (banner caché en step 1)."
+

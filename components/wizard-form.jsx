@@ -36,6 +36,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
   const [notFound, setNotFound] = useState(false);
   const stateRef = useRef(null);
   const [availability, setAvailability] = useState(null);
+  const [orgSites, setOrgSites] = useState([]);  // 🌐 Multi-sites de l'organisation
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const lastFetchRef = useRef(0);
@@ -121,7 +122,21 @@ export default function WizardPage({ registrationId, isPublic = false }) {
     } catch (e) { console.error('availability', e); }
   }, []);
 
+  // 🌐 Multi-sites : charge tous les sites réservés par l'organisation
+  const loadOrgSites = useCallback(async (orgId) => {
+    if (!orgId) return;
+    try {
+      const d = await api(`/wizard/org-sites?organization_id=${encodeURIComponent(orgId)}`);
+      setOrgSites(d.sites || []);
+    } catch (e) { console.error('org-sites', e); }
+  }, []);
+
   useEffect(() => { loadState(); loadAvailability(); }, [loadState, loadAvailability]);
+
+  // 🌐 Recharger les sites quand l'org change ou après chaque sauvegarde
+  useEffect(() => {
+    if (state?.organization?.id) loadOrgSites(state.organization.id);
+  }, [state?.organization?.id, state?.registration?.venue_id, state?.registration?.stand_code, state?.registration?.wizard_step, loadOrgSites]);
 
   // Polling temps réel des dispos toutes les 8s
   useEffect(() => {
@@ -273,6 +288,105 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                     📅 RDV {new Date(state.validation_request.rdv_date).toLocaleDateString('fr-FR')}
                   </Badge>
                 )}
+              </div>
+            )}
+
+            {/* 🌐 PROFIL MULTI-SITES — Liste de tous les sites réservés par l'organisation */}
+            {orgSites.length > 1 && (
+              <div className="mt-3 pt-3 border-t">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    🏢 Vos {orgSites.length} sites réservés
+                  </div>
+                  <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700 text-[10px]">Multi-sites</Badge>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {orgSites.map(s => {
+                    const isCurrent = s.registration_id === registrationId;
+                    return (
+                      <button
+                        key={s.registration_id}
+                        type="button"
+                        onClick={() => {
+                          if (isCurrent) return;
+                          try { localStorage.setItem('inscription_public_reg_id', s.registration_id); } catch {}
+                          window.location.href = `/inscription`;
+                        }}
+                        className={`text-left rounded-md border p-2 transition ${
+                          isCurrent
+                            ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200 cursor-default'
+                            : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'
+                        }`}
+                        data-testid={`site-${s.registration_id}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-semibold text-slate-900 text-xs truncate">
+                            {s.venue_name || <span className="italic text-slate-400">Site non choisi</span>}
+                          </div>
+                          {isCurrent && <Badge className="bg-blue-600 text-white text-[9px] px-1.5 py-0">ICI</Badge>}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-slate-600">
+                          {s.stand_code && <span className="bg-emerald-100 text-emerald-800 rounded px-1.5">Stand {s.stand_code}</span>}
+                          {(s.attending_days?.length || 0) > 0 && (
+                            <span className="bg-slate-100 rounded px-1.5">{s.attending_days.length === 2 ? 'Ven+Sam' : (s.attending_days[0] === 'samedi' ? 'Sam' : 'Ven')}</span>
+                          )}
+                          {s.animations_count > 0 && <span className="bg-violet-100 text-violet-800 rounded px-1.5">{s.animations_count} anim.</span>}
+                          <span className={`rounded px-1.5 ${
+                            s.status === 'confirme' ? 'bg-emerald-100 text-emerald-800' :
+                            s.status === 'annule' ? 'bg-red-100 text-red-700' :
+                            s.status === 'a_confirmer' ? 'bg-amber-100 text-amber-800' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {s.status === 'confirme' ? '✓ Confirmé' :
+                             s.status === 'annule' ? '✗ Annulé' :
+                             s.status === 'a_confirmer' ? 'À confirmer' :
+                             s.status === 'contacte' ? 'En cours' : (s.status || '—')}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!state.organization?.id) return;
+                    if (!window.confirm('Réserver un site supplémentaire pour ' + state.organization.name + ' ?')) return;
+                    try {
+                      const r = await api('/wizard/add-site', { method: 'POST', body: JSON.stringify({ organization_id: state.organization.id }) });
+                      toast.success('Nouveau site ajouté — vous allez être redirigé');
+                      try { localStorage.setItem('inscription_public_reg_id', r.registration_id); } catch {}
+                      setTimeout(() => { window.location.href = '/inscription'; }, 800);
+                    } catch (e) { toast.error(e.message); }
+                  }}
+                  className="mt-2 text-[11px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                  data-testid="add-another-site"
+                >
+                  <Plus className="w-3 h-3" /> Réserver un site supplémentaire
+                </button>
+              </div>
+            )}
+
+            {/* Bouton "Ajouter un site" même si on n'a qu'un seul site (pour proposer le multi-sites dès la première inscription) */}
+            {orgSites.length === 1 && state.registration?.wizard_step >= 4 && (
+              <div className="mt-3 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!state.organization?.id) return;
+                    if (!window.confirm('Souhaitez-vous réserver un site supplémentaire pour ' + state.organization.name + ' ?\n\n(ex: un stand sur Faaa ET un sur Punaauia)')) return;
+                    try {
+                      const r = await api('/wizard/add-site', { method: 'POST', body: JSON.stringify({ organization_id: state.organization.id }) });
+                      toast.success('Nouveau site ajouté — redirection');
+                      try { localStorage.setItem('inscription_public_reg_id', r.registration_id); } catch {}
+                      setTimeout(() => { window.location.href = '/inscription'; }, 800);
+                    } catch (e) { toast.error(e.message); }
+                  }}
+                  className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                  data-testid="add-second-site"
+                >
+                  <Plus className="w-3 h-3" /> Ajouter un second site (optionnel)
+                </button>
               </div>
             )}
           </div>
