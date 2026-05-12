@@ -1983,10 +1983,14 @@ export async function POST(request, { params }) {
         updated_at: new Date(),
       };
       await db.collection('organizations').updateOne({ id: reg.organization_id }, { $set: update });
+      await db.collection('registrations').updateOne({ id: registration_id }, { $set: { wizard_step: 2, updated_at: new Date() } });
+      return json({ ok: true, next_step: 2 });
+    }
+
     // 🛠 ADMIN OVERRIDE — Reset/cancel any action of an exposant
     if (route.match(/^admin\/registrations\/[^/]+\/reset$/)) {
-      const ctx = getUserContext(request);
-      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const ctx2 = getUserContext(request);
+      if (ctx2.role !== 'aracom_admin') return err('Accès admin requis', 403);
       const regId = p[2];
       const { reset } = body;
       const reg = await db.collection('registrations').findOne({ id: regId });
@@ -2043,12 +2047,12 @@ export async function POST(request, { params }) {
 
     // 🗑 DELETE FULL — supprime complètement la registration + ses dépendances
     if (route.match(/^admin\/registrations\/[^/]+\/delete-full$/)) {
-      const ctx = getUserContext(request);
-      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const ctx3 = getUserContext(request);
+      if (ctx3.role !== 'aracom_admin') return err('Accès admin requis', 403);
       const regId = p[2];
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
-      // Garde-fou : refuse de supprimer un exposant protégé
+      // Garde-fou : refuse de supprimer un exposant protégé (RULES.md)
       const PROTECTED = ['I Mua Papeete', 'Dream Lab', 'ACE Arue', 'Budokan Judo Pirae', 'Lotus Bleu'];
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
       if (org && PROTECTED.includes(org.name)) {
@@ -2066,11 +2070,6 @@ export async function POST(request, { params }) {
         await db.collection('organizations').deleteOne({ id: reg.organization_id });
       }
       return json({ ok: true, action: 'fully_deleted', org_also_deleted: otherRegs === 0 });
-    }
-
-
-      await db.collection('registrations').updateOne({ id: registration_id }, { $set: { wizard_step: 2, updated_at: new Date() } });
-      return json({ ok: true, next_step: 2 });
     }
 
     // Étape 2 — Site + Jours de présence avec horaires (PAS de stand ici)
