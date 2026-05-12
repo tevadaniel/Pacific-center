@@ -29,6 +29,7 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
 import { exportFullXLSX } from '@/lib/xlsx-export';
 import PushToggle from '@/components/push-toggle';
+import PortalSwitcher from '@/components/portal-switcher';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -176,6 +177,7 @@ export default function AracomPage() {
               🛡️ TEST MAIL
             </button>
           )}
+          <PortalSwitcher />
           <PushToggle />
           <AlertsBadge onGoto={setTab} />
           <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
@@ -472,8 +474,7 @@ function DashboardView({ onGoto }) {
         </div>
       )}
 
-      {/* 🤖 Assistant IA intégré dans le dashboard */}
-      <ChatbotCard role="aracom_admin" />
+      {/* 🤖 Assistant IA retiré du dashboard — disponible via la bulle flottante */}
 
       <Card>
         <CardHeader>

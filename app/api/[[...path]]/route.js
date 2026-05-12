@@ -973,6 +973,17 @@ export async function GET(request, { params }) {
       return json(orgs.map(o => { delete o._id; return o; }));
     }
 
+    // Get/create magic access link for an exposant (admin only)
+    if (route.match(/^organizations\/[^/]+\/access-link$/)) {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const orgId = p[1];
+      const org = await db.collection('organizations').findOne({ id: orgId });
+      if (!org) return err('Organisation introuvable', 404);
+      const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email);
+      return json({ ok: true, access_url, organization_name: org.name });
+    }
+
     if (route === 'tasks') {
       const q = {};
       const status = url.searchParams.get('status');
@@ -1742,6 +1753,48 @@ export async function POST(request, { params }) {
     }
 
     // 🌐 Self-register pour le tunnel public (création registration + organization vides)
+    // 🪄 Magic link exposant — envoi par email
+    if (route === 'auth/request-magic-link') {
+      const { email } = body;
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      if (!cleanEmail || !/^[^@]+@[^@]+\.[^@]+$/.test(cleanEmail)) return err('Email invalide', 400);
+      // Cherche l'organization correspondante
+      const org = await db.collection('organizations').findOne({ main_email: cleanEmail });
+      if (!org) {
+        // Réponse volontairement générique pour ne pas leaker l'existence d'un compte
+        return json({ ok: true, sent: true, message: 'Si un compte existe sur cet email, un lien vient d\'être envoyé.' });
+      }
+      // Génère/récupère le magic link
+      const url = await getOrCreateExposantAccessUrl(db, org.id, cleanEmail);
+      // Envoie l'email via sendMailAuto (respecte le mode TEST)
+      try {
+        const { sendMailAuto } = await import('@/lib/mail-config');
+        await sendMailAuto({
+          to: cleanEmail,
+          subject: '🔐 Votre lien de connexion — Forum de la Rentrée 2026',
+          html: `<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+            <h2 style="color:#1e40af">Bonjour ${org.contact_name || org.name || ''},</h2>
+            <p>Voici votre lien d'accès personnel à votre espace exposant :</p>
+            <p style="margin:32px 0;text-align:center">
+              <a href="${url}" style="background:#1e40af;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Accéder à mon espace</a>
+            </p>
+            <p style="color:#64748b;font-size:13px">Ce lien est strictement personnel. Conservez-le précieusement.</p>
+            <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0" />
+            <p style="color:#94a3b8;font-size:12px">Forum de la Rentrée 2026 · ARACOM Conseil</p>
+          </div>`,
+        });
+        await db.collection('access_tokens').updateOne(
+          { organization_id: org.id, purpose: 'exposant', revoked_at: null },
+          { $set: { last_email_sent_at: new Date() } }
+        );
+      } catch (e) {
+        console.error('[magic-link] mail error:', e.message);
+        return err('Impossible d\'envoyer le lien pour le moment', 500);
+      }
+      return json({ ok: true, sent: true });
+    }
+
+
     if (route === 'auth/self-register') {
       const { email } = body;
       if (!email || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) return err('Email invalide');

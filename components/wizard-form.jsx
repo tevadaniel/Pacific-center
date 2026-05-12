@@ -1047,6 +1047,11 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
                 <Textarea rows={1} value={rdvForm.notes} onChange={e => setRdvForm(r => ({ ...r, notes: e.target.value }))} placeholder="Notes complémentaires…" />
               </Field>
               <div className="text-xs text-amber-700 bg-amber-100 border border-amber-200 rounded p-2">💡 Lors du RDV, vous remettrez votre caution de <b>20 000 XPF</b> ainsi que vos documents (assurance, convention) si pas déjà uploadés ci-dessous.</div>
+              <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded p-3 leading-relaxed">
+                <b>ℹ️ À propos de la caution :</b> Elle est <b>restituée à l&apos;issue de l&apos;événement</b> si tout s&apos;est bien passé.
+                Un questionnaire de satisfaction vous sera envoyé par mail.
+                Un rendez-vous sera fixé pour la restitution, sauf si elle est effectuée le Jour J.
+              </div>
               <Button onClick={submitRdv} disabled={submittingRdv} className="bg-amber-600 hover:bg-amber-700 w-full" data-testid="submit-rdv">
                 {submittingRdv ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 Demander mon RDV caution
@@ -1058,8 +1063,15 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
         {/* 2) Documents (optionnel — peuvent être remis au RDV) */}
         <div className="border-t pt-5">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> 2. Documents (optionnel — peuvent être remis au RDV)</h3>
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> 2. Documents</h3>
             <div className="text-xs text-slate-500">{requiredDocsUploaded}/{requiredDocs.length} obligatoires en ligne</div>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800 mb-3">
+            <b>📎 Deux options :</b>
+            <ul className="list-disc ml-4 mt-1 space-y-0.5">
+              <li><b>En ligne</b> — uploadez vos documents ci-dessous (PDF, JPG, PNG).</li>
+              <li><b>En main propre</b> — remettez vos documents physiques lors de votre RDV caution avec ARACOM (option recommandée pour les pièces signées).</li>
+            </ul>
           </div>
           <div className="h-2 bg-slate-200 rounded-full mb-3 overflow-hidden">
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${docProgress}%` }} />
