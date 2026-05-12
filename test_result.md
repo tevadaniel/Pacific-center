@@ -961,6 +961,38 @@ agent_communication:
     implemented: true
     working: true
     file: "components/wizard-form.jsx"
+
+
+  - task: "Fix PortalSwitcher exposant — popup blocker bypass (session 18)"
+    implemented: true
+    working: true
+    file: "components/portal-switcher.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "Utilisateur a signalé : 'impossible d'acceder aux autres portails'."
+      - working: true
+        agent: "main"
+        comment: "✅ BUG IDENTIFIÉ : window.open(url, '_blank') était bloqué par le popup blocker car appelé APRÈS un await fetch (la chaîne d'événement utilisateur était rompue). FIX : ouvrir window.open('about:blank','_blank') IMMÉDIATEMENT au click, puis assigner win.location.href après le fetch. Gestion d'erreur : si popup bloqué → toast 'Autorisez les popups'. Endpoints backend vérifiés OK : GET /api/organizations (66 orgs), GET /api/organizations/:id/access-link (200 avec access_url), GET /pacific (200)."
+
+  - task: "Refactor cockpit multi-sites → catégories du Centre d'alertes (session 18)"
+    implemented: true
+    working: true
+    file: "app/aracom/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "Utilisateur a explicitement demandé : 'le multi site tu dois le mettre dans anomalie à surveiller'."
+      - working: true
+        agent: "main"
+        comment: "✅ REFACTORÉ : Suppression de l'onglet 'Cockpit multi-sites' du menu TABS et TAB_GROUPS. AlertsBadge enrichi avec : (a) fetch /api/admin/multi-site-alerts toutes les 30s. (b) 2 nouvelles catégories : 'multi_site_duplicates' (cyan, exposants présents sur N sites) et 'multi_site_overloaded' (orange, sites surchargés vs moyenne). (c) Mini-stats buttons dans le header du Sheet pour accès rapide. (d) Rendering enrichi : chaque exposant multi-site affiche ses venues ('Inscrit sur 5 sites : Faaa · Punaauia · Arue...'). (e) Badge total inclut désormais les 2 nouvelles catégories. Vérifié screenshot E2E : 10 exposants multi-sites listés avec détails par venue, 0 sites surchargés correctement affiché."
+
     stuck_count: 0
     priority: "high"
     needs_retesting: false

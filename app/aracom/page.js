@@ -35,7 +35,6 @@ import StatusLegend from '@/components/status-legend';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
-  { key: 'cockpit-multi', label: '🌐 Cockpit multi-sites', href: '/aracom?tab=cockpit-multi' },
   { key: 'exposants', label: 'Exposants', href: '/aracom?tab=exposants' },
   { key: 'sites', label: 'Sites & stands', href: '/aracom?tab=sites' },
   { key: 'validations', label: 'Validations', href: '/aracom?tab=validations' },
@@ -57,7 +56,6 @@ const TABS = [
 // Regroupement intelligent des onglets en menus déroulants
 const TAB_GROUPS = [
   { key: 'dashboard', label: 'Dashboard', icon: '📊', single: true }, // Direct
-  { key: 'cockpit-multi', label: 'Multi-sites', icon: '🌐', single: true, redirectTo: 'cockpit-multi' },
   {
     key: 'pilotage',
     label: 'Pilotage',
@@ -4058,6 +4056,7 @@ function AlertsBadge({ onGoto }) {
   const [open, setOpen] = useState(false);
   const [regs, setRegs] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  const [multiSite, setMultiSite] = useState(null); // 🌐 Anomalies multi-sites
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [activeCat, setActiveCat] = useState('insurance');
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -4065,7 +4064,11 @@ function AlertsBadge({ onGoto }) {
   // Polling alertes (toutes les 30s)
   useEffect(() => {
     api('/api/alerts').then(setAlerts).catch(() => {});
-    const t = setInterval(() => api('/api/alerts').then(setAlerts).catch(() => {}), 30000);
+    api('/api/admin/multi-site-alerts').then(setMultiSite).catch(() => {});
+    const t = setInterval(() => {
+      api('/api/alerts').then(setAlerts).catch(() => {});
+      api('/api/admin/multi-site-alerts').then(setMultiSite).catch(() => {});
+    }, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -4076,15 +4079,18 @@ function AlertsBadge({ onGoto }) {
     Promise.all([
       api('/api/registrations'),
       api('/api/anomalies').catch(() => []),
+      api('/api/admin/multi-site-alerts').catch(() => null),
     ])
-      .then(([r, a]) => { setRegs(r); setAnomalies(Array.isArray(a) ? a : []); })
+      .then(([r, a, m]) => { setRegs(r); setAnomalies(Array.isArray(a) ? a : []); if (m) setMultiSite(m); })
       .catch(() => {})
       .finally(() => setLoadingDetail(false));
     setSelectedIds(new Set());
   }, [open]);
 
   if (!alerts) return null;
-  const total = alerts.anomalies_open + alerts.tasks_open + alerts.missing_insurance + (alerts.validation_pending || 0) + (alerts.validation_rdv || 0);
+  const multiSiteOverloadedCount = multiSite?.overloaded_sites?.length || 0;
+  const multiSiteDuplicatesCount = multiSite?.duplicate_exposants?.length || 0;
+  const total = alerts.anomalies_open + alerts.tasks_open + alerts.missing_insurance + (alerts.validation_pending || 0) + (alerts.validation_rdv || 0) + multiSiteOverloadedCount + multiSiteDuplicatesCount;
 
   // Catégorisation des dossiers (côté client, à partir des flags registrations + anomalies)
   const activeRegs = (regs || []).filter(r => r.status !== 'annule' && r.status !== 'libre');
@@ -4129,6 +4135,50 @@ function AlertsBadge({ onGoto }) {
         return activeRegs.filter(r => ids.has(r.id)).map(r => ({
           ...r,
           _anom_count: openAnom.filter(a => a.registration_id === r.id).length,
+        }));
+      })(),
+    },
+    multi_site_duplicates: {
+      label: '🌐 Exposants multi-sites (à surveiller)',
+      mail_type: 'relance_generale',
+      color: 'cyan',
+      items: (() => {
+        const dups = multiSite?.duplicate_exposants || [];
+        // Mapper sur la 1ʳᵉ registration de chaque exposant pour pouvoir l'ouvrir
+        return dups.map(d => {
+          const firstRegId = d.venues?.[0]?.registration_id;
+          const baseReg = activeRegs.find(r => r.id === firstRegId);
+          const venuesLabel = (d.venues || []).map(v => v.venue_name).filter(Boolean).join(' · ');
+          return {
+            id: firstRegId || `org-${d.org_id}`,
+            organization_id: d.org_id,
+            organization_name: d.org_name,
+            discipline: baseReg?.discipline || null,
+            priority_level: baseReg?.priority_level || null,
+            status: baseReg?.status || 'multi_site',
+            stand_code: null,
+            main_email: baseReg?.main_email || null,
+            _multi_site_count: d.venues?.length || 0,
+            _multi_site_label: venuesLabel,
+            _multi_site_venues: d.venues || [],
+          };
+        });
+      })(),
+    },
+    multi_site_overloaded: {
+      label: '📍 Sites surchargés',
+      mail_type: 'relance_generale',
+      color: 'orange',
+      items: (() => {
+        const overloaded = multiSite?.overloaded_sites || [];
+        return overloaded.map(s => ({
+          id: `site-${s.venue_id}`,
+          organization_name: s.venue_name,
+          discipline: `${s.count} inscriptions (moyenne ${multiSite?.avg_per_site || '—'}, capacité ${s.capacity || '?'})`,
+          status: 'overloaded',
+          _site_capacity: s.capacity,
+          _site_count: s.count,
+          _site_overload: s.overload_pct,
         }));
       })(),
     },
@@ -4210,6 +4260,18 @@ function AlertsBadge({ onGoto }) {
                 <div className="text-xl font-bold text-red-900">{alerts.critical_anomalies}</div>
               </button>
             )}
+            {multiSiteDuplicatesCount > 0 && (
+              <button onClick={() => { setActiveCat('multi_site_duplicates'); }} className="rounded-md p-2 text-left bg-cyan-50 hover:bg-cyan-100 border border-cyan-200">
+                <div className="text-xs text-cyan-700">🌐 Exposants multi-sites</div>
+                <div className="text-xl font-bold text-cyan-900">{multiSiteDuplicatesCount}</div>
+              </button>
+            )}
+            {multiSiteOverloadedCount > 0 && (
+              <button onClick={() => { setActiveCat('multi_site_overloaded'); }} className="rounded-md p-2 text-left bg-orange-50 hover:bg-orange-100 border border-orange-200">
+                <div className="text-xs text-orange-700">📍 Sites surchargés</div>
+                <div className="text-xl font-bold text-orange-900">{multiSiteOverloadedCount}</div>
+              </button>
+            )}
           </div>
 
           {/* Tabs catégories */}
@@ -4260,8 +4322,18 @@ function AlertsBadge({ onGoto }) {
                         {r.discipline || '—'}
                         {r.venue_name && <> · 📍 {r.venue_name}</>}
                         {r.stand_code && <> · 🔖 {r.stand_code}</>}
-                        <> · {r.completion_percent || 0}%</>
+                        {typeof r.completion_percent === 'number' && <> · {r.completion_percent}%</>}
                       </div>
+                      {r._multi_site_count > 1 && (
+                        <div className="text-[11px] text-cyan-700 mt-0.5 truncate">
+                          🌐 Inscrit sur <b>{r._multi_site_count}</b> sites : {r._multi_site_label}
+                        </div>
+                      )}
+                      {r._site_overload && (
+                        <div className="text-[11px] text-orange-700 mt-0.5">
+                          ⚠️ {r._site_count}/{r._site_capacity || '?'} stands occupés (+{Math.round(r._site_overload * 100)}% au-dessus moyenne)
+                        </div>
+                      )}
                       {(r.main_email || r.organization?.main_email) && (
                         <div className="text-[11px] text-slate-400 truncate">📧 {r.main_email || r.organization?.main_email}</div>
                       )}

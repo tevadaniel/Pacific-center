@@ -39,17 +39,24 @@ export default function PortalSwitcher() {
   };
 
   const goExposant = async (org) => {
+    // 🛡️ Ouvrir l'onglet IMMÉDIATEMENT (sinon popup blocker à cause du await)
+    const win = window.open('about:blank', '_blank');
+    if (!win) {
+      toast.error('Le navigateur a bloqué l\'ouverture du portail. Autorisez les popups pour ce site.');
+      return;
+    }
     setOpen(false);
     try {
-      // Generate/fetch access link
       const r = await fetch(`/api/organizations/${org.id}/access-link`);
       const d = await r.json();
       if (r.ok && d?.access_url) {
-        window.open(d.access_url, '_blank');
+        win.location.href = d.access_url;
       } else {
+        win.close();
         toast.error('Lien d\'accès indisponible pour cet exposant');
       }
     } catch (e) {
+      try { win.close(); } catch {}
       toast.error('Erreur : ' + e.message);
     }
   };
