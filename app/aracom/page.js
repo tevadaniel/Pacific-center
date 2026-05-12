@@ -1032,6 +1032,9 @@ function FicheExposant({ id, onClose }) {
               <SheetDescription>{data.organization?.discipline} • <PrioBadge p={data.organization?.priority_level} /> • <span className="font-mono">{data.registration?.stand_code}</span> • {data.venue?.name}</SheetDescription>
             </SheetHeader>
 
+            {/* 🛠 ACTIONS ADMIN OVERRIDE — modifier/annuler/supprimer toute action de l'exposant */}
+            <AdminOverridePanel data={data} onReload={load} onClose={onClose} />
+
             {data.registration?.status !== 'confirme' && (
               <div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 p-3">
                 <div>
@@ -6355,6 +6358,90 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
     </Dialog>
   );
 }
+
+// ─────────────────────────────────────────────────────────
+// ADMIN OVERRIDE PANEL — modifier / annuler / supprimer toute action de l'exposant
+// ─────────────────────────────────────────────────────────
+function AdminOverridePanel({ data, onReload, onClose }) {
+  const [busy, setBusy] = useState(null);
+  if (!data?.registration) return null;
+  const reg = data.registration;
+
+  const callAdmin = async (label, path, body, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(label);
+    try {
+      const r = await fetch(`/api${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `Erreur ${label}`);
+      toast.success(`${label} ✓`);
+      await onReload();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const releaseStand = () => callAdmin('Stand libéré', `/admin/registrations/${reg.id}/reset`, { reset: 'stand' }, `Libérer le stand ${reg.stand_code} de ${data.organization?.name} ?`);
+  const clearAnimation = () => callAdmin('Animations supprimées', `/admin/registrations/${reg.id}/reset`, { reset: 'animations' }, `Supprimer toutes les animations de ${data.organization?.name} ?`);
+  const clearDays = () => callAdmin('Jours réinitialisés', `/admin/registrations/${reg.id}/reset`, { reset: 'days' }, `Réinitialiser les jours de présence ?`);
+  const cancelReg = () => callAdmin('Inscription annulée', `/admin/registrations/${reg.id}/reset`, { reset: 'cancel' }, `⚠ Annuler complètement l'inscription de ${data.organization?.name} ? (statut "annulé", stand libéré, animations supprimées)`);
+  const deleteReg = async () => {
+    if (!window.confirm(`🗑️ SUPPRIMER DÉFINITIVEMENT ${data.organization?.name} et toutes ses données ? Action irréversible.`)) return;
+    if (!window.confirm(`Confirmation finale : tapez OK pour valider la suppression définitive.`)) return;
+    setBusy('delete');
+    try {
+      const r = await fetch(`/api/admin/registrations/${reg.id}/delete-full`, { method: 'POST', headers: { 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' } });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Erreur suppression');
+      toast.success('Exposant supprimé définitivement');
+      onClose();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+
+  return (
+    <div className="rounded-md border-2 border-red-200 bg-red-50/40 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="font-bold text-red-900 text-sm">🛠️ Actions admin (override)</div>
+        <div className="text-[10px] text-red-600">— Modifier ou annuler toute action de l&apos;exposant, à n&apos;importe quelle étape</div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {reg.stand_code && (
+          <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
+            {busy === 'Stand libéré' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            Libérer stand {reg.stand_code}
+          </Button>
+        )}
+        {data.slots?.length > 0 && (
+          <Button size="sm" variant="outline" onClick={clearAnimation} disabled={busy === 'Animations supprimées'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
+            {busy === 'Animations supprimées' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            Supprimer animations ({data.slots.length})
+          </Button>
+        )}
+        {(reg.attending_days?.length > 0) && (
+          <Button size="sm" variant="outline" onClick={clearDays} disabled={busy === 'Jours réinitialisés'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
+            {busy === 'Jours réinitialisés' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            Réinitialiser jours
+          </Button>
+        )}
+        {reg.status !== 'annule' && (
+          <Button size="sm" variant="outline" onClick={cancelReg} disabled={busy === 'Inscription annulée'} className="bg-red-600 text-white hover:bg-red-700 border-red-700">
+            {busy === 'Inscription annulée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            ⛔ Annuler inscription
+          </Button>
+        )}
+        <Button size="sm" variant="outline" onClick={deleteReg} disabled={busy === 'delete'} className="bg-zinc-900 text-white hover:bg-black border-black">
+          {busy === 'delete' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
+          Supprimer définitivement
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 
 
 

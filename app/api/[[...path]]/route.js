@@ -1983,6 +1983,92 @@ export async function POST(request, { params }) {
         updated_at: new Date(),
       };
       await db.collection('organizations').updateOne({ id: reg.organization_id }, { $set: update });
+    // 🛠 ADMIN OVERRIDE — Reset/cancel any action of an exposant
+    if (route.match(/^admin\/registrations\/[^/]+\/reset$/)) {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const regId = p[2];
+      const { reset } = body;
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+
+      if (reset === 'stand') {
+        await db.collection('stand_assignments').updateMany(
+          { registration_id: regId, status: { $nin: ['annule', 'cancelled'] } },
+          { $set: { status: 'annule', updated_at: new Date(), cancelled_by: 'admin_override' } }
+        );
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $unset: { stand_code: '' }, $set: { wizard_step: Math.min(reg.wizard_step || 1, 3), updated_at: new Date() } }
+        );
+        return json({ ok: true, action: 'stand_released' });
+      }
+      if (reset === 'animations') {
+        const r = await db.collection('animation_slots').deleteMany({ registration_id: regId });
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $set: { wizard_step: Math.min(reg.wizard_step || 1, 4), updated_at: new Date() } }
+        );
+        return json({ ok: true, action: 'animations_cleared', count: r.deletedCount });
+      }
+      if (reset === 'days') {
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $set: { attending_days: [], attending_day_times: {}, wizard_step: 2, updated_at: new Date() }, $unset: { venue_id: '', stand_code: '', visit_day_label: '' } }
+        );
+        await db.collection('stand_assignments').updateMany(
+          { registration_id: regId, status: { $nin: ['annule', 'cancelled'] } },
+          { $set: { status: 'annule', updated_at: new Date() } }
+        );
+        await db.collection('animation_slots').deleteMany({ registration_id: regId });
+        return json({ ok: true, action: 'days_reset' });
+      }
+      if (reset === 'cancel') {
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $set: { status: 'annule', cancelled_at: new Date(), cancelled_by: 'admin_override', updated_at: new Date() } }
+        );
+        await db.collection('stand_assignments').updateMany(
+          { registration_id: regId, status: { $nin: ['annule', 'cancelled'] } },
+          { $set: { status: 'annule', updated_at: new Date() } }
+        );
+        await db.collection('animation_slots').updateMany(
+          { registration_id: regId },
+          { $set: { status: 'annulé', updated_at: new Date() } }
+        );
+        return json({ ok: true, action: 'registration_cancelled' });
+      }
+      return err('Action de reset inconnue (stand|animations|days|cancel)', 400);
+    }
+
+    // 🗑 DELETE FULL — supprime complètement la registration + ses dépendances
+    if (route.match(/^admin\/registrations\/[^/]+\/delete-full$/)) {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const regId = p[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Garde-fou : refuse de supprimer un exposant protégé
+      const PROTECTED = ['I Mua Papeete', 'Dream Lab', 'ACE Arue', 'Budokan Judo Pirae', 'Lotus Bleu'];
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (org && PROTECTED.includes(org.name)) {
+        return err(`Refus de suppression — "${org.name}" est un exposant protégé. Utilisez "Annuler inscription" à la place.`, 403);
+      }
+      await db.collection('stand_assignments').deleteMany({ registration_id: regId });
+      await db.collection('animation_slots').deleteMany({ registration_id: regId });
+      await db.collection('validation_requests').deleteMany({ registration_id: regId });
+      await db.collection('modification_tokens').deleteMany({ registration_id: regId });
+      await db.collection('registration_documents').deleteMany({ registration_id: regId });
+      await db.collection('registrations').deleteOne({ id: regId });
+      // Si l'org n'a plus aucune reg, on supprime aussi l'org
+      const otherRegs = await db.collection('registrations').countDocuments({ organization_id: reg.organization_id });
+      if (otherRegs === 0 && reg.organization_id) {
+        await db.collection('organizations').deleteOne({ id: reg.organization_id });
+      }
+      return json({ ok: true, action: 'fully_deleted', org_also_deleted: otherRegs === 0 });
+    }
+
+
       await db.collection('registrations').updateOne({ id: registration_id }, { $set: { wizard_step: 2, updated_at: new Date() } });
       return json({ ok: true, next_step: 2 });
     }
