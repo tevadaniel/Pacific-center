@@ -217,18 +217,21 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
   // ── 6) DONNÉES DE TEST RÉSIDUELLES ────────────────────────────────
   console.log('\n[6/7] Données de test résiduelles');
   // 🚨 Conditions cumulatives pour pouvoir supprimer automatiquement :
-  //  - Le nom doit contenir teva|aracom|teka (préfixes autorisés)
-  //  - ET l'email doit être manifestement un email de test (pas un vrai mail)
-  // Cela protège le compte de Teva (tevageros@me.com) qui est légitime.
+  //  - Le nom contient teva|aracom|teka (préfixes autorisés)
+  //  - ET (email est un email de test OU id commence par "org-pub-" = créé via self-register)
+  // Cela protège le compte de Teva (tevageros@me.com) qui est légitime (id = "org-XXX")
+  // mais cleanup auto les orgs "Teva Test ..." créées via /inscription (id = "org-pub-XXX").
   const TEST_EMAIL_PATTERN = /(@e2e-test\.local$|\+test@|wizard.?e2e|e2e[-_.]test|@test\.|@example\.)/i;
   const candidates = await db.collection('organizations').find({
     $and: [
       { name: ALLOWED_TEST_NAME_PATTERN },
-      { main_email: TEST_EMAIL_PATTERN },
+      { $or: [
+        { main_email: TEST_EMAIL_PATTERN },
+        { id: /^org-pub-/ },
+      ]},
     ],
   }).toArray();
-  const testOrgs = candidates; // Déjà filtrés par AND
-  // Détecter aussi tout reste suspect non auto-purgeable (pour info uniquement)
+  const testOrgs = candidates;
   const suspicious = await db.collection('organizations').find({
     main_email: TEST_EMAIL_PATTERN,
     name: { $not: ALLOWED_TEST_NAME_PATTERN },

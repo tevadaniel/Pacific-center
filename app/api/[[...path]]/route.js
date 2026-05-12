@@ -1828,7 +1828,129 @@ export async function POST(request, { params }) {
       return json({ ok: true, next_step: 2 });
     }
 
-    // Étape 2 — Site + Stand (carte interactive) + Jours de présence avec horaires
+    // Étape 2 — Site + Jours de présence avec horaires (PAS de stand ici)
+    if (route === 'wizard/days') {
+      const { registration_id, venue_id, attending_days, attending_day_times } = body;
+      if (!registration_id || !venue_id) return err('registration_id et venue_id requis', 400);
+      if (!Array.isArray(attending_days) || attending_days.length === 0) {
+        return err('Veuillez cocher au moins un jour de présence', 400);
+      }
+      const validDays = attending_days.filter(d => ['vendredi', 'samedi'].includes(d));
+      if (validDays.length === 0) return err('Jours invalides', 400);
+
+      const times = attending_day_times || {};
+      for (const d of validDays) {
+        const t = times[d];
+        if (!t || !t.start || !t.end) return err(`Horaire requis pour ${d} (heure début et fin)`, 400);
+        if (t.start >= t.end) return err(`Pour ${d}, l'heure de fin doit être après l'heure de début`, 400);
+      }
+
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+
+      // Si on change de site, libère le stand précédemment réservé
+      if (reg.venue_id && reg.venue_id !== venue_id && reg.stand_code) {
+        await db.collection('stand_assignments').updateMany(
+          { registration_id, status: { $nin: ['annule', 'cancelled'] } },
+          { $set: { status: 'annule', updated_at: new Date() } }
+        );
+        await db.collection('registrations').updateOne(
+          { id: registration_id },
+          { $unset: { stand_code: '' }, $set: { updated_at: new Date() } }
+        );
+      }
+
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: {
+            venue_id,
+            attending_days: validDays,
+            attending_day_times: validDays.reduce((acc, d) => { acc[d] = { start: times[d].start, end: times[d].end }; return acc; }, {}),
+            visit_day_label: validDays.length === 1 ? validDays[0] : (reg.visit_day_label || null),
+            wizard_step: 3,
+            updated_at: new Date(),
+          },
+        }
+      );
+
+      // Supprime les animations sur des jours plus présents
+      const removedAnims = await db.collection('animation_slots').deleteMany({
+        registration_id,
+        day_label: { $nin: validDays },
+      });
+
+      return json({
+        ok: true,
+        venue_id,
+        attending_days: validDays,
+        attending_day_times: validDays.reduce((acc, d) => { acc[d] = times[d]; return acc; }, {}),
+        removed_animations: removedAnims.deletedCount,
+        next_step: 3,
+      });
+    }
+
+    // Étape 3 — Choix du stand sur la carte interactive
+    if (route === 'wizard/stand') {
+      const { registration_id, stand_code, venue_stand_id } = body;
+      if (!registration_id) return err('registration_id requis', 400);
+      if (!stand_code && !venue_stand_id) return err('Veuillez sélectionner un stand sur la carte', 400);
+
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (!reg.venue_id) return err('Étape 2 (site & jour) manquante', 400);
+
+      // Résoudre le stand
+      let stand = null;
+      if (venue_stand_id) {
+        stand = await db.collection('venue_stands').findOne({ id: venue_stand_id, venue_id: reg.venue_id });
+      } else if (stand_code) {
+        stand = await db.collection('venue_stands').findOne({ stand_code: String(stand_code).toUpperCase(), venue_id: reg.venue_id });
+      }
+      if (!stand) return err('Stand introuvable sur ce site', 404);
+
+      // Vérifier qu'il n'est pas pris par quelqu'un d'autre
+      const conflicting = await db.collection('stand_assignments').findOne({
+        venue_stand_id: stand.id,
+        status: { $nin: ['annule', 'cancelled'] },
+        registration_id: { $ne: registration_id },
+      });
+      if (conflicting) {
+        const otherReg = await db.collection('registrations').findOne({ id: conflicting.registration_id });
+        const otherOrg = otherReg ? await db.collection('organizations').findOne({ id: otherReg.organization_id }) : null;
+        return err(`Ce stand est déjà réservé par ${otherOrg?.name || 'un autre exposant'}. Choisissez-en un autre.`, 409);
+      }
+
+      // Annuler les anciennes assignations de cet exposant
+      await db.collection('stand_assignments').updateMany(
+        { registration_id, status: { $nin: ['annule', 'cancelled'] } },
+        { $set: { status: 'annule', updated_at: new Date() } }
+      );
+
+      // Créer la nouvelle assignation
+      await db.collection('stand_assignments').insertOne({
+        id: uuid(),
+        registration_id,
+        venue_stand_id: stand.id,
+        assigned_by: 'wizard',
+        assigned_at: new Date(),
+        status: 'provisoire',
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: { stand_code: stand.stand_code, wizard_step: 4, updated_at: new Date() } }
+      );
+
+      return json({
+        ok: true,
+        stand: { id: stand.id, stand_code: stand.stand_code, zone: stand.zone },
+        next_step: 4,
+      });
+    }
+
+    // Étape 2 — (DEPRECATED, conservé pour compat) Site + Stand + Jours en une seule fois
     if (route === 'wizard/booking') {
       const { registration_id, venue_id, stand_code, venue_stand_id, attending_days, attending_day_times } = body;
       if (!registration_id || !venue_id) return err('registration_id et venue_id requis', 400);

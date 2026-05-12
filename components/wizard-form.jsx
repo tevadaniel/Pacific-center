@@ -14,10 +14,10 @@ import SmartVenueMap from '@/components/smart-venue-map';
 
 const STEPS = [
   { n: 1, key: 'profile', label: 'Profil', icon: '👤' },
-  { n: 2, key: 'booking', label: 'Site & Stand', icon: '📍' },
-  { n: 3, key: 'animation', label: 'Animation', icon: '🎭' },
-  { n: 4, key: 'documents', label: 'Documents & Caution', icon: '📁' },
-  { n: 5, key: 'confirm', label: 'Récapitulatif', icon: '🎉' },
+  { n: 2, key: 'days', label: 'Jour', icon: '📅' },
+  { n: 3, key: 'stand', label: 'Stand', icon: '🗺️' },
+  { n: 4, key: 'animation', label: 'Animation', icon: '🎭' },
+  { n: 5, key: 'final', label: 'RDV & Confirmation', icon: '✅' },
 ];
 
 async function api(path, opts = {}) {
@@ -132,9 +132,9 @@ export default function WizardPage({ registrationId, isPublic = false }) {
   const canAdvanceTo = (step) => {
     if (step === 1) return true;
     if (step === 2) return stepStatus.step1_profile;
-    if (step === 3) return stepStatus.step2_booking;
-    if (step === 4) return stepStatus.step3_animation;
-    if (step === 5) return stepStatus.step4_docs_rdv;
+    if (step === 3) return stepStatus.step2_days || stepStatus.step2_booking;
+    if (step === 4) return stepStatus.step3_stand || stepStatus.step2_booking;
+    if (step === 5) return stepStatus.step4_animation || stepStatus.step3_animation;
     return false;
   };
 
@@ -193,7 +193,8 @@ export default function WizardPage({ registrationId, isPublic = false }) {
           {/* Steps nav */}
           <div className="mt-3 grid grid-cols-5 gap-1 md:gap-2">
             {STEPS.map(s => {
-              const isDone = currentStep > s.n || (state.step_status[`step${s.n}_${s.key === 'profile' ? 'profile' : s.key === 'booking' ? 'booking' : s.key === 'animation' ? 'animation' : s.key === 'documents' ? 'docs_rdv' : 'confirmed'}`]);
+              const statusKey = { 1: 'step1_profile', 2: 'step2_days', 3: 'step3_stand', 4: 'step4_animation', 5: 'step5_docs_rdv' }[s.n];
+              const isDone = state.step_status?.[statusKey] && currentStep !== s.n;
               const isActive = currentStep === s.n;
               const isLocked = !canAdvanceTo(s.n);
               return (
@@ -227,10 +228,10 @@ export default function WizardPage({ registrationId, isPublic = false }) {
 
       <main className="max-w-3xl mx-auto px-4 py-6">
         {currentStep === 1 && <Step1Profile state={state} draft={draft} setDraft={setDraft} onNext={goNext} reload={loadState} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
-        {currentStep === 2 && <Step2Booking state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
-        {currentStep === 3 && <Step3Animation state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
-        {currentStep === 4 && <Step4Documents state={state} onNext={goNext} onBack={goBack} reload={loadState} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
-        {currentStep === 5 && <Step5Confirm state={state} onBack={goBack} reload={loadState} registrationId={registrationId} saving={saving} setSaving={setSaving} onEditStep={(n) => setCurrentStep(n)} />}
+        {currentStep === 2 && <Step2Days state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
+        {currentStep === 3 && <Step3Stand state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
+        {currentStep === 4 && <Step4Animation state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
+        {currentStep === 5 && <Step5Final state={state} onBack={goBack} reload={loadState} registrationId={registrationId} saving={saving} setSaving={setSaving} onEditStep={(n) => setCurrentStep(n)} />}
       </main>
     </div>
   );
@@ -311,9 +312,9 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
 }
 
 // ─────────────────────────────────────────────────────────
-// STEP 2 — Site + Stand (carte interactive) + Jours de présence avec horaires
+// STEP 2 — Jour (site + jours cochés + horaires)
 // ─────────────────────────────────────────────────────────
-function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
+function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
   const b = draft.booking || {};
   const setField = (k, v) => setDraft(d => ({ ...d, booking: { ...d.booking, [k]: v } }));
   const setTime = (day, field, val) => setDraft(d => ({
@@ -335,48 +336,10 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
   const venues = availability?.venues || [];
   const selectedVenue = venues.find(v => v.id === b.venue_id);
 
-  // Charge les stands du site sélectionné
-  const [stands, setStands] = useState([]);
-  const [loadingStands, setLoadingStands] = useState(false);
-  useEffect(() => {
-    if (!b.venue_id) { setStands([]); return; }
-    let cancelled = false;
-    (async () => {
-      setLoadingStands(true);
-      try {
-        const list = await api(`/venues/${b.venue_id}/stands`);
-        if (!cancelled) setStands(Array.isArray(list) ? list : []);
-      } catch (e) { console.error('stands load', e); }
-      finally { if (!cancelled) setLoadingStands(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [b.venue_id]);
-
-  // Stand sélectionné — disponible si pas d'assignation OU si c'est moi
-  const isStandAvailable = (s) => {
-    if (!s.assignment) return true;
-    if (s.assignment.registration_id === registrationId) return true;
-    return ['annule', 'cancelled'].includes(s.assignment.status);
-  };
-  const myStand = stands.find(s => s.stand_code === b.stand_code);
-
-  const onStandClick = (stand) => {
-    if (!stand) return;
-    if (!isStandAvailable(stand)) {
-      toast.error(`Stand ${stand.stand_code} déjà attribué à ${stand.organization?.name || 'un autre exposant'}`);
-      return;
-    }
-    setField('stand_code', stand.stand_code);
-    setField('venue_stand_id', stand.id);
-    toast.success(`Stand ${stand.stand_code} sélectionné`);
-  };
-
   const submit = async () => {
     if (!b.venue_id) { toast.error('Choisissez un site'); return; }
-    if (!b.stand_code) { toast.error('Cliquez sur un stand disponible sur la carte'); return; }
     if (!Array.isArray(b.attending_days) || b.attending_days.length === 0) {
-      toast.error('Cochez au moins un jour de présence');
-      return;
+      toast.error('Cochez au moins un jour de présence'); return;
     }
     for (const d of b.attending_days) {
       const t = b.attending_day_times?.[d];
@@ -385,18 +348,16 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
     }
     setSaving(true);
     try {
-      await api('/wizard/booking', {
+      await api('/wizard/days', {
         method: 'POST',
         body: JSON.stringify({
           registration_id: registrationId,
           venue_id: b.venue_id,
-          stand_code: b.stand_code,
-          venue_stand_id: b.venue_stand_id,
           attending_days: b.attending_days,
           attending_day_times: b.attending_day_times,
         }),
       });
-      toast.success('Site, stand et présence enregistrés ✓');
+      toast.success('Site et jours enregistrés ✓');
       await reload();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
@@ -406,11 +367,11 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
   return (
     <Card>
       <CardContent className="p-6 space-y-6">
-        <SectionHeader icon="📍" title="Site, stand et jours de présence" desc="Choisissez votre site, votre stand sur la carte interactive, puis cochez vos jours de présence avec les horaires." />
+        <SectionHeader icon="📅" title="Mon site et mes jours de présence" desc="Choisissez votre site puis cochez les jours où vous serez présent avec vos horaires d'ouverture." />
 
         {/* 1) SITES */}
         <div>
-          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> 1. Choisir mon site</h3>
+          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> 1. Mon site</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {venues.map(v => {
               const isSel = b.venue_id === v.id;
@@ -447,38 +408,10 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
           </div>
         </div>
 
-        {/* 2) STAND sur carte interactive */}
+        {/* 2) JOURS DE PRÉSENCE + HORAIRES */}
         {selectedVenue && (
           <div>
-            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">🗺️ 2. Choisir mon stand sur le plan</h3>
-            <div className="text-xs text-slate-500 mb-3">Cliquez sur un stand libre pour le sélectionner. Les stands grisés sont déjà pris.</div>
-            {loadingStands ? (
-              <div className="py-8 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Chargement du plan…</div>
-            ) : stands.length === 0 ? (
-              <div className="py-6 text-center text-amber-700 bg-amber-50 rounded-lg border border-amber-200">Le plan de ce site n&apos;est pas encore disponible. Contactez ARACOM.</div>
-            ) : (
-              <div className="border rounded-lg overflow-hidden bg-slate-50">
-                <SmartVenueMap
-                  venue={selectedVenue}
-                  stands={stands}
-                  highlightStandCode={b.stand_code}
-                  onStandClick={onStandClick}
-                />
-              </div>
-            )}
-            {b.stand_code && (
-              <div className="mt-3 bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r text-sm font-medium text-emerald-900 flex items-center justify-between">
-                <span>✓ Stand sélectionné : <b>{b.stand_code}</b>{myStand?.zone ? ` (zone ${myStand.zone})` : ''}</span>
-                <button onClick={() => { setField('stand_code', ''); setField('venue_stand_id', ''); }} className="text-xs text-emerald-700 underline">Changer</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 3) JOURS DE PRÉSENCE + HORAIRES */}
-        {selectedVenue && b.stand_code && (
-          <div>
-            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> 3. Mes jours de présence et horaires</h3>
+            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> 2. Mes jours et horaires de présence</h3>
             <div className="text-xs text-slate-500 mb-3">Cochez au moins un jour. Renseignez vos horaires d&apos;ouverture du stand pour chaque jour coché.</div>
             <div className="space-y-3">
               {[
@@ -520,11 +453,11 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
           <Button
             onClick={submit}
-            disabled={saving || !b.venue_id || !b.stand_code || !(b.attending_days?.length > 0)}
+            disabled={saving || !b.venue_id || !(b.attending_days?.length > 0)}
             className="gap-2 bg-blue-600 hover:bg-blue-700"
             data-testid="step2-next"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmer & verrouiller <ChevronRight className="w-4 h-4" /></>}
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
       </CardContent>
@@ -533,9 +466,130 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
 }
 
 // ─────────────────────────────────────────────────────────
-// STEP 3 — Animation OBLIGATOIRE (1 par jour de présence, sur stand ou zone démo)
+// STEP 3 — Stand (carte interactive)
 // ─────────────────────────────────────────────────────────
-function Step3Animation({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
+function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
+  const b = draft.booking || {};
+  const setField = (k, v) => setDraft(d => ({ ...d, booking: { ...d.booking, [k]: v } }));
+  const venueId = state.registration?.venue_id || b.venue_id;
+  const venues = availability?.venues || [];
+  const selectedVenue = venues.find(v => v.id === venueId);
+
+  const [stands, setStands] = useState([]);
+  const [loadingStands, setLoadingStands] = useState(false);
+  useEffect(() => {
+    if (!venueId) { setStands([]); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingStands(true);
+      try {
+        const list = await api(`/venues/${venueId}/stands`);
+        if (!cancelled) setStands(Array.isArray(list) ? list : []);
+      } catch (e) { console.error('stands load', e); }
+      finally { if (!cancelled) setLoadingStands(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [venueId]);
+
+  const isStandAvailable = (s) => {
+    if (!s.assignment) return true;
+    if (s.assignment.registration_id === registrationId) return true;
+    return ['annule', 'cancelled'].includes(s.assignment.status);
+  };
+  const myStand = stands.find(s => s.stand_code === b.stand_code);
+
+  const onStandClick = (stand) => {
+    if (!stand) return;
+    if (!isStandAvailable(stand)) {
+      toast.error(`Stand ${stand.stand_code} déjà attribué à ${stand.organization?.name || 'un autre exposant'}`);
+      return;
+    }
+    setField('stand_code', stand.stand_code);
+    setField('venue_stand_id', stand.id);
+    toast.success(`Stand ${stand.stand_code} sélectionné`);
+  };
+
+  const submit = async () => {
+    if (!b.stand_code) { toast.error('Cliquez sur un stand disponible sur la carte'); return; }
+    setSaving(true);
+    try {
+      await api('/wizard/stand', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          stand_code: b.stand_code,
+          venue_stand_id: b.venue_stand_id,
+        }),
+      });
+      toast.success(`Stand ${b.stand_code} verrouillé ✓`);
+      await reload();
+      onNext();
+    } catch (e) { toast.error(e.message); reloadAvailability(); }
+    finally { setSaving(false); }
+  };
+
+  if (!selectedVenue) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r">
+            <p className="font-semibold text-amber-900">Veuillez d&apos;abord choisir votre site à l&apos;étape précédente.</p>
+          </div>
+          <div className="mt-4">
+            <Button variant="outline" onClick={onBack}><ChevronLeft className="w-4 h-4 mr-2" /> Retour étape 2</Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-6">
+        <SectionHeader icon="🗺️" title={`Mon stand sur le plan de ${selectedVenue.name}`} desc="Cliquez sur un stand libre pour le sélectionner. Les stands grisés sont déjà pris." />
+
+        {loadingStands ? (
+          <div className="py-8 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Chargement du plan…</div>
+        ) : stands.length === 0 ? (
+          <div className="py-6 text-center text-amber-700 bg-amber-50 rounded-lg border border-amber-200">Le plan de ce site n&apos;est pas encore disponible. Contactez ARACOM.</div>
+        ) : (
+          <div className="border rounded-lg overflow-hidden bg-slate-50">
+            <SmartVenueMap
+              venue={selectedVenue}
+              stands={stands}
+              highlightStandCode={b.stand_code}
+              onStandClick={onStandClick}
+            />
+          </div>
+        )}
+
+        {b.stand_code && (
+          <div className="bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r text-sm font-medium text-emerald-900 flex items-center justify-between">
+            <span>✓ Stand sélectionné : <b>{b.stand_code}</b>{myStand?.zone ? ` (zone ${myStand.zone})` : ''}</span>
+            <button onClick={() => { setField('stand_code', ''); setField('venue_stand_id', ''); }} className="text-xs text-emerald-700 underline">Changer</button>
+          </div>
+        )}
+
+        <div className="flex justify-between pt-3 border-t">
+          <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
+          <Button
+            onClick={submit}
+            disabled={saving || !b.stand_code}
+            className="gap-2 bg-blue-600 hover:bg-blue-700"
+            data-testid="step3-next"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Verrouiller mon stand <ChevronRight className="w-4 h-4" /></>}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// STEP 4 — Animation OBLIGATOIRE (1 par jour de présence, sur stand ou zone démo)
+// ─────────────────────────────────────────────────────────
+function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
   const config = availability?.config || {};
   const reg = state.registration || {};
   const venueId = reg.venue_id;
@@ -766,9 +820,9 @@ function AnimationBlock({ anim, idx, config, occupied, update }) {
 }
 
 // ─────────────────────────────────────────────────────────
-// STEP 4 — Documents & Caution
+// STEP 5 — RDV caution + Documents + Récap + Confirmation (fusionné)
 // ─────────────────────────────────────────────────────────
-function Step4Documents({ state, onNext, onBack, reload, registrationId, saving, setSaving }) {
+function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, onEditStep }) {
   const DOC_TYPES = [
     { key: 'attestation_assurance', label: 'Attestation d\'assurance', required: true },
     { key: 'convention_signee', label: 'Convention signée', required: true },
@@ -781,6 +835,18 @@ function Step4Documents({ state, onNext, onBack, reload, registrationId, saving,
     rdv_proposal: state.validation_request?.rdv_proposal || '',
     notes: state.validation_request?.notes || '',
   });
+  const [submittingRdv, setSubmittingRdv] = useState(false);
+  const [accepted, setAccepted] = useState(state.registration?.wizard_regulation_accepted || false);
+  const [completed, setCompleted] = useState(state.registration?.status === 'confirme');
+  const [links, setLinks] = useState({});
+
+  const o = state.organization || {};
+  const v = state.venue || {};
+  const reg = state.registration || {};
+  const attendingDays = Array.isArray(reg.attending_days) ? reg.attending_days : [];
+  const dayTimes = reg.attending_day_times || {};
+  const dayLabel = (k) => k === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
+  const animations = Array.isArray(state.animation_slots) ? state.animation_slots : [];
 
   const uploadedTypes = new Set((state.documents || []).map(d => d.document_type));
   const requiredDocs = DOC_TYPES.filter(d => d.required);
@@ -805,112 +871,20 @@ function Step4Documents({ state, onNext, onBack, reload, registrationId, saving,
   const submitRdv = async () => {
     if (!rdvForm.preferred_payment) { toast.error('Choisissez chèque ou espèces'); return; }
     if (!rdvForm.rdv_proposal) { toast.error('Indiquez vos disponibilités'); return; }
-    setSaving(true);
+    setSubmittingRdv(true);
     try {
       await api(`/registrations/${registrationId}/request-validation`, { method: 'POST', body: JSON.stringify(rdvForm) });
-      toast.success('Demande de RDV caution envoyée ✓ Vous serez contacté par ARACOM.');
+      toast.success('Demande de RDV caution envoyée ✓');
       await reload();
       await api('/wizard/mark-step-4', { method: 'POST', body: JSON.stringify({ registration_id: registrationId }) });
-      onNext();
     } catch (e) { toast.error(e.message); }
-    finally { setSaving(false); }
+    finally { setSubmittingRdv(false); }
   };
 
-  return (
-    <Card>
-      <CardContent className="p-6 space-y-6">
-        <SectionHeader icon="📁" title="Documents et caution" desc="Les documents peuvent être uploadés ici ou remis en main propre lors du rendez-vous caution. Choisir un créneau RDV est obligatoire pour continuer." />
-
-        {/* Documents */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-slate-900">Documents administratifs</h3>
-            <div className="text-xs text-slate-500">{requiredDocsUploaded}/{requiredDocs.length} obligatoires chargés</div>
-          </div>
-          <div className="h-2 bg-slate-200 rounded-full mb-3 overflow-hidden">
-            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${docProgress}%` }} />
-          </div>
-          <div className="space-y-2">
-            {DOC_TYPES.map(d => {
-              const isUploaded = uploadedTypes.has(d.key);
-              return (
-                <div key={d.key} className={`p-3 rounded-lg border flex items-center justify-between ${isUploaded ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex items-center gap-2">
-                    {isUploaded ? <Check className="w-4 h-4 text-emerald-600" /> : <FileText className="w-4 h-4 text-slate-400" />}
-                    <div>
-                      <div className="font-medium text-sm">{d.label}</div>
-                      <Badge variant="outline" className={`text-[10px] ${d.required ? 'border-rose-300 text-rose-700' : 'border-slate-300 text-slate-600'}`}>{d.required ? 'Obligatoire' : 'Optionnel'}</Badge>
-                    </div>
-                  </div>
-                  <label className="cursor-pointer">
-                    <input type="file" className="hidden" onChange={e => handleUpload(d.key, e.target.files?.[0])} accept=".pdf,.jpg,.jpeg,.png" />
-                    <Button asChild variant="outline" size="sm" disabled={uploading === d.key}><span>{uploading === d.key ? 'Envoi…' : isUploaded ? 'Remplacer' : 'Choisir un fichier'}</span></Button>
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-          <div className="text-xs text-slate-500 mt-2">💡 Vous pouvez aussi remettre ces documents en main propre lors du RDV caution.</div>
-        </div>
-
-        {/* RDV caution */}
-        <div className="border-t pt-5">
-          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-amber-600" /> Rendez-vous caution (obligatoire)</h3>
-          {state.validation_request?.rdv_date ? (
-            <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r">
-              <div className="font-bold text-emerald-900">✓ RDV fixé pour le {new Date(state.validation_request.rdv_date).toLocaleString('fr-FR')}</div>
-              <div className="text-sm text-emerald-700 mt-1">📍 {state.validation_request.rdv_location || 'Lieu à confirmer'}</div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <Field label="Mode de caution préféré *" testid="rdv-payment">
-                <Select value={rdvForm.preferred_payment} onValueChange={v => setRdvForm(r => ({ ...r, preferred_payment: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cheque">Chèque (à l&apos;ordre d&apos;ARACOM)</SelectItem>
-                    <SelectItem value="especes">Espèces</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Vos disponibilités pour le RDV *" testid="rdv-proposal">
-                <Textarea rows={2} value={rdvForm.rdv_proposal} onChange={e => setRdvForm(r => ({ ...r, rdv_proposal: e.target.value }))} placeholder="Ex : lundi 16/05 entre 14h et 17h, ou mardi matin…" />
-              </Field>
-              <Field label="Notes pour ARACOM (optionnel)">
-                <Textarea rows={1} value={rdvForm.notes} onChange={e => setRdvForm(r => ({ ...r, notes: e.target.value }))} placeholder="Notes complémentaires…" />
-              </Field>
-              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">💡 Lors du RDV, vous pourrez remettre votre caution de <b>20 000 XPF</b> ainsi que vos documents (assurance, convention) si pas déjà uploadés ici.</div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-between pt-3 border-t">
-          <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={state.validation_request?.rdv_date ? onNext : submitRdv} disabled={saving} className="gap-2 bg-blue-600 hover:bg-blue-700" data-testid="step4-next">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────
-// STEP 5 — Récapitulatif et confirmation
-// ─────────────────────────────────────────────────────────
-function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving, onEditStep }) {
-  const [accepted, setAccepted] = useState(state.registration?.wizard_regulation_accepted || false);
-  const [completed, setCompleted] = useState(state.registration?.status === 'confirme');
-  const [links, setLinks] = useState({});
-
-  const o = state.organization || {};
-  const v = state.venue || {};
-  const reg = state.registration || {};
-  const attendingDays = Array.isArray(reg.attending_days) ? reg.attending_days : [];
-  const dayTimes = reg.attending_day_times || {};
-  const dayLabel = (k) => k === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
-  const animations = Array.isArray(state.animation_slots) ? state.animation_slots : [];
+  const hasRdv = !!(state.validation_request?.rdv_date || state.validation_request?.rdv_proposal);
 
   const submit = async () => {
+    if (!hasRdv) { toast.error('Veuillez d\'abord demander un RDV caution ci-dessus'); return; }
     if (!accepted) { toast.error('Acceptez le règlement exposant pour finaliser'); return; }
     setSaving(true);
     try {
@@ -952,56 +926,125 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
 
   return (
     <Card>
-      <CardContent className="p-6 space-y-5">
-        <SectionHeader icon="🎉" title="Récapitulatif et confirmation" desc="Vérifiez vos réservations. Les éléments verrouillés sont marqués d'un badge vert." />
+      <CardContent className="p-6 space-y-6">
+        <SectionHeader icon="✅" title="RDV caution et confirmation" desc="Demandez votre rendez-vous pour remettre la caution et les documents, vérifiez votre récapitulatif, puis confirmez votre inscription." />
 
-        {/* Profil */}
-        <RecapBlock title="Profil" icon="👤" onEdit={() => onEditStep(1)}>
-          <RecapRow label="Association" value={o.name} />
-          <RecapRow label="Secteur" value={o.discipline} />
-          <RecapRow label="Référent" value={`${o.contact_name} ${o.contact_function ? `(${o.contact_function})` : ''}`} />
-          <RecapRow label="Contact" value={`${o.main_email} · ${o.main_phone}`} />
-          <RecapRow label="Représentants" value={`${o.representatives_count || 1} pers.`} />
-          <RecapRow label="Description stand" value={o.stand_description} />
-        </RecapBlock>
+        {/* 1) RDV caution */}
+        <div>
+          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-amber-600" /> 1. Rendez-vous caution (obligatoire)</h3>
+          {state.validation_request?.rdv_date ? (
+            <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r">
+              <div className="font-bold text-emerald-900">✓ RDV fixé pour le {new Date(state.validation_request.rdv_date).toLocaleString('fr-FR')}</div>
+              <div className="text-sm text-emerald-700 mt-1">📍 {state.validation_request.rdv_location || 'Lieu à confirmer'}</div>
+            </div>
+          ) : state.validation_request?.rdv_proposal ? (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r">
+              <div className="font-bold text-amber-900">✓ Demande de RDV envoyée</div>
+              <div className="text-sm text-amber-700 mt-1">Vos disponibilités : {state.validation_request.rdv_proposal}</div>
+              <div className="text-xs text-amber-600 mt-1">ARACOM vous contactera pour confirmer le créneau.</div>
+            </div>
+          ) : (
+            <div className="space-y-3 p-4 border-2 border-amber-200 rounded-lg bg-amber-50/30">
+              <Field label="Mode de caution préféré *" testid="rdv-payment">
+                <Select value={rdvForm.preferred_payment} onValueChange={v => setRdvForm(r => ({ ...r, preferred_payment: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cheque">Chèque (à l&apos;ordre d&apos;ARACOM)</SelectItem>
+                    <SelectItem value="especes">Espèces</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Vos disponibilités pour le RDV *" testid="rdv-proposal">
+                <Textarea rows={2} value={rdvForm.rdv_proposal} onChange={e => setRdvForm(r => ({ ...r, rdv_proposal: e.target.value }))} placeholder="Ex : lundi 16/05 entre 14h et 17h, ou mardi matin…" />
+              </Field>
+              <Field label="Notes pour ARACOM (optionnel)">
+                <Textarea rows={1} value={rdvForm.notes} onChange={e => setRdvForm(r => ({ ...r, notes: e.target.value }))} placeholder="Notes complémentaires…" />
+              </Field>
+              <div className="text-xs text-amber-700 bg-amber-100 border border-amber-200 rounded p-2">💡 Lors du RDV, vous remettrez votre caution de <b>20 000 XPF</b> ainsi que vos documents (assurance, convention) si pas déjà uploadés ci-dessous.</div>
+              <Button onClick={submitRdv} disabled={submittingRdv} className="bg-amber-600 hover:bg-amber-700 w-full" data-testid="submit-rdv">
+                {submittingRdv ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Demander mon RDV caution
+              </Button>
+            </div>
+          )}
+        </div>
 
-        {/* Lieu */}
-        <RecapBlock title="Site, stand et présence" icon="📍" locked onEdit={() => onEditStep(2)}>
-          <RecapRow label="Site" value={v.name} locked />
-          <RecapRow label="Stand" value={reg.stand_code || '—'} locked />
-          <RecapRow label="Jours de présence" value={attendingDays.length ? attendingDays.map(dayLabel).join(' · ') : '—'} locked />
-          {attendingDays.map(d => (
-            <RecapRow
-              key={d}
-              label={`Horaires ${d === 'samedi' ? 'samedi' : 'vendredi'}`}
-              value={dayTimes[d] ? `${dayTimes[d].start} → ${dayTimes[d].end}` : '—'}
-              locked
-            />
-          ))}
-        </RecapBlock>
+        {/* 2) Documents (optionnel — peuvent être remis au RDV) */}
+        <div className="border-t pt-5">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> 2. Documents (optionnel — peuvent être remis au RDV)</h3>
+            <div className="text-xs text-slate-500">{requiredDocsUploaded}/{requiredDocs.length} obligatoires en ligne</div>
+          </div>
+          <div className="h-2 bg-slate-200 rounded-full mb-3 overflow-hidden">
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${docProgress}%` }} />
+          </div>
+          <div className="space-y-2">
+            {DOC_TYPES.map(d => {
+              const isUploaded = uploadedTypes.has(d.key);
+              return (
+                <div key={d.key} className={`p-3 rounded-lg border flex items-center justify-between ${isUploaded ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2">
+                    {isUploaded ? <Check className="w-4 h-4 text-emerald-600" /> : <FileText className="w-4 h-4 text-slate-400" />}
+                    <div>
+                      <div className="font-medium text-sm">{d.label}</div>
+                      <Badge variant="outline" className={`text-[10px] ${d.required ? 'border-rose-300 text-rose-700' : 'border-slate-300 text-slate-600'}`}>{d.required ? 'À remettre au RDV ou ici' : 'Optionnel'}</Badge>
+                    </div>
+                  </div>
+                  <label className="cursor-pointer">
+                    <input type="file" className="hidden" onChange={e => handleUpload(d.key, e.target.files?.[0])} accept=".pdf,.jpg,.jpeg,.png" />
+                    <Button asChild variant="outline" size="sm" disabled={uploading === d.key}><span>{uploading === d.key ? 'Envoi…' : isUploaded ? 'Remplacer' : 'Charger'}</span></Button>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        {/* Animations */}
-        {animations.length > 0 && (
-          <RecapBlock title={`Animations (${animations.length})`} icon="🎭" locked onEdit={() => onEditStep(3)}>
-            {animations.map((a, idx) => (
-              <div key={a.id || idx} className="pb-2 mb-2 border-b last:border-b-0 last:mb-0 last:pb-0">
-                <div className="text-xs font-bold text-violet-700 uppercase tracking-wider">{dayLabel(a.day_label)}</div>
-                <RecapRow label="Nom" value={a.title} />
-                <RecapRow label="Type" value={a.slot_type} />
-                <RecapRow label="Lieu" value={a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'} />
-                <RecapRow label="Public cible" value={a.target_audience} />
-                <RecapRow label="Créneau" value={`${a.start_time} → ${a.end_time}`} locked />
-              </div>
+        {/* 3) Récap de tout */}
+        <div className="border-t pt-5">
+          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">📋 3. Récapitulatif</h3>
+
+          <RecapBlock title="Profil" icon="👤" onEdit={() => onEditStep(1)}>
+            <RecapRow label="Association" value={o.name} />
+            <RecapRow label="Secteur" value={o.discipline} />
+            <RecapRow label="Référent" value={`${o.contact_name} ${o.contact_function ? `(${o.contact_function})` : ''}`} />
+            <RecapRow label="Contact" value={`${o.main_email} · ${o.main_phone}`} />
+            <RecapRow label="Représentants" value={`${o.representatives_count || 1} pers.`} />
+            <RecapRow label="Description stand" value={o.stand_description} />
+          </RecapBlock>
+
+          <RecapBlock title="Site & jours de présence" icon="📅" locked onEdit={() => onEditStep(2)}>
+            <RecapRow label="Site" value={v.name} locked />
+            <RecapRow label="Jours" value={attendingDays.length ? attendingDays.map(dayLabel).join(' · ') : '—'} locked />
+            {attendingDays.map(d => (
+              <RecapRow
+                key={d}
+                label={`Horaires ${d === 'samedi' ? 'samedi' : 'vendredi'}`}
+                value={dayTimes[d] ? `${dayTimes[d].start} → ${dayTimes[d].end}` : '—'}
+                locked
+              />
             ))}
           </RecapBlock>
-        )}
 
-        {/* Documents */}
-        <RecapBlock title="Documents et caution" icon="📁" onEdit={() => onEditStep(4)}>
-          <RecapRow label="Documents chargés" value={`${state.documents?.length || 0}`} />
-          <RecapRow label="RDV caution" value={state.validation_request?.rdv_date ? new Date(state.validation_request.rdv_date).toLocaleString('fr-FR') : 'À fixer par ARACOM'} />
-          <RecapRow label="Mode de paiement" value={state.validation_request?.preferred_payment === 'cheque' ? 'Chèque' : 'Espèces'} />
-        </RecapBlock>
+          <RecapBlock title="Stand" icon="🗺️" locked onEdit={() => onEditStep(3)}>
+            <RecapRow label="Code stand" value={reg.stand_code || '—'} locked />
+          </RecapBlock>
+
+          {animations.length > 0 && (
+            <RecapBlock title={`Animations (${animations.length})`} icon="🎭" locked onEdit={() => onEditStep(4)}>
+              {animations.map((a, idx) => (
+                <div key={a.id || idx} className="pb-2 mb-2 border-b last:border-b-0 last:mb-0 last:pb-0">
+                  <div className="text-xs font-bold text-violet-700 uppercase tracking-wider">{dayLabel(a.day_label)}</div>
+                  <RecapRow label="Nom" value={a.title} />
+                  <RecapRow label="Type" value={a.slot_type} />
+                  <RecapRow label="Lieu" value={a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'} />
+                  <RecapRow label="Public cible" value={a.target_audience} />
+                  <RecapRow label="Créneau" value={`${a.start_time} → ${a.end_time}`} locked />
+                </div>
+              ))}
+            </RecapBlock>
+          )}
+        </div>
 
         {/* Aperçu badge */}
         <div className="border-2 border-dashed border-amber-300 rounded-lg p-4 bg-amber-50/50">
@@ -1031,7 +1074,7 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={submit} disabled={saving || !accepted} size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700" data-testid="finalize">
+          <Button onClick={submit} disabled={saving || !accepted || !hasRdv} size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700" data-testid="finalize">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Confirmer mon inscription</>}
           </Button>
         </div>
