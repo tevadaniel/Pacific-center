@@ -1673,6 +1673,36 @@ export async function POST(request, { params }) {
     // 🎯 WIZARD — Tunnel de réservation exposant en 5 étapes
     // ════════════════════════════════════════════════════════════════
 
+    // 🔑 Login par code unique (page d'accueil simplifiée)
+    if (route === 'auth/code-login') {
+      const { code, role } = body;
+      const ACCESS_CODE = process.env.UNIVERSAL_ACCESS_CODE || 'Projetaracom12';
+      if (!code || code !== ACCESS_CODE) return err('Code invalide', 401);
+      if (!['aracom_admin', 'exposant', 'pacific_centers_readonly'].includes(role)) return err('Rôle inconnu', 400);
+
+      if (role === 'aracom_admin') {
+        const u = await db.collection('users').findOne({ email: 'admin@aracom.pf' }) || await db.collection('users').findOne({ role_code: 'aracom_admin' });
+        if (!u) return err('Compte admin introuvable. Contactez le support.', 500);
+        return json({ ok: true, user: { id: u.id, name: u.name || 'ARACOM Admin', email: u.email, role: 'aracom_admin' } });
+      }
+      if (role === 'pacific_centers_readonly') {
+        let u = await db.collection('users').findOne({ email: 'pacific@centers.pf' }) || await db.collection('users').findOne({ role_code: 'pacific_centers_readonly' });
+        if (!u) {
+          // Auto-seed compte Pacific si absent
+          const uid = `u-pacific-${uuid().slice(0, 8)}`;
+          await db.collection('users').insertOne({
+            id: uid, name: 'Pacific Centers', email: 'pacific@centers.pf',
+            role_code: 'pacific_centers_readonly', is_active: true,
+            created_at: new Date(), updated_at: new Date(),
+          });
+          u = await db.collection('users').findOne({ id: uid });
+        }
+        return json({ ok: true, user: { id: u.id, name: u.name, email: u.email, role: 'pacific_centers_readonly' } });
+      }
+      // Exposant : pas de user spécifique — redirection vers /inscription pour saisir email
+      return json({ ok: true, redirect: '/inscription' });
+    }
+
     // 🌐 Self-register pour le tunnel public (création registration + organization vides)
     if (route === 'auth/self-register') {
       const { email } = body;
