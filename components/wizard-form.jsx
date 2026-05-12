@@ -228,6 +228,56 @@ export default function WizardPage({ registrationId, isPublic = false }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-6">
+        {/* 📌 Bandeau profil persistant : visible à toutes les étapes (sauf 1 = en train de remplir) */}
+        {currentStep > 1 && state.organization && (
+          <div className="mb-4 bg-white border border-slate-200 rounded-lg p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold flex-shrink-0">
+                  {(state.organization.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-900 truncate">{state.organization.name}</div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {state.organization.discipline} · {state.organization.contact_name} · {state.organization.main_email}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setCurrentStep(1)} className="text-xs text-blue-600 hover:underline whitespace-nowrap" data-testid="edit-profile">Modifier</button>
+            </div>
+            {/* Résumé des étapes verrouillées */}
+            {(state.registration?.venue_id || state.registration?.stand_code || (state.animation_slots?.length > 0)) && (
+              <div className="mt-3 pt-3 border-t flex flex-wrap gap-2 text-[11px]">
+                {state.registration?.venue_id && (
+                  <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-800 gap-1">
+                    <MapPin className="w-3 h-3" /> {state.venue?.name || state.registration.venue_id}
+                  </Badge>
+                )}
+                {state.registration?.attending_days?.length > 0 && (
+                  <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-800 gap-1">
+                    <Calendar className="w-3 h-3" /> {state.registration.attending_days.length === 2 ? 'Ven + Sam' : (state.registration.attending_days[0] === 'samedi' ? 'Sam' : 'Ven')}
+                  </Badge>
+                )}
+                {state.registration?.stand_code && (
+                  <Badge variant="outline" className="bg-emerald-50 border-emerald-200 text-emerald-800 gap-1">
+                    🗺️ Stand {state.registration.stand_code}
+                  </Badge>
+                )}
+                {state.animation_slots?.length > 0 && (
+                  <Badge variant="outline" className="bg-violet-50 border-violet-200 text-violet-800 gap-1">
+                    <Music className="w-3 h-3" /> {state.animation_slots.length} animation{state.animation_slots.length > 1 ? 's' : ''}
+                  </Badge>
+                )}
+                {state.validation_request?.rdv_date && (
+                  <Badge variant="outline" className="bg-amber-50 border-amber-200 text-amber-800 gap-1">
+                    📅 RDV {new Date(state.validation_request.rdv_date).toLocaleDateString('fr-FR')}
+                  </Badge>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {currentStep === 1 && <Step1Profile state={state} draft={draft} setDraft={setDraft} onNext={goNext} reload={loadState} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
         {currentStep === 2 && <Step2Days state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
         {currentStep === 3 && <Step3Stand state={state} availability={availability} draft={draft} setDraft={setDraft} onNext={goNext} onBack={goBack} reload={loadState} reloadAvailability={loadAvailability} registrationId={registrationId} saving={saving} setSaving={setSaving} />}
@@ -941,12 +991,33 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
   };
 
   if (completed) {
+    const addAnotherSite = async () => {
+      if (!state.organization?.id) { toast.error('Organisation introuvable'); return; }
+      try {
+        const r = await api('/wizard/add-site', { method: 'POST', body: JSON.stringify({ organization_id: state.organization.id }) });
+        toast.success('Nouveau site ajouté — reprise du tunnel pour ce site');
+        try {
+          localStorage.setItem('inscription_public_reg_id', r.registration_id);
+          localStorage.removeItem(`wizard:${registrationId}`);
+        } catch {}
+        window.location.href = '/inscription';
+      } catch (e) { toast.error(e.message); }
+    };
     return (
       <Card>
         <CardContent className="p-6 text-center space-y-4">
           <div className="text-6xl">🎉</div>
           <h2 className="text-2xl font-bold text-emerald-700">Inscription confirmée !</h2>
           <p className="text-slate-600">Votre badge exposant a été envoyé par email. Bienvenue au Forum de la Rentrée 2026.</p>
+
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 max-w-xl mx-auto">
+            <div className="text-sm font-semibold text-blue-900 mb-2">🌐 Réserver sur un autre site ?</div>
+            <p className="text-xs text-blue-700 mb-3">Vous pouvez participer à plusieurs sites du Forum. Cliquez ci-dessous pour ajouter une nouvelle réservation sur un autre site (vous gardez votre profil et votre RDV caution).</p>
+            <Button onClick={addAnotherSite} variant="outline" className="bg-blue-600 text-white hover:bg-blue-700 border-blue-600 gap-2">
+              <Plus className="w-4 h-4" /> Ajouter un autre site
+            </Button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto pt-4">
             <a href={`/api/wizard/badge/${registrationId}`} target="_blank" rel="noopener noreferrer" className="p-3 border rounded-lg bg-amber-50 hover:bg-amber-100 transition flex flex-col items-center gap-1">
               <Download className="w-5 h-5 text-amber-700" />

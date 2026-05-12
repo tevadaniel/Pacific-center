@@ -30,9 +30,12 @@ import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/
 import { exportFullXLSX } from '@/lib/xlsx-export';
 import PushToggle from '@/components/push-toggle';
 import PortalSwitcher from '@/components/portal-switcher';
+import MultiSiteCockpit from '@/components/multi-site-cockpit';
+import StatusLegend from '@/components/status-legend';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
+  { key: 'cockpit-multi', label: '🌐 Cockpit multi-sites', href: '/aracom?tab=cockpit-multi' },
   { key: 'exposants', label: 'Exposants', href: '/aracom?tab=exposants' },
   { key: 'sites', label: 'Sites & stands', href: '/aracom?tab=sites' },
   { key: 'validations', label: 'Validations', href: '/aracom?tab=validations' },
@@ -54,6 +57,7 @@ const TABS = [
 // Regroupement intelligent des onglets en menus déroulants
 const TAB_GROUPS = [
   { key: 'dashboard', label: 'Dashboard', icon: '📊', single: true }, // Direct
+  { key: 'cockpit-multi', label: 'Multi-sites', icon: '🌐', single: true, redirectTo: 'cockpit-multi' },
   {
     key: 'pilotage',
     label: 'Pilotage',
@@ -185,6 +189,7 @@ export default function AracomPage() {
       }
     >
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
+      {activeTab === 'cockpit-multi' && <MultiSiteCockpit />}
       {activeTab === 'prospection' && <ProspectionAracomView />}
       {activeTab === 'documents-officiels' && <OfficialDocumentsView />}
       {activeTab === 'deadlines' && <DeadlinesView />}

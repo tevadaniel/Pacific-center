@@ -973,6 +973,113 @@ export async function GET(request, { params }) {
       return json(orgs.map(o => { delete o._id; return o; }));
     }
 
+    // 🚨 Alertes multi-sites (concentration / doublons / surbooké chronologique)
+    if (route === 'admin/multi-site-alerts') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+
+      const venues = await db.collection('venues').find({}).toArray();
+      const allRegs = await db.collection('registrations').find({
+        venue_id: { $ne: null, $exists: true },
+        status: { $nin: ['annule', 'annulé'] },
+      }).toArray();
+      const allOrgs = await db.collection('organizations').find({}).toArray();
+      const orgMap = new Map(allOrgs.map(o => [o.id, o]));
+
+      // 1) Concentration : sites avec significativement plus de regs
+      const byVenue = {};
+      allRegs.forEach(r => { byVenue[r.venue_id] = (byVenue[r.venue_id] || 0) + 1; });
+      const counts = Object.values(byVenue);
+      const avg = counts.length ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
+      const overloaded = venues
+        .filter(v => (byVenue[v.id] || 0) > Math.max(avg * 1.5, avg + 3))
+        .map(v => {
+          const regs = allRegs
+            .filter(r => r.venue_id === v.id)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+            .map(r => ({
+              registration_id: r.id,
+              org_id: r.organization_id,
+              org_name: orgMap.get(r.organization_id)?.name || '(inconnu)',
+              created_at: r.created_at,
+              status: r.status,
+            }));
+          return { venue_id: v.id, venue_name: v.name, count: byVenue[v.id] || 0, avg: Math.round(avg * 10) / 10, registrations: regs };
+        });
+
+      // 2) Doublons : orgs avec regs sur plusieurs sites
+      const byOrg = {};
+      allRegs.forEach(r => {
+        if (!byOrg[r.organization_id]) byOrg[r.organization_id] = [];
+        byOrg[r.organization_id].push(r);
+      });
+      const duplicates = Object.entries(byOrg)
+        .filter(([_, regs]) => regs.length > 1)
+        .map(([orgId, regs]) => ({
+          org_id: orgId,
+          org_name: orgMap.get(orgId)?.name || '(inconnu)',
+          venues: regs.map(r => ({
+            registration_id: r.id,
+            venue_id: r.venue_id,
+            venue_name: venues.find(v => v.id === r.venue_id)?.name || r.venue_id,
+            created_at: r.created_at,
+            status: r.status,
+          })),
+        }));
+
+      return json({
+        overloaded_sites: overloaded,
+        avg_per_site: Math.round(avg * 10) / 10,
+        duplicate_exposants: duplicates,
+        generated_at: new Date(),
+      });
+    }
+
+    // 🌐 Vue par site (associations confirmées + animations) — pour le dashboard switchable
+    if (route.match(/^admin\/site-view\/[^/]+$/)) {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const venueId = p[2];
+      const venue = await db.collection('venues').findOne({ id: venueId });
+      if (!venue) return err('Site introuvable', 404);
+
+      const regs = await db.collection('registrations').find({
+        venue_id: venueId,
+        status: { $nin: ['annule', 'annulé'] },
+      }).sort({ created_at: 1 }).toArray();
+      const orgIds = regs.map(r => r.organization_id);
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const orgMap = new Map(orgs.map(o => [o.id, o]));
+      const regIds = regs.map(r => r.id);
+      const anims = await db.collection('animation_slots').find({
+        registration_id: { $in: regIds },
+        status: { $ne: 'annulé' },
+      }).sort({ day_label: 1, start_time: 1 }).toArray();
+
+      const exposants = regs.map(r => {
+        const org = orgMap.get(r.organization_id) || {};
+        return {
+          registration_id: r.id,
+          org_id: org.id,
+          org_name: org.name,
+          discipline: org.discipline,
+          contact_name: org.contact_name,
+          stand_code: r.stand_code,
+          status: r.status,
+          attending_days: r.attending_days || [],
+          attending_day_times: r.attending_day_times || {},
+          animations: anims.filter(a => a.registration_id === r.id),
+        };
+      });
+
+      return json({
+        venue: { id: venue.id, name: venue.name, code: venue.code, capacity_stands: venue.capacity_stands },
+        exposants,
+        animations_total: anims.length,
+        confirmed_count: exposants.filter(e => e.status === 'confirme').length,
+      });
+    }
+
     // Get/create magic access link for an exposant (admin only)
     if (route.match(/^organizations\/[^/]+\/access-link$/)) {
       const ctx = getUserContext(request);
@@ -1758,7 +1865,6 @@ export async function POST(request, { params }) {
       const { email } = body;
       const cleanEmail = String(email || '').trim().toLowerCase();
       if (!cleanEmail || !/^[^@]+@[^@]+\.[^@]+$/.test(cleanEmail)) return err('Email invalide', 400);
-      // Cherche l'organization correspondante
       const org = await db.collection('organizations').findOne({ main_email: cleanEmail });
       if (!org) {
         // Réponse volontairement générique pour ne pas leaker l'existence d'un compte
@@ -1882,6 +1988,56 @@ export async function POST(request, { params }) {
     }
 
     // Étape 2 — Site + Jours de présence avec horaires (PAS de stand ici)
+    // 🌐 Liste tous les sites (registrations) d'une organisation (multi-sites)
+    if (route === 'wizard/org-sites') {
+      const orgId = q.get('organization_id');
+      if (!orgId) return err('organization_id requis', 400);
+      const regs = await db.collection('registrations').find({ organization_id: orgId }).sort({ created_at: 1 }).toArray();
+      const venues = await db.collection('venues').find({}).toArray();
+      const venueMap = new Map(venues.map(v => [v.id, v]));
+      const regIds = regs.map(r => r.id);
+      const animCounts = {};
+      const anims = await db.collection('animation_slots').find({ registration_id: { $in: regIds } }).toArray();
+      anims.forEach(a => { animCounts[a.registration_id] = (animCounts[a.registration_id] || 0) + 1; });
+      return json({
+        organization_id: orgId,
+        sites: regs.map(r => ({
+          registration_id: r.id,
+          venue_id: r.venue_id,
+          venue_name: r.venue_id ? venueMap.get(r.venue_id)?.name : null,
+          stand_code: r.stand_code,
+          attending_days: r.attending_days || [],
+          attending_day_times: r.attending_day_times || {},
+          animations_count: animCounts[r.id] || 0,
+          status: r.status,
+          wizard_step: r.wizard_step,
+          created_at: r.created_at,
+        })),
+      });
+    }
+
+    // ➕ Créer une nouvelle registration (un nouveau site) pour une organisation existante
+    if (route === 'wizard/add-site') {
+      const { organization_id } = body;
+      if (!organization_id) return err('organization_id requis', 400);
+      const org = await db.collection('organizations').findOne({ id: organization_id });
+      if (!org) return err('Organisation introuvable', 404);
+      const newRegId = `reg-pub-${uuid().slice(0, 12)}`;
+      await db.collection('registrations').insertOne({
+        id: newRegId,
+        organization_id,
+        status: 'contacte',
+        source: 'self_register',
+        wizard_step: 2,
+        attending_days: [],
+        attending_day_times: {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      return json({ ok: true, registration_id: newRegId, organization_id });
+    }
+
+
     if (route === 'wizard/days') {
       const { registration_id, venue_id, attending_days, attending_day_times } = body;
       if (!registration_id || !venue_id) return err('registration_id et venue_id requis', 400);
