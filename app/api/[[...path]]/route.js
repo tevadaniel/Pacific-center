@@ -1828,87 +1828,193 @@ export async function POST(request, { params }) {
       return json({ ok: true, next_step: 2 });
     }
 
-    // Étape 2 — Réservation site + jour + créneau de passage
+    // Étape 2 — Site + Stand (carte interactive) + Jours de présence avec horaires
     if (route === 'wizard/booking') {
-      const { registration_id, venue_id, day_label, visit_slot_id } = body;
-      if (!registration_id || !venue_id || !day_label || !visit_slot_id) {
-        return err('registration_id, venue_id, day_label, visit_slot_id requis');
+      const { registration_id, venue_id, stand_code, venue_stand_id, attending_days, attending_day_times } = body;
+      if (!registration_id || !venue_id) return err('registration_id et venue_id requis', 400);
+      if (!stand_code && !venue_stand_id) return err('Veuillez sélectionner un stand sur la carte', 400);
+      if (!Array.isArray(attending_days) || attending_days.length === 0) {
+        return err('Veuillez cocher au moins un jour de présence', 400);
       }
+      const validDays = attending_days.filter(d => ['vendredi', 'samedi'].includes(d));
+      if (validDays.length === 0) return err('Jours invalides', 400);
+
+      // Horaires par jour : { vendredi: {start, end}, samedi: {start, end} }
+      const times = attending_day_times || {};
+      for (const d of validDays) {
+        const t = times[d];
+        if (!t || !t.start || !t.end) return err(`Horaire requis pour ${d} (heure début et fin)`, 400);
+        if (t.start >= t.end) return err(`Pour ${d}, l'heure de fin doit être après l'heure de début`, 400);
+      }
+
       const reg = await db.collection('registrations').findOne({ id: registration_id });
       if (!reg) return err('Inscription introuvable', 404);
-      // Vérifier que le visit_slot est cohérent
-      const vs = await db.collection('visit_slots').findOne({ id: visit_slot_id });
-      if (!vs || vs.venue_id !== venue_id || vs.day_label !== day_label) {
-        return err('Créneau incohérent avec le site/jour', 400);
+
+      // Résoudre le stand
+      let stand = null;
+      if (venue_stand_id) {
+        stand = await db.collection('venue_stands').findOne({ id: venue_stand_id, venue_id });
+      } else if (stand_code) {
+        stand = await db.collection('venue_stands').findOne({ stand_code: String(stand_code).toUpperCase(), venue_id });
       }
-      // Réserver atomiquement
-      try {
-        const r = await bookVisitSlot(db, { visit_slot_id, registration_id });
-        // Mettre à jour la registration avec venue + day
-        await db.collection('registrations').updateOne(
-          { id: registration_id },
-          { $set: { venue_id, visit_day_label: day_label, wizard_step: 3, updated_at: new Date() } }
-        );
-        return json({ ok: true, slot: r.slot, next_step: 3 });
-      } catch (e) { return err(e.message, 400); }
-    }
+      if (!stand) return err('Stand introuvable sur ce site', 404);
 
-    // Étape 3 — Réservation animation
-    if (route === 'wizard/animation') {
-      const { registration_id, location_type, slot_type, title, target_audience, material_needs, start_time, end_time } = body;
-      if (!registration_id) return err('registration_id requis');
-      const reg = await db.collection('registrations').findOne({ id: registration_id });
-      if (!reg) return err('Inscription introuvable', 404);
-      if (!reg.venue_id || !reg.visit_day_label) return err('Étape 2 (site/jour) manquante', 400);
-      const errs = [];
-      if (!location_type || !['sur_stand', 'zone_demo'].includes(location_type)) errs.push('lieu animation');
-      if (!slot_type) errs.push('type animation');
-      if (!title) errs.push('nom animation');
-      if (!target_audience) errs.push('public cible');
-      if (!start_time || !end_time) errs.push('horaire');
-      if (errs.length) return err(`Champs manquants : ${errs.join(', ')}`, 400);
-
-      // Vérifier qu'aucun autre exposant n'a réservé ce créneau sur ce site+jour
-      const conflict = await db.collection('animation_slots').findOne({
-        venue_id: reg.venue_id,
-        day_label: reg.visit_day_label,
+      // Vérifier que le stand n'est pas déjà pris par quelqu'un d'autre
+      const conflicting = await db.collection('stand_assignments').findOne({
+        venue_stand_id: stand.id,
+        status: { $nin: ['annule', 'cancelled'] },
         registration_id: { $ne: registration_id },
-        status: { $ne: 'annulé' },
-        $or: [
-          { start_time: { $lt: end_time }, end_time: { $gt: start_time } },
-        ],
       });
-      if (conflict) return err('Ce créneau est déjà pris par un autre exposant. Choisissez-en un autre.', 409);
+      if (conflicting) {
+        const otherReg = await db.collection('registrations').findOne({ id: conflicting.registration_id });
+        const otherOrg = otherReg ? await db.collection('organizations').findOne({ id: otherReg.organization_id }) : null;
+        return err(`Ce stand est déjà réservé par ${otherOrg?.name || 'un autre exposant'}. Choisissez-en un autre.`, 409);
+      }
 
-      // Supprimer toute animation existante de cet exposant (max 1 par stand)
-      await db.collection('animation_slots').deleteMany({ registration_id });
-      const venue = await db.collection('venues').findOne({ id: reg.venue_id });
-      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      const slotId = uuid();
-      await db.collection('animation_slots').insertOne({
-        id: slotId,
+      // Annuler les anciennes assignations de cet exposant
+      await db.collection('stand_assignments').updateMany(
+        { registration_id, status: { $nin: ['annule', 'cancelled'] } },
+        { $set: { status: 'annule', updated_at: new Date() } }
+      );
+
+      // Créer la nouvelle assignation (statut provisoire jusqu'à la fin du wizard)
+      await db.collection('stand_assignments').insertOne({
+        id: uuid(),
         registration_id,
-        venue_id: reg.venue_id,
-        venue_name: venue?.name,
-        organization_name: org?.name,
-        discipline: org?.discipline,
-        stand_code: reg.stand_code,
-        day_label: reg.visit_day_label,
-        start_time, end_time,
-        slot_type,
-        location_type,
-        title,
-        target_audience,
-        material_needs: material_needs || '',
-        status: 'planifié',
+        venue_stand_id: stand.id,
+        assigned_by: 'wizard',
+        assigned_at: new Date(),
+        status: 'provisoire',
         created_at: new Date(),
         updated_at: new Date(),
       });
+
+      // Mise à jour de la registration : site + stand + jours + horaires
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: {
+            venue_id,
+            stand_code: stand.stand_code,
+            attending_days: validDays,
+            attending_day_times: validDays.reduce((acc, d) => { acc[d] = { start: times[d].start, end: times[d].end }; return acc; }, {}),
+            // Si l'exposant est présent un seul jour, on garde aussi visit_day_label pour rétro-compat
+            visit_day_label: validDays.length === 1 ? validDays[0] : (reg.visit_day_label || null),
+            wizard_step: 3,
+            updated_at: new Date(),
+          },
+        }
+      );
+
+      // Si l'exposant avait des animations sur des jours qu'il ne fait plus, on les supprime
+      const removedAnims = await db.collection('animation_slots').deleteMany({
+        registration_id,
+        day_label: { $nin: validDays },
+      });
+
+      return json({
+        ok: true,
+        stand: { id: stand.id, stand_code: stand.stand_code, zone: stand.zone },
+        attending_days: validDays,
+        attending_day_times: validDays.reduce((acc, d) => { acc[d] = times[d]; return acc; }, {}),
+        removed_animations: removedAnims.deletedCount,
+        next_step: 3,
+      });
+    }
+
+    // Étape 3 — Animations (1 ou 2 jours, OBLIGATOIRE au moins 1)
+    if (route === 'wizard/animation') {
+      const { registration_id, animations, location_type, slot_type, title, target_audience, material_needs, start_time, end_time } = body;
+      if (!registration_id) return err('registration_id requis');
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (!reg.venue_id || !Array.isArray(reg.attending_days) || reg.attending_days.length === 0) {
+        return err('Étape 2 (site, stand, jours) manquante', 400);
+      }
+
+      // Compatibilité : si le caller envoie un objet simple, on le convertit en tableau
+      let anims = Array.isArray(animations) ? animations : null;
+      if (!anims && (location_type || slot_type || title)) {
+        anims = [{ day_label: reg.attending_days[0], location_type, slot_type, title, target_audience, material_needs, start_time, end_time }];
+      }
+      if (!Array.isArray(anims) || anims.length === 0) {
+        return err('Au moins une animation est obligatoire pour finaliser votre inscription', 400);
+      }
+
+      // Validation par animation
+      const normalized = [];
+      for (const a of anims) {
+        const errs = [];
+        if (!a.day_label || !reg.attending_days.includes(a.day_label)) errs.push(`jour invalide (${a.day_label || '—'})`);
+        if (!a.location_type || !['sur_stand', 'zone_demo'].includes(a.location_type)) errs.push('lieu (sur stand / zone démo)');
+        if (!a.slot_type) errs.push('type');
+        if (!a.title) errs.push('nom');
+        if (!a.target_audience) errs.push('public cible');
+        if (!a.start_time || !a.end_time) errs.push('horaire');
+        if (a.start_time && a.end_time && a.start_time >= a.end_time) errs.push('horaire (fin > début)');
+        if (errs.length) return err(`Animation ${a.day_label || '?'} : ${errs.join(', ')}`, 400);
+        normalized.push(a);
+      }
+
+      // Maximum 1 animation par jour
+      const daysSeen = new Set();
+      for (const a of normalized) {
+        if (daysSeen.has(a.day_label)) return err(`Plusieurs animations sur le même jour (${a.day_label}) — 1 max par jour.`, 400);
+        daysSeen.add(a.day_label);
+      }
+
+      // Vérifier conflits avec autres exposants du même site / même jour / même lieu
+      for (const a of normalized) {
+        const conflict = await db.collection('animation_slots').findOne({
+          venue_id: reg.venue_id,
+          day_label: a.day_label,
+          location_type: a.location_type,
+          registration_id: { $ne: registration_id },
+          status: { $ne: 'annulé' },
+          start_time: { $lt: a.end_time },
+          end_time: { $gt: a.start_time },
+        });
+        if (conflict) {
+          return err(`Conflit ${a.day_label} ${a.start_time}–${a.end_time} (${a.location_type === 'sur_stand' ? 'sur stand' : 'zone démo'}) : créneau déjà pris.`, 409);
+        }
+      }
+
+      // Remplacer toutes les animations existantes de cet exposant
+      await db.collection('animation_slots').deleteMany({ registration_id });
+      const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const inserted = [];
+      for (const a of normalized) {
+        const slotId = uuid();
+        const doc = {
+          id: slotId,
+          registration_id,
+          venue_id: reg.venue_id,
+          venue_name: venue?.name,
+          organization_name: org?.name,
+          discipline: org?.discipline,
+          stand_code: reg.stand_code,
+          day_label: a.day_label,
+          event_date: a.day_label === 'vendredi' ? '2026-08-14' : '2026-08-15',
+          start_time: a.start_time,
+          end_time: a.end_time,
+          slot_type: a.slot_type,
+          location_type: a.location_type,
+          title: a.title,
+          target_audience: a.target_audience,
+          material_needs: a.material_needs || '',
+          status: 'planifié',
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+        await db.collection('animation_slots').insertOne(doc);
+        inserted.push({ id: slotId, day_label: a.day_label });
+      }
+
       await db.collection('registrations').updateOne(
         { id: registration_id },
         { $set: { wizard_step: 4, updated_at: new Date() } }
       );
-      return json({ ok: true, slot_id: slotId, next_step: 4 });
+      return json({ ok: true, animations: inserted, next_step: 4 });
     }
 
     // Étape 4 — Documents & RDV caution (réutilise les endpoints existants ; ici marquage step)

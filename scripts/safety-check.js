@@ -203,12 +203,17 @@ const action = m => log(DRY_RUN ? '🔍' : '🔧', m);
 
   // ── 6) DONNÉES DE TEST RÉSIDUELLES ────────────────────────────────
   console.log('\n[6/6] Données de test résiduelles');
+  // Détecte les orgs créées via self-register du wizard public dont l'email contient
+  // un marqueur de test, ou dont le nom est manifestement un test.
   const testOrgs = await db.collection('organizations').find({
     $or: [
       { name: /wizard.test/i },
       { name: /^test\s/i },
-      { id: /^org-pub-/, main_email: /e2e/i },
-      { main_email: /e2e[-_.]test/i },
+      { name: /e2e/i },
+      { name: /^demo\s/i },
+      { main_email: /@e2e-test\.local$/i },
+      { main_email: /\+test@/i },
+      { main_email: /wizard.e2e/i },
     ],
   }).toArray();
   if (testOrgs.length > 0) {

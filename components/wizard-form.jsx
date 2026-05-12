@@ -10,10 +10,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast, Toaster } from 'sonner';
 import { Check, ChevronRight, ChevronLeft, Lock, Plus, Minus, MapPin, Calendar, Clock, Music, FileText, ShieldCheck, Sparkles, Loader2, AlertCircle, Edit, Download } from 'lucide-react';
+import SmartVenueMap from '@/components/smart-venue-map';
 
 const STEPS = [
   { n: 1, key: 'profile', label: 'Profil', icon: '👤' },
-  { n: 2, key: 'booking', label: 'Lieu & Jour', icon: '📍' },
+  { n: 2, key: 'booking', label: 'Site & Stand', icon: '📍' },
   { n: 3, key: 'animation', label: 'Animation', icon: '🎭' },
   { n: 4, key: 'documents', label: 'Documents & Caution', icon: '📁' },
   { n: 5, key: 'confirm', label: 'Récapitulatif', icon: '🎉' },
@@ -32,6 +33,7 @@ async function api(path, opts = {}) {
 export default function WizardPage({ registrationId, isPublic = false }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [state, setState] = useState(null);
+  const stateRef = useRef(null);
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,8 +54,12 @@ export default function WizardPage({ registrationId, isPublic = false }) {
     if (!registrationId) { setLoading(false); return; }
     try {
       const s = await api(`/wizard/state/${registrationId}`);
+      const isFirstLoad = !stateRef.current;
       setState(s);
-      setCurrentStep(s.current_step || 1);
+      stateRef.current = s;
+      // Ne fixer currentStep qu'au tout premier chargement (sinon on saute des étapes
+      // après chaque save car le current_step backend remonte en même temps que onNext).
+      if (isFirstLoad) setCurrentStep(s.current_step || 1);
       // Pré-remplir le draft avec les données DB existantes
       if (!Object.keys(draft).length) {
         setDraft({
@@ -69,10 +75,26 @@ export default function WizardPage({ registrationId, isPublic = false }) {
           },
           booking: {
             venue_id: s.registration?.venue_id || '',
-            day_label: s.registration?.visit_day_label || '',
-            visit_slot_id: s.registration?.visit_slot_id || '',
+            stand_code: s.registration?.stand_code || '',
+            venue_stand_id: '',
+            attending_days: Array.isArray(s.registration?.attending_days) ? s.registration.attending_days : [],
+            attending_day_times: s.registration?.attending_day_times || {
+              vendredi: { start: '08:00', end: '17:00' },
+              samedi: { start: '08:00', end: '17:00' },
+            },
           },
-          animation: s.animation_slots?.[0] || {},
+          animations: Array.isArray(s.animation_slots) && s.animation_slots.length
+            ? s.animation_slots.map(a => ({
+                day_label: a.day_label,
+                location_type: a.location_type === 'stand' ? 'sur_stand' : (a.location_type || 'sur_stand'),
+                slot_type: a.slot_type || '',
+                title: a.title || '',
+                target_audience: a.target_audience || '',
+                material_needs: a.material_needs || '',
+                start_time: a.start_time || '',
+                end_time: a.end_time || '',
+              }))
+            : [],
         });
       }
     } catch (e) { toast.error(e.message); }
@@ -251,23 +273,92 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
 }
 
 // ─────────────────────────────────────────────────────────
-// STEP 2 — Lieu / Jour / Créneau de passage
+// STEP 2 — Site + Stand (carte interactive) + Jours de présence avec horaires
 // ─────────────────────────────────────────────────────────
 function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
   const b = draft.booking || {};
   const setField = (k, v) => setDraft(d => ({ ...d, booking: { ...d.booking, [k]: v } }));
+  const setTime = (day, field, val) => setDraft(d => ({
+    ...d,
+    booking: {
+      ...d.booking,
+      attending_day_times: {
+        ...(d.booking?.attending_day_times || {}),
+        [day]: { ...((d.booking?.attending_day_times || {})[day] || {}), [field]: val },
+      },
+    },
+  }));
+  const toggleDay = (day) => {
+    const current = Array.isArray(b.attending_days) ? b.attending_days : [];
+    const next = current.includes(day) ? current.filter(d => d !== day) : [...current, day];
+    setField('attending_days', next);
+  };
 
   const venues = availability?.venues || [];
   const selectedVenue = venues.find(v => v.id === b.venue_id);
-  const dayInfo = selectedVenue?.available_per_day?.find(d => d.day_key === b.day_label);
-  const slots = selectedVenue?.visit_slots?.filter(vs => vs.day_label === b.day_label) || [];
+
+  // Charge les stands du site sélectionné
+  const [stands, setStands] = useState([]);
+  const [loadingStands, setLoadingStands] = useState(false);
+  useEffect(() => {
+    if (!b.venue_id) { setStands([]); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingStands(true);
+      try {
+        const list = await api(`/venues/${b.venue_id}/stands`);
+        if (!cancelled) setStands(Array.isArray(list) ? list : []);
+      } catch (e) { console.error('stands load', e); }
+      finally { if (!cancelled) setLoadingStands(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [b.venue_id]);
+
+  // Stand sélectionné — disponible si pas d'assignation OU si c'est moi
+  const isStandAvailable = (s) => {
+    if (!s.assignment) return true;
+    if (s.assignment.registration_id === registrationId) return true;
+    return ['annule', 'cancelled'].includes(s.assignment.status);
+  };
+  const myStand = stands.find(s => s.stand_code === b.stand_code);
+
+  const onStandClick = (stand) => {
+    if (!stand) return;
+    if (!isStandAvailable(stand)) {
+      toast.error(`Stand ${stand.stand_code} déjà attribué à ${stand.organization?.name || 'un autre exposant'}`);
+      return;
+    }
+    setField('stand_code', stand.stand_code);
+    setField('venue_stand_id', stand.id);
+    toast.success(`Stand ${stand.stand_code} sélectionné`);
+  };
 
   const submit = async () => {
-    if (!b.venue_id || !b.day_label || !b.visit_slot_id) { toast.error('Sélectionnez site, jour et créneau de passage'); return; }
+    if (!b.venue_id) { toast.error('Choisissez un site'); return; }
+    if (!b.stand_code) { toast.error('Cliquez sur un stand disponible sur la carte'); return; }
+    if (!Array.isArray(b.attending_days) || b.attending_days.length === 0) {
+      toast.error('Cochez au moins un jour de présence');
+      return;
+    }
+    for (const d of b.attending_days) {
+      const t = b.attending_day_times?.[d];
+      if (!t?.start || !t?.end) { toast.error(`Renseignez les horaires pour ${d}`); return; }
+      if (t.start >= t.end) { toast.error(`${d} : l'heure de fin doit être après l'heure de début`); return; }
+    }
     setSaving(true);
     try {
-      await api('/wizard/booking', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, ...b }) });
-      toast.success('Site et créneau de passage réservés ✓');
+      await api('/wizard/booking', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          venue_id: b.venue_id,
+          stand_code: b.stand_code,
+          venue_stand_id: b.venue_stand_id,
+          attending_days: b.attending_days,
+          attending_day_times: b.attending_day_times,
+        }),
+      });
+      toast.success('Site, stand et présence enregistrés ✓');
       await reload();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
@@ -277,11 +368,11 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
   return (
     <Card>
       <CardContent className="p-6 space-y-6">
-        <SectionHeader icon="📍" title="Lieu, jour et créneau de passage" desc="Choisissez votre site, votre journée puis votre créneau d'1h sur place." />
+        <SectionHeader icon="📍" title="Site, stand et jours de présence" desc="Choisissez votre site, votre stand sur la carte interactive, puis cochez vos jours de présence avec les horaires." />
 
         {/* 1) SITES */}
         <div>
-          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Choisir mon site</h3>
+          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> 1. Choisir mon site</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {venues.map(v => {
               const isSel = b.venue_id === v.id;
@@ -291,8 +382,14 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
                 <button
                   key={v.id}
                   type="button"
-                  disabled={isFull}
-                  onClick={() => { setField('venue_id', v.id); setField('day_label', ''); setField('visit_slot_id', ''); }}
+                  disabled={isFull && !isSel}
+                  onClick={() => {
+                    if (b.venue_id !== v.id) {
+                      setField('venue_id', v.id);
+                      setField('stand_code', '');
+                      setField('venue_stand_id', '');
+                    }
+                  }}
                   className={`relative p-3 rounded-lg border-2 text-left transition ${
                     isSel ? 'border-blue-600 bg-blue-50' :
                     isFull ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed' :
@@ -312,63 +409,69 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
           </div>
         </div>
 
-        {/* 2) JOUR */}
+        {/* 2) STAND sur carte interactive */}
         {selectedVenue && (
           <div>
-            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> Choisir mon jour</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {selectedVenue.available_per_day.map(d => {
-                const isSel = b.day_label === d.day_key;
-                const isFull = d.is_full;
-                return (
-                  <button
-                    key={d.day_key}
-                    type="button"
-                    disabled={isFull}
-                    onClick={() => { setField('day_label', d.day_key); setField('visit_slot_id', ''); }}
-                    className={`p-4 rounded-lg border-2 text-left transition ${
-                      isSel ? 'border-blue-600 bg-blue-50' :
-                      isFull ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed' :
-                      'border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'
-                    }`}
-                    data-testid={`day-${d.day_key}`}
-                  >
-                    <div className="font-bold text-slate-900">{d.day_label}</div>
-                    <div className="text-xs text-slate-500 mt-1">8h00 – 18h00</div>
-                    <div className="text-sm mt-2 font-medium">
-                      {isFull ? <span className="text-slate-400">Complet</span> : <span className="text-emerald-600">{d.remaining} places restantes</span>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">🗺️ 2. Choisir mon stand sur le plan</h3>
+            <div className="text-xs text-slate-500 mb-3">Cliquez sur un stand libre pour le sélectionner. Les stands grisés sont déjà pris.</div>
+            {loadingStands ? (
+              <div className="py-8 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Chargement du plan…</div>
+            ) : stands.length === 0 ? (
+              <div className="py-6 text-center text-amber-700 bg-amber-50 rounded-lg border border-amber-200">Le plan de ce site n&apos;est pas encore disponible. Contactez ARACOM.</div>
+            ) : (
+              <div className="border rounded-lg overflow-hidden bg-slate-50">
+                <SmartVenueMap
+                  venue={selectedVenue}
+                  stands={stands}
+                  highlightStandCode={b.stand_code}
+                  onStandClick={onStandClick}
+                />
+              </div>
+            )}
+            {b.stand_code && (
+              <div className="mt-3 bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r text-sm font-medium text-emerald-900 flex items-center justify-between">
+                <span>✓ Stand sélectionné : <b>{b.stand_code}</b>{myStand?.zone ? ` (zone ${myStand.zone})` : ''}</span>
+                <button onClick={() => { setField('stand_code', ''); setField('venue_stand_id', ''); }} className="text-xs text-emerald-700 underline">Changer</button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 3) CRÉNEAU DE PASSAGE */}
-        {b.day_label && (
+        {/* 3) JOURS DE PRÉSENCE + HORAIRES */}
+        {selectedVenue && b.stand_code && (
           <div>
-            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Clock className="w-4 h-4 text-blue-600" /> Choisir mon créneau de passage (1h sur place)</h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              {slots.map(s => {
-                const isSel = b.visit_slot_id === s.id;
-                const isFull = s.is_full;
+            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> 3. Mes jours de présence et horaires</h3>
+            <div className="text-xs text-slate-500 mb-3">Cochez au moins un jour. Renseignez vos horaires d&apos;ouverture du stand pour chaque jour coché.</div>
+            <div className="space-y-3">
+              {[
+                { key: 'vendredi', label: 'Vendredi 14 août 2026' },
+                { key: 'samedi', label: 'Samedi 15 août 2026' },
+              ].map(d => {
+                const isChecked = Array.isArray(b.attending_days) && b.attending_days.includes(d.key);
+                const t = b.attending_day_times?.[d.key] || { start: '08:00', end: '17:00' };
                 return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    disabled={isFull}
-                    onClick={() => setField('visit_slot_id', s.id)}
-                    className={`p-2 rounded border-2 text-center transition ${
-                      isSel ? 'border-blue-600 bg-blue-600 text-white' :
-                      isFull ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed' :
-                      'border-slate-200 hover:border-blue-400'
-                    }`}
-                    data-testid={`visit-slot-${s.id}`}
-                  >
-                    <div className="font-mono text-sm font-bold">{s.start_time}–{s.end_time}</div>
-                    <div className="text-[10px] mt-1">{isFull ? 'Complet' : `${s.remaining}/${s.capacity}`}</div>
-                  </button>
+                  <div key={d.key} className={`p-4 rounded-lg border-2 transition ${isChecked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200'}`}>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleDay(d.key)}
+                        className="w-5 h-5 accent-blue-600"
+                        data-testid={`day-check-${d.key}`}
+                      />
+                      <span className="font-bold text-slate-900">{d.label}</span>
+                    </label>
+                    {isChecked && (
+                      <div className="mt-3 ml-8 grid grid-cols-2 gap-3 max-w-md">
+                        <Field label="De" testid={`day-${d.key}-start`}>
+                          <Input type="time" value={t.start || '08:00'} onChange={e => setTime(d.key, 'start', e.target.value)} step={900} />
+                        </Field>
+                        <Field label="À" testid={`day-${d.key}-end`}>
+                          <Input type="time" value={t.end || '17:00'} onChange={e => setTime(d.key, 'end', e.target.value)} step={900} />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -377,7 +480,12 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={submit} disabled={saving || !b.visit_slot_id} className="gap-2 bg-blue-600 hover:bg-blue-700" data-testid="step2-next">
+          <Button
+            onClick={submit}
+            disabled={saving || !b.venue_id || !b.stand_code || !(b.attending_days?.length > 0)}
+            className="gap-2 bg-blue-600 hover:bg-blue-700"
+            data-testid="step2-next"
+          >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmer & verrouiller <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
@@ -387,154 +495,235 @@ function Step2Booking({ state, availability, draft, setDraft, onNext, onBack, re
 }
 
 // ─────────────────────────────────────────────────────────
-// STEP 3 — Animation (lieu + type + créneau)
+// STEP 3 — Animation OBLIGATOIRE (1 par jour de présence, sur stand ou zone démo)
 // ─────────────────────────────────────────────────────────
 function Step3Animation({ state, availability, draft, setDraft, onNext, onBack, reload, reloadAvailability, registrationId, saving, setSaving }) {
   const config = availability?.config || {};
-  const a = draft.animation || {};
-  const setField = (k, v) => setDraft(d => ({ ...d, animation: { ...d.animation, [k]: v } }));
+  const reg = state.registration || {};
+  const venueId = reg.venue_id;
+  const attendingDays = Array.isArray(reg.attending_days) && reg.attending_days.length > 0
+    ? reg.attending_days
+    : (Array.isArray(draft.booking?.attending_days) ? draft.booking.attending_days : []);
 
-  const venueId = state.registration?.venue_id;
-  const dayLabel = state.registration?.visit_day_label;
+  // Animations en cours d'édition (un objet par jour de présence)
+  const initialAnims = useMemo(() => {
+    const existing = Array.isArray(draft.animations) ? draft.animations : [];
+    return attendingDays.map(day => {
+      const found = existing.find(a => a.day_label === day);
+      return found || {
+        day_label: day,
+        location_type: 'sur_stand',
+        slot_type: '',
+        title: '',
+        target_audience: '',
+        material_needs: '',
+        start_time: '',
+        end_time: '',
+      };
+    });
+  }, [attendingDays, draft.animations]);
+
+  const [anims, setAnims] = useState(initialAnims);
+  useEffect(() => { setAnims(initialAnims); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [attendingDays.join(',')]);
+
+  const updateAnim = (day, field, value) => {
+    setAnims(prev => {
+      const next = prev.map(a => a.day_label === day ? { ...a, [field]: value } : a);
+      setDraft(d => ({ ...d, animations: next }));
+      return next;
+    });
+  };
+
+  // Créneaux occupés par d'autres exposants sur ce site / par jour / par lieu
   const venue = (availability?.venues || []).find(v => v.id === venueId);
-  const occupied = (venue?.animation_slots_occupied || []).filter(s => s.day_label === dayLabel && s.registration_id !== registrationId);
-
-  const typeInfo = (config.ANIMATION_TYPES || []).find(t => t.value === a.slot_type);
-
-  // Calcul créneaux 45 min dispos
-  const animSlots = (config.ANIM_SLOTS || []).map(slot => {
-    const isOccupied = occupied.some(o => o.start_time < slot.end && o.end_time > slot.start);
-    const isSel = a.start_time === slot.start && a.end_time === slot.end;
-    return { ...slot, isOccupied, isSel };
-  });
+  const occupiedSlots = (day, location_type) => {
+    return (venue?.animation_slots_occupied || []).filter(s =>
+      s.day_label === day &&
+      s.registration_id !== registrationId &&
+      (s.location_type ? s.location_type === location_type : true)
+    );
+  };
 
   const submit = async () => {
-    const errs = [];
-    if (!a.location_type) errs.push('lieu');
-    if (!a.slot_type) errs.push('type');
-    if (!a.title) errs.push('nom animation');
-    if (!a.target_audience) errs.push('public cible');
-    if (!a.start_time || !a.end_time) errs.push('créneau');
-    if (errs.length) { toast.error(`Manquant : ${errs.join(', ')}`); return; }
+    if (anims.length === 0) { toast.error('Vous devez avoir au moins une animation'); return; }
+    // Valider chaque animation
+    for (const a of anims) {
+      const errs = [];
+      if (!a.location_type) errs.push('lieu');
+      if (!a.slot_type) errs.push('type');
+      if (!a.title) errs.push('nom');
+      if (!a.target_audience) errs.push('public cible');
+      if (!a.start_time || !a.end_time) errs.push('horaire');
+      if (a.start_time && a.end_time && a.start_time >= a.end_time) errs.push('horaire fin > début');
+      if (errs.length) {
+        toast.error(`Animation ${a.day_label} : ${errs.join(', ')} manquant`);
+        return;
+      }
+    }
     setSaving(true);
     try {
-      await api('/wizard/animation', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, ...a }) });
-      toast.success('Animation réservée ✓');
+      await api('/wizard/animation', {
+        method: 'POST',
+        body: JSON.stringify({ registration_id: registrationId, animations: anims }),
+      });
+      toast.success(`${anims.length} animation${anims.length > 1 ? 's' : ''} enregistrée${anims.length > 1 ? 's' : ''} ✓`);
       await reload();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
     finally { setSaving(false); }
   };
 
+  if (attendingDays.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r">
+            <p className="font-semibold text-amber-900">Veuillez d&apos;abord cocher vos jours de présence à l&apos;étape précédente.</p>
+          </div>
+          <div className="mt-4">
+            <Button variant="outline" onClick={onBack}><ChevronLeft className="w-4 h-4 mr-2" /> Retour étape 2</Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardContent className="p-6 space-y-6">
-        <SectionHeader icon="🎭" title="Mon animation" desc="3 sous-étapes : lieu, type et contenu, puis créneau horaire. Maximum 1 animation par stand." />
+        <SectionHeader
+          icon="🎭"
+          title="Animations (obligatoire)"
+          desc={`Une animation obligatoire par jour de présence (${attendingDays.length} jour${attendingDays.length > 1 ? 's' : ''} coché${attendingDays.length > 1 ? 's' : ''}). Vous pouvez animer sur votre stand ou dans la zone de démonstration.`}
+        />
 
-        {/* 1) Lieu animation */}
-        <div>
-          <h3 className="font-semibold text-slate-900 mb-3">1. Lieu de l&apos;animation</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {(config.ANIMATION_LOCATIONS || []).map(loc => {
-              const isSel = a.location_type === loc.value;
-              return (
-                <button
-                  key={loc.value}
-                  type="button"
-                  onClick={() => setField('location_type', loc.value)}
-                  className={`p-4 rounded-lg border-2 text-left transition ${isSel ? 'border-blue-600 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`}
-                  data-testid={`anim-location-${loc.value}`}
-                >
-                  <div className="font-bold text-slate-900">{loc.label}</div>
-                  <div className="text-xs text-slate-600 mt-1">{loc.description}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 2) Type & contenu */}
-        {a.location_type && (
-          <div>
-            <h3 className="font-semibold text-slate-900 mb-3">2. Type et contenu</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-              {(config.ANIMATION_TYPES || []).map(t => {
-                const isSel = a.slot_type === t.value;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setField('slot_type', t.value)}
-                    className={`p-3 rounded-lg border-2 text-left transition text-sm ${isSel ? 'border-violet-600 bg-violet-50' : 'border-slate-200 hover:border-violet-300'}`}
-                    data-testid={`anim-type-${t.value}`}
-                  >
-                    <div className="font-bold text-slate-900">{t.label}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {typeInfo && (
-              <div className="bg-violet-50 border-l-4 border-violet-500 p-3 rounded-r text-sm text-violet-900 mb-3">
-                💡 {typeInfo.description}
-              </div>
-            )}
-            <Field label="Nom de l&apos;animation *" testid="anim-title">
-              <Input value={a.title || ''} onChange={e => setField('title', e.target.value)} placeholder="Ex : Initiation natation enfants" />
-            </Field>
-            <Field label="Public cible *" testid="anim-target">
-              <Select value={a.target_audience || ''} onValueChange={v => setField('target_audience', v)}>
-                <SelectTrigger><SelectValue placeholder="Choisir un public…" /></SelectTrigger>
-                <SelectContent>
-                  {(config.PUBLIC_TARGETS || []).map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Besoins matériels (optionnel)" testid="anim-material">
-              <Textarea rows={2} value={a.material_needs || ''} onChange={e => setField('material_needs', e.target.value)} placeholder="Ex : 2 tapis, sono, projecteur…" />
-            </Field>
-          </div>
-        )}
-
-        {/* 3) Créneau horaire */}
-        {a.location_type && a.slot_type && (
-          <div>
-            <h3 className="font-semibold text-slate-900 mb-3">3. Créneau horaire ({dayLabel === 'samedi' ? 'Samedi 15 août' : 'Vendredi 14 août'} · 45 min)</h3>
-            <div className="text-xs text-slate-500 mb-3">Les créneaux pris par d&apos;autres exposants de ce site sont grisés (même créneau, peu importe le lieu).</div>
-            <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-              {animSlots.map((s, i) => (
-                <button
-                  key={`${s.start}-${i}`}
-                  type="button"
-                  disabled={s.isOccupied}
-                  onClick={() => { setField('start_time', s.start); setField('end_time', s.end); }}
-                  className={`p-2 rounded border-2 text-center transition ${
-                    s.isSel ? 'border-violet-600 bg-violet-600 text-white' :
-                    s.isOccupied ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed' :
-                    'border-slate-200 hover:border-violet-400'
-                  }`}
-                  data-testid={`anim-slot-${s.start}`}
-                >
-                  <div className="font-mono text-xs font-bold">{s.start}</div>
-                  <div className="text-[10px]">{s.isOccupied ? 'Pris' : 'Libre'}</div>
-                </button>
-              ))}
-            </div>
-            {a.start_time && (
-              <div className="mt-4 bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r text-sm font-medium text-emerald-900">
-                ✓ Créneau sélectionné : <b>{a.start_time} → {a.end_time}</b>
-              </div>
-            )}
-          </div>
-        )}
+        {anims.map((a, idx) => (
+          <AnimationBlock
+            key={a.day_label}
+            anim={a}
+            idx={idx}
+            config={config}
+            occupied={occupiedSlots(a.day_label, a.location_type)}
+            update={(field, value) => updateAnim(a.day_label, field, value)}
+          />
+        ))}
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={submit} disabled={saving || !a.start_time} className="gap-2 bg-violet-600 hover:bg-violet-700" data-testid="step3-next">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmer l&apos;animation <ChevronRight className="w-4 h-4" /></>}
+          <Button onClick={submit} disabled={saving} className="gap-2 bg-violet-600 hover:bg-violet-700" data-testid="step3-next">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmer mes animations <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AnimationBlock({ anim, idx, config, occupied, update }) {
+  const a = anim;
+  const dayLabel = a.day_label === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
+  const typeInfo = (config.ANIMATION_TYPES || []).find(t => t.value === a.slot_type);
+  const animSlots = (config.ANIM_SLOTS || []).map(slot => {
+    const isOccupied = occupied.some(o => o.start_time < slot.end && o.end_time > slot.start);
+    const isSel = a.start_time === slot.start && a.end_time === slot.end;
+    return { ...slot, isOccupied, isSel };
+  });
+
+  return (
+    <div className="border-2 border-violet-200 rounded-lg p-4 bg-violet-50/30 space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="bg-violet-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">{idx + 1}</div>
+        <div>
+          <div className="font-bold text-slate-900">Animation du {dayLabel}</div>
+          <div className="text-xs text-slate-600">Champs obligatoires pour finaliser l&apos;inscription.</div>
+        </div>
+      </div>
+
+      {/* 1) Lieu */}
+      <div>
+        <Label className="text-sm font-semibold">Lieu de l&apos;animation *</Label>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+          {[
+            { value: 'sur_stand', label: 'Sur mon stand', desc: 'Démonstration directement sur votre stand' },
+            { value: 'zone_demo', label: 'Zone de démonstration', desc: 'Espace dédié partagé (sportifs, scènes, tatamis…)' },
+          ].map(loc => {
+            const isSel = a.location_type === loc.value;
+            return (
+              <button
+                key={loc.value}
+                type="button"
+                onClick={() => update('location_type', loc.value)}
+                className={`p-3 rounded-lg border-2 text-left transition ${isSel ? 'border-violet-600 bg-violet-100' : 'border-slate-200 hover:border-violet-300 bg-white'}`}
+                data-testid={`anim-${a.day_label}-location-${loc.value}`}
+              >
+                <div className="font-bold text-slate-900">{loc.label}</div>
+                <div className="text-xs text-slate-600 mt-1">{loc.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 2) Type, titre, public, matériel */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Type d'animation *" testid={`anim-${a.day_label}-type`}>
+          <Select value={a.slot_type || ''} onValueChange={v => update('slot_type', v)}>
+            <SelectTrigger><SelectValue placeholder="Choisir un type…" /></SelectTrigger>
+            <SelectContent>
+              {(config.ANIMATION_TYPES || []).map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Public cible *" testid={`anim-${a.day_label}-audience`}>
+          <Select value={a.target_audience || ''} onValueChange={v => update('target_audience', v)}>
+            <SelectTrigger><SelectValue placeholder="Choisir un public…" /></SelectTrigger>
+            <SelectContent>
+              {(config.PUBLIC_TARGETS || []).map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      {typeInfo && (
+        <div className="bg-violet-50 border-l-4 border-violet-500 p-2 rounded-r text-xs text-violet-900">💡 {typeInfo.description}</div>
+      )}
+
+      <Field label="Nom de l'animation *" testid={`anim-${a.day_label}-title`}>
+        <Input value={a.title || ''} onChange={e => update('title', e.target.value)} placeholder="Ex : Initiation natation enfants" />
+      </Field>
+      <Field label="Besoins matériels (optionnel)" testid={`anim-${a.day_label}-material`}>
+        <Textarea rows={2} value={a.material_needs || ''} onChange={e => update('material_needs', e.target.value)} placeholder="Ex : 2 tapis, sono, projecteur…" />
+      </Field>
+
+      {/* 3) Créneau horaire */}
+      <div>
+        <Label className="text-sm font-semibold">Créneau horaire * ({dayLabel} · 45 min)</Label>
+        <div className="text-xs text-slate-500 my-2">Les créneaux pris par d&apos;autres exposants ({a.location_type === 'sur_stand' ? 'sur stand' : 'zone démo'}) sont grisés.</div>
+        <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+          {animSlots.map((s, i) => (
+            <button
+              key={`${a.day_label}-${s.start}-${i}`}
+              type="button"
+              disabled={s.isOccupied}
+              onClick={() => { update('start_time', s.start); update('end_time', s.end); }}
+              className={`p-2 rounded border-2 text-center transition ${
+                s.isSel ? 'border-violet-600 bg-violet-600 text-white' :
+                s.isOccupied ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed' :
+                'border-slate-200 hover:border-violet-400 bg-white'
+              }`}
+              data-testid={`anim-${a.day_label}-slot-${s.start}`}
+            >
+              <div className="font-mono text-xs font-bold">{s.start}</div>
+              <div className="text-[10px]">{s.isOccupied ? 'Pris' : 'Libre'}</div>
+            </button>
+          ))}
+        </div>
+        {a.start_time && (
+          <div className="mt-3 bg-emerald-50 border-l-4 border-emerald-500 p-2 rounded-r text-sm font-medium text-emerald-900">
+            ✓ {a.start_time} → {a.end_time}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -677,8 +866,11 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
 
   const o = state.organization || {};
   const v = state.venue || {};
-  const vs = state.visit_slot;
-  const a = state.animation_slots?.[0];
+  const reg = state.registration || {};
+  const attendingDays = Array.isArray(reg.attending_days) ? reg.attending_days : [];
+  const dayTimes = reg.attending_day_times || {};
+  const dayLabel = (k) => k === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
+  const animations = Array.isArray(state.animation_slots) ? state.animation_slots : [];
 
   const submit = async () => {
     if (!accepted) { toast.error('Acceptez le règlement exposant pour finaliser'); return; }
@@ -708,7 +900,7 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
             </a>
             {links.visit_slot && <a href={links.visit_slot} className="p-3 border rounded-lg bg-blue-50 hover:bg-blue-100 transition flex flex-col items-center gap-1">
               <Calendar className="w-5 h-5 text-blue-700" />
-              <div className="text-xs font-bold text-blue-900">Modifier mon créneau</div>
+              <div className="text-xs font-bold text-blue-900">Modifier mes jours / horaires</div>
             </a>}
             {links.animation && <a href={links.animation} className="p-3 border rounded-lg bg-violet-50 hover:bg-violet-100 transition flex flex-col items-center gap-1">
               <Music className="w-5 h-5 text-violet-700" />
@@ -736,21 +928,33 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
         </RecapBlock>
 
         {/* Lieu */}
-        <RecapBlock title="Lieu, jour et passage" icon="📍" locked onEdit={() => onEditStep(2)}>
+        <RecapBlock title="Site, stand et présence" icon="📍" locked onEdit={() => onEditStep(2)}>
           <RecapRow label="Site" value={v.name} locked />
-          <RecapRow label="Stand" value={state.registration?.stand_code || '—'} />
-          <RecapRow label="Jour" value={state.registration?.visit_day_label === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026'} locked />
-          {vs && <RecapRow label="Créneau de passage" value={`${vs.start_time} → ${vs.end_time}`} locked />}
+          <RecapRow label="Stand" value={reg.stand_code || '—'} locked />
+          <RecapRow label="Jours de présence" value={attendingDays.length ? attendingDays.map(dayLabel).join(' · ') : '—'} locked />
+          {attendingDays.map(d => (
+            <RecapRow
+              key={d}
+              label={`Horaires ${d === 'samedi' ? 'samedi' : 'vendredi'}`}
+              value={dayTimes[d] ? `${dayTimes[d].start} → ${dayTimes[d].end}` : '—'}
+              locked
+            />
+          ))}
         </RecapBlock>
 
-        {/* Animation */}
-        {a && (
-          <RecapBlock title="Animation" icon="🎭" locked onEdit={() => onEditStep(3)}>
-            <RecapRow label="Lieu" value={a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'} />
-            <RecapRow label="Type" value={a.slot_type} />
-            <RecapRow label="Nom" value={a.title} />
-            <RecapRow label="Public cible" value={a.target_audience} />
-            <RecapRow label="Créneau" value={`${a.start_time} → ${a.end_time}`} locked />
+        {/* Animations */}
+        {animations.length > 0 && (
+          <RecapBlock title={`Animations (${animations.length})`} icon="🎭" locked onEdit={() => onEditStep(3)}>
+            {animations.map((a, idx) => (
+              <div key={a.id || idx} className="pb-2 mb-2 border-b last:border-b-0 last:mb-0 last:pb-0">
+                <div className="text-xs font-bold text-violet-700 uppercase tracking-wider">{dayLabel(a.day_label)}</div>
+                <RecapRow label="Nom" value={a.title} />
+                <RecapRow label="Type" value={a.slot_type} />
+                <RecapRow label="Lieu" value={a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'} />
+                <RecapRow label="Public cible" value={a.target_audience} />
+                <RecapRow label="Créneau" value={`${a.start_time} → ${a.end_time}`} locked />
+              </div>
+            ))}
           </RecapBlock>
         )}
 
@@ -770,11 +974,11 @@ function Step5Confirm({ state, onBack, reload, registrationId, saving, setSaving
           <div className="bg-white rounded p-3 text-sm">
             <div className="font-bold text-lg">{o.name}</div>
             <div className="text-slate-500">{o.discipline}</div>
-            <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
+            <div className="mt-2 grid grid-cols-3 md:grid-cols-4 gap-2 text-xs">
               <div><span className="text-slate-400">SITE</span><br/><b>{v.name}</b></div>
-              <div><span className="text-slate-400">STAND</span><br/><b>{state.registration?.stand_code}</b></div>
-              <div><span className="text-slate-400">JOUR</span><br/><b>{state.registration?.visit_day_label === 'samedi' ? 'Sam 15/08' : 'Ven 14/08'}</b></div>
-              {vs && <div><span className="text-slate-400">PASSAGE</span><br/><b>{vs.start_time}–{vs.end_time}</b></div>}
+              <div><span className="text-slate-400">STAND</span><br/><b>{reg.stand_code}</b></div>
+              <div><span className="text-slate-400">JOURS</span><br/><b>{attendingDays.length === 2 ? 'Ven + Sam' : attendingDays.includes('samedi') ? 'Sam 15/08' : 'Ven 14/08'}</b></div>
+              <div><span className="text-slate-400">ANIMATIONS</span><br/><b>{animations.length}</b></div>
             </div>
           </div>
         </div>
