@@ -33,6 +33,7 @@ async function api(path, opts = {}) {
 export default function WizardPage({ registrationId, isPublic = false }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [state, setState] = useState(null);
+  const [notFound, setNotFound] = useState(false);
   const stateRef = useRef(null);
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +98,17 @@ export default function WizardPage({ registrationId, isPublic = false }) {
             : [],
         });
       }
-    } catch (e) { toast.error(e.message); }
+    } catch (e) {
+      // Si la reg n'existe pas/plus → nettoyer le localStorage et revenir au formulaire email
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('inscription_public_reg_id');
+          localStorage.removeItem(`wizard:${registrationId}`);
+        } catch {}
+      }
+      setNotFound(true);
+      toast.error('Inscription introuvable. Veuillez recommencer.');
+    }
     finally { setLoading(false); }
   }, [registrationId]);
 
@@ -131,7 +142,34 @@ export default function WizardPage({ registrationId, isPublic = false }) {
   const goBack = () => setCurrentStep(s => Math.max(1, s - 1));
 
   if (loading) return <FullScreenLoader />;
-  if (!state) return <div className="p-8 text-center text-red-600">Impossible de charger l&apos;inscription.</div>;
+  if (notFound || !state) {
+    const resetAndRestart = () => {
+      try {
+        localStorage.removeItem('inscription_public_reg_id');
+        if (registrationId) localStorage.removeItem(`wizard:${registrationId}`);
+      } catch {}
+      window.location.href = '/inscription';
+    };
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <Toaster position="top-right" richColors />
+        <Card className="max-w-md w-full">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="text-5xl">🤔</div>
+            <h2 className="text-xl font-bold text-slate-900">Inscription introuvable</h2>
+            <p className="text-sm text-slate-600">
+              Votre session d&apos;inscription précédente n&apos;est plus disponible.
+              Cela peut arriver si l&apos;équipe ARACOM a réinitialisé la base de test
+              ou si trop de temps s&apos;est écoulé.
+            </p>
+            <Button onClick={resetAndRestart} size="lg" className="bg-blue-600 hover:bg-blue-700 w-full">
+              Recommencer une inscription
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const progressPct = ((currentStep - 1) / 4) * 100;
 
