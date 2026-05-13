@@ -17,6 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { ChatbotFloating } from '@/components/chatbot-widget';
+import ExposantPasswordGate, { ExposantPasswordManager } from '@/components/exposant-password-gate';
 import { toast } from 'sonner';
 import {
   Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
@@ -51,6 +52,16 @@ export default function ExposantPortal() {
   const [stepDeadlines, setStepDeadlines] = useState({});
   const [postEvent, setPostEvent] = useState({ unlocked: false });
   const [validationRequest, setValidationRequest] = useState(null);
+  const [passwordStatus, setPasswordStatus] = useState({ has_password: false });
+
+  // 🔐 Charge le statut du mot de passe (pour l'affichage du panneau de gestion)
+  const loadPasswordStatus = async (orgId) => {
+    if (!orgId) return;
+    try {
+      const s = await api(`/api/exposant/password/status?organization_id=${encodeURIComponent(orgId)}`);
+      setPasswordStatus(s);
+    } catch { /* ignore */ }
+  };
 
   // Read ?tab= from URL on mount and when changed externally
   useEffect(() => {
@@ -83,6 +94,8 @@ export default function ExposantPortal() {
       if (!mine) { setData({ me, registration: null }); setLoading(false); return; }
       const full = await api(`/api/registrations/${mine.id}`);
       setData({ me, ...full });
+      // 🔐 Statut mot de passe (pour le bandeau de gestion)
+      loadPasswordStatus(me.organization.id);
       // Charge la demande de validation existante (si présente)
       try {
         const vrList = await api('/api/validation-requests');
@@ -135,7 +148,20 @@ export default function ExposantPortal() {
       allowedRoles={['exposant']}
       right={null}
     >
+      <ExposantPasswordGate
+        organizationId={o?.id}
+        organizationName={o?.name}
+        userRole={user?.role}
+      >
       <div className="space-y-6">
+        {/* 🔐 Bandeau gestion mot de passe — visible seulement à l'exposant (pas en mode aperçu admin) */}
+        {user?.role === 'exposant' && o?.id && (
+          <ExposantPasswordManager
+            organizationId={o.id}
+            hasPassword={passwordStatus.has_password}
+            onUpdated={() => loadPasswordStatus(o.id)}
+          />
+        )}
         <Card className="bg-gradient-to-br from-blue-50 to-emerald-50 border-blue-100">
           <CardContent className="p-6 flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex-1">
@@ -354,6 +380,7 @@ export default function ExposantPortal() {
         </Tabs>
       </div>
       <ChatbotFloating role="exposant" />
+      </ExposantPasswordGate>
     </Shell>
   );
 }

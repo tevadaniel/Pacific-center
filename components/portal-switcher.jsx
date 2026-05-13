@@ -70,7 +70,9 @@ export default function PortalSwitcher() {
       const r = await authFetch(`/api/organizations/${org.id}/access-link`);
       const d = await r.json();
       if (r.ok && d?.access_url) {
-        win.location.href = d.access_url;
+        // 🛡️ Append ?admin=1 pour signaler à /access/[token] et /exposant que l'admin est en mode aperçu
+        const sep = d.access_url.includes('?') ? '&' : '?';
+        win.location.href = d.access_url + sep + 'admin=1';
       } else {
         win.close();
         toast.error('Lien d\'accès indisponible pour cet exposant');

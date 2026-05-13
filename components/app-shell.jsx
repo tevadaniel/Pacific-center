@@ -22,15 +22,10 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
   }, [router, allowedRoles]);
 
   const logout = () => {
-    // 📨 Fire-and-forget : on déclenche l'envoi d'email en arrière-plan (pour les exposants & pacific)
-    //    et on redirige IMMÉDIATEMENT vers /goodbye (pas d'attente utilisateur).
-    //    Les admins ARACOM sont ignorés côté backend (login par mot de passe).
-    if (session?.role && session.role !== 'aracom_admin') {
-      api('/api/auth/logout-email', { method: 'POST', body: JSON.stringify({}) })
-        .catch(e => console.error('[logout-email]', e?.message));
-      try { sessionStorage.setItem('fr26_logout_email_sent', 'ok'); } catch { /* ignore */ }
-    }
-    clearSession();
+    // 🚫 PLUS d'envoi automatique de mail au logout : l'exposant garde un accès permanent
+    //    via son magic link (et est protégé par mot de passe s'il en a défini un).
+    try { clearSession(); } catch { /* ignore */ }
+    try { sessionStorage.clear(); } catch { /* ignore */ }
     router.replace('/goodbye');
   };
 

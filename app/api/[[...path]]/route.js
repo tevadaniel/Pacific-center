@@ -572,6 +572,19 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
+    // 🔐 GET /api/exposant/password/status — check if password is set for current/specified org
+    if (route === 'exposant/password/status') {
+      const ctx = getUserContext(request);
+      const orgId = url.searchParams.get('organization_id') || ctx.organization_id;
+      if (!orgId) return json({ has_password: false, organization_id: null });
+      const org = await db.collection('organizations').findOne({ id: orgId });
+      return json({
+        has_password: !!org?.access_password_hash,
+        organization_id: orgId,
+        password_set_at: org?.password_set_at || null,
+      });
+    }
+
     // 🌐 Liste tous les sites (registrations) d'une organisation (multi-sites)
     if (route === 'wizard/org-sites') {
       const orgId = url.searchParams.get('organization_id');
@@ -1957,6 +1970,55 @@ export async function POST(request, { params }) {
         return err('Impossible d\'envoyer le lien pour le moment', 500);
       }
       return json({ ok: true, sent: true });
+    }
+
+
+    // 🔐 EXPOSANT — Set / change own password
+    if (route === 'exposant/password') {
+      const ctx = getUserContext(request);
+      const bcrypt = require('bcryptjs');
+      const { password, current_password, organization_id } = body || {};
+      // Determine target org : explicit (admin override) OR from session
+      const targetOrgId = organization_id && ctx.role === 'aracom_admin' ? organization_id : ctx.organization_id;
+      if (!targetOrgId) return err('Aucune organisation liée à cette session', 401);
+      if (!password || password.length < 4) return err('Mot de passe requis (min. 4 caractères)', 400);
+      const org = await db.collection('organizations').findOne({ id: targetOrgId });
+      if (!org) return err('Organisation introuvable', 404);
+      // Si un mdp existe déjà et qu'on n'est pas admin, vérifier l'ancien
+      if (org.access_password_hash && ctx.role !== 'aracom_admin') {
+        if (!current_password) return err('Mot de passe actuel requis pour changer', 400);
+        const ok = await bcrypt.compare(current_password, org.access_password_hash);
+        if (!ok) return err('Mot de passe actuel incorrect', 403);
+      }
+      const hash = await bcrypt.hash(password, 10);
+      await db.collection('organizations').updateOne(
+        { id: targetOrgId },
+        { $set: { access_password_hash: hash, password_set_at: new Date(), updated_at: new Date() } }
+      );
+      return json({ ok: true, action: 'password_set' });
+    }
+
+    // 🔓 EXPOSANT — Verify password (accept universal admin pwd as bypass)
+    if (route === 'exposant/password/verify') {
+      const bcrypt = require('bcryptjs');
+      const ctx = getUserContext(request);
+      const { password, organization_id } = body || {};
+      if (!password) return err('Mot de passe requis', 400);
+      const targetOrgId = organization_id || ctx.organization_id;
+      if (!targetOrgId) return err('Organisation requise', 400);
+      // 🔑 Universal admin password bypass
+      const UNIVERSAL_PWD = 'Projetaracom12';
+      if (password === UNIVERSAL_PWD) {
+        return json({ ok: true, method: 'universal_admin' });
+      }
+      const org = await db.collection('organizations').findOne({ id: targetOrgId });
+      if (!org) return err('Organisation introuvable', 404);
+      if (!org.access_password_hash) {
+        return err('Aucun mot de passe défini pour cette organisation', 400);
+      }
+      const ok = await bcrypt.compare(password, org.access_password_hash);
+      if (!ok) return err('Mot de passe incorrect', 403);
+      return json({ ok: true, method: 'own_password' });
     }
 
 
@@ -6860,6 +6922,21 @@ export async function DELETE(request, { params }) {
     if (route.startsWith('tasks/')) {
       await db.collection('tasks_or_followups').deleteOne({ id: p[1] });
       return json({ ok: true });
+    }
+
+    // 🔓 DELETE /api/exposant/password — remove password (admin can clear any, exposant can clear own)
+    if (route === 'exposant/password') {
+      const ctx = getUserContext(request);
+      const url2 = new URL(request.url);
+      const targetOrgId = url2.searchParams.get('organization_id') && ctx.role === 'aracom_admin'
+        ? url2.searchParams.get('organization_id')
+        : ctx.organization_id;
+      if (!targetOrgId) return err('Organisation requise', 400);
+      await db.collection('organizations').updateOne(
+        { id: targetOrgId },
+        { $unset: { access_password_hash: '', password_set_at: '' }, $set: { updated_at: new Date() } }
+      );
+      return json({ ok: true, action: 'password_removed' });
     }
     if (route.startsWith('animation-slots/')) {
       const slot = await db.collection('animation_slots').findOne({ id: p[1] });

@@ -44,17 +44,23 @@ export default function AccessTokenPage() {
           token_purpose: data.token_info?.purpose || null,
           accessed_via_token: true,
         });
+        // 🛡️ Si admin=1 dans l'URL, persister le mode aperçu admin (utilisé par ExposantPasswordGate)
+        const adminPreview = searchParams?.get('admin') === '1';
+        if (adminPreview) {
+          try { sessionStorage.setItem('admin_preview_mode', '1'); } catch { /* ignore */ }
+        }
         const tabSuffix = requestedTab ? `?tab=${encodeURIComponent(requestedTab)}` : '';
+        const adminSuffix = adminPreview ? (tabSuffix ? '&admin=1' : '?admin=1') : '';
         // Redirect by PURPOSE first (more reliable), then by role_code as fallback
         const purpose = data.token_info?.purpose;
         if (purpose === 'inscription_exposant') {
           router.replace('/inscription?token=' + encodeURIComponent(token));
         } else if (purpose === 'pacific_centers' || data.user.role_code === 'pacific_centers_readonly') {
-          router.replace('/pacific' + tabSuffix);
+          router.replace('/pacific' + tabSuffix + adminSuffix);
         } else if (data.user.role_code === 'aracom_admin') {
           router.replace('/aracom' + tabSuffix);
         } else {
-          router.replace('/exposant' + tabSuffix);
+          router.replace('/exposant' + tabSuffix + adminSuffix);
         }
       } catch (e) {
         if (!alive) return;
