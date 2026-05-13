@@ -79,16 +79,21 @@ function getPublicBaseUrl(request) {
       const h = request.headers;
       const xfHost = h.get?.('x-forwarded-host') || h.get?.('host');
       const xfProto = h.get?.('x-forwarded-proto') || 'https';
-      if (xfHost && !xfHost.includes('localhost') && !xfHost.includes('127.0.0.1')) {
+      // Liste des hosts considérés comme "local/dev" → on préfère le fallback env si dispo
+      const isLocalHost = (host) => !host || host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0');
+      if (xfHost && !isLocalHost(xfHost)) {
         return `${xfProto}://${xfHost}`;
       }
-      // Fallback : essayer l'origin / referer si dispo
       const origin = h.get?.('origin');
-      if (origin && /^https?:\/\//.test(origin)) return origin;
-      // Sinon parse l'url request (next/server)
+      if (origin && /^https?:\/\//.test(origin)) {
+        try {
+          const ou = new URL(origin);
+          if (!isLocalHost(ou.host)) return origin;
+        } catch { /* ignore */ }
+      }
       if (request.url) {
         const u = new URL(request.url);
-        if (u.host && !u.host.includes('localhost')) return `${u.protocol}//${u.host}`;
+        if (!isLocalHost(u.host)) return `${u.protocol}//${u.host}`;
       }
     } catch (_e) { /* ignore */ }
   }

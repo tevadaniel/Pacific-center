@@ -1026,6 +1026,23 @@ agent_communication:
         agent: "main"
         comment: "Cause profonde du 'portails inaccessibles' : portal-switcher.jsx utilisait fetch() brut SANS les headers x-user-id et x-user-role, donc /api/organizations/:id/access-link retournait 403. (Toutes les autres pages utilisent api() du lib/auth-client qui injecte ces headers depuis localStorage fr26_session)."
       - working: true
+
+
+  - task: "🚨 Fix portails Pacific Centers et Exposant inaccessibles à l'admin (session 18)"
+    implemented: true
+    working: true
+    file: "components/app-shell.jsx, app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "User : 'j'en ai marre le portail pacific centers ou exposant ne fonctionne pas'. Cause racine identifiée : (1) /pacific et /exposant ont `allowedRoles=['pacific_centers_readonly']` (ou similaire) ; (2) Le Shell rejette tout rôle non-listé via `router.replace('/')` ; (3) L'admin ARACOM (rôle aracom_admin) n'était JAMAIS dans la liste, donc systématiquement redirigé vers la homepage. EN PLUS : `getPublicBaseUrl(request)` retournait `http://0.0.0.0:3000` quand request.url contenait 0.0.0.0 (host=0.0.0.0:3000 n'était pas filtré comme local)."
+      - working: true
+        agent: "main"
+        comment: "✅ 2 FIXES : (1) Shell.jsx ligne 18 : ajout du bypass `const isAdmin = s.role === 'aracom_admin'` qui autorise l'admin sur TOUS les portails (mode aperçu/audit). (2) getPublicBaseUrl ajout du filtre `0.0.0.0` à la liste des hosts locaux pour ne plus retourner d'URL inaccessible. Tests E2E navigateur : (a) admin login + nav directe /pacific → ✅ portail charge avec KPIs Pacific (67 exposants, 6 sites, etc.). (b) admin login + nav directe /exposant → ✅ portail charge (affiche 'aucune org liée' car admin sans org, comportement attendu). (c) PortalSwitcher → I Mua → popup s'ouvre → URL = https://polynesie-event-hub.preview.emergentagent.com/exposant → affiche le dossier I Mua Papeete avec stand A-C01, 25% complétion, Arue, Natation, etc. Domaine preserved correctly via x-forwarded-host."
+
         agent: "main"
         comment: "✅ FIX : Création d'un helper local authFetch() qui ajoute automatiquement x-user-id / x-user-role depuis getSession() (lib/auth-client) avec fallback aracom_admin si admin a loggé via la homepage. fetch() remplacé par authFetch() pour /api/organizations et /api/organizations/:id/access-link. Vérifié E2E : logs montrent maintenant `200 in 82ms` au lieu de 403. La popup s'ouvre, navigue vers /access/<token> et l'exposant entre dans son portail."
 

@@ -15,7 +15,9 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
   useEffect(() => {
     const s = getSession();
     if (!s) { router.replace('/'); return; }
-    if (allowedRoles && !allowedRoles.includes(s.role)) { router.replace('/'); return; }
+    // 🛡️ Bypass admin : l'admin ARACOM peut accéder à TOUS les portails (mode aperçu/audit)
+    const isAdmin = s.role === 'aracom_admin';
+    if (allowedRoles && !isAdmin && !allowedRoles.includes(s.role)) { router.replace('/'); return; }
     setSession(s);
   }, [router, allowedRoles]);
 
