@@ -65,7 +65,33 @@ async function tryAutoMailGuard() {
 }
 
 // ===== Tracking helpers =====
-function getPublicBaseUrl() {
+/**
+ * Get the public base URL for emails / access links / etc.
+ * 🛡️ Stratégie : priorité à l'origine de la requête entrante (preserves preview vs production)
+ *    1. Si request est passé → utiliser x-forwarded-host + x-forwarded-proto (or origin/referer)
+ *    2. Sinon → fallback sur NEXT_PUBLIC_BASE_URL (.env)
+ *    3. Sinon → localhost
+ * Ainsi, en preview les liens pointent vers preview, en prod vers prod, sans configuration .env spécifique.
+ */
+function getPublicBaseUrl(request) {
+  if (request) {
+    try {
+      const h = request.headers;
+      const xfHost = h.get?.('x-forwarded-host') || h.get?.('host');
+      const xfProto = h.get?.('x-forwarded-proto') || 'https';
+      if (xfHost && !xfHost.includes('localhost') && !xfHost.includes('127.0.0.1')) {
+        return `${xfProto}://${xfHost}`;
+      }
+      // Fallback : essayer l'origin / referer si dispo
+      const origin = h.get?.('origin');
+      if (origin && /^https?:\/\//.test(origin)) return origin;
+      // Sinon parse l'url request (next/server)
+      if (request.url) {
+        const u = new URL(request.url);
+        if (u.host && !u.host.includes('localhost')) return `${u.protocol}//${u.host}`;
+      }
+    } catch (_e) { /* ignore */ }
+  }
   return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 }
 /**
@@ -74,9 +100,9 @@ function getPublicBaseUrl() {
  * @param {string} messageId - email_messages.id
  * @returns {string} HTML with tracking instrumentation
  */
-function injectTracking(html, messageId) {
+function injectTracking(html, messageId, baseUrl) {
   if (!html) return html;
-  const base = getPublicBaseUrl();
+  const base = baseUrl || getPublicBaseUrl();
   // Wrap <a href="..."> to redirect through our tracker
   let out = html.replace(/<a([^>]*?)href="(https?:\/\/[^"]+)"([^>]*?)>/gi, (m, pre, url, post) => {
     if (url.includes('/api/track/')) return m; // avoid double-wrap
@@ -110,7 +136,7 @@ function sanitizeEmailHtml(html) {
  * Returns the full URL (https://.../access/TOKEN).
  * Reuses the most recent non-revoked token if it exists, otherwise creates one.
  */
-async function getOrCreateExposantAccessUrl(db, organizationId, email) {
+async function getOrCreateExposantAccessUrl(db, organizationId, email, request) {
   if (!organizationId && !email) return null;
   const query = organizationId
     ? { organization_id: organizationId, purpose: 'exposant', revoked_at: null }
@@ -137,7 +163,7 @@ async function getOrCreateExposantAccessUrl(db, organizationId, email) {
     });
     tk = { token: tokenStr };
   }
-  return `${getPublicBaseUrl()}/access/${tk.token}`;
+  return `${getPublicBaseUrl(request)}/access/${tk.token}`;
 }
 
 /**
@@ -1115,7 +1141,7 @@ export async function GET(request, { params }) {
       const orgId = p[1];
       const org = await db.collection('organizations').findOne({ id: orgId });
       if (!org) return err('Organisation introuvable', 404);
-      const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email);
+      const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request);
       return json({ ok: true, access_url, organization_name: org.name });
     }
 
@@ -1735,7 +1761,7 @@ export async function GET(request, { params }) {
       return json(list.map(t => ({
         ...t, _id: undefined,
         organization: t.organization_id ? (orgById[t.organization_id] ? { id: orgById[t.organization_id].id, name: orgById[t.organization_id].name, main_email: orgById[t.organization_id].main_email } : null) : null,
-        access_url: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${t.token}`,
+        access_url: `${getPublicBaseUrl(request)}/access/${t.token}`,
         is_revoked: Boolean(t.revoked_at),
         is_expired: t.expires_at ? new Date(t.expires_at) < new Date() : false,
       })));
@@ -1899,7 +1925,7 @@ export async function POST(request, { params }) {
         return json({ ok: true, sent: true, message: 'Si un compte existe sur cet email, un lien vient d\'être envoyé.' });
       }
       // Génère/récupère le magic link
-      const url = await getOrCreateExposantAccessUrl(db, org.id, cleanEmail);
+      const url = await getOrCreateExposantAccessUrl(db, org.id, cleanEmail, request);
       // Envoie l'email via sendMailAuto (respecte le mode TEST)
       try {
         const { sendMailAuto } = await import('@/lib/mail-config');
@@ -2535,7 +2561,7 @@ export async function POST(request, { params }) {
       } catch (e) { console.error('[wizard finalize] badge generation failed:', e.message); }
 
       // Email avec PJ
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const baseUrl = getPublicBaseUrl(request);
       const linkVisit = `${baseUrl}/modify/visit/${tokVisit}`;
       const linkAnim = `${baseUrl}/modify/animation/${tokAnim}`;
       const a = state.animation_slots[0];
@@ -3072,7 +3098,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         await db.collection('access_tokens').insertOne(doc);
         tk = doc;
       }
-      const accessUrl = `${getPublicBaseUrl()}/access/${tk.token}`;
+      const accessUrl = `${getPublicBaseUrl(request)}/access/${tk.token}`;
       const displayName = user.full_name || user.email;
       const html = `<p>Bonjour ${displayName},</p>
 <p>Vous venez de vous déconnecter de votre espace <b>${purpose === 'pacific_centers' ? 'Pacific Centers' : 'exposant'}</b> du Forum de la Rentrée 2026.</p>
@@ -4112,7 +4138,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       const r = await pushToRole({
         title: '🔔 Test ARACOM',
         body: 'Si vous voyez cette notification, le push web fonctionne !',
-        url: process.env.NEXT_PUBLIC_BASE_URL ? `${process.env.NEXT_PUBLIC_BASE_URL}/aracom?tab=validations` : '/aracom?tab=validations',
+        url: `${getPublicBaseUrl(request)}/aracom?tab=validations`,
         tag: 'aracom-test',
       }, { role: 'aracom_admin' });
       return json(r);
@@ -4657,7 +4683,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         const lastSent = existing.last_email_sent_at ? new Date(existing.last_email_sent_at) : null;
         const cooldownMs = 60 * 60 * 1000; // 1 hour
         const canSend = send_email && (!lastSent || (Date.now() - lastSent.getTime()) > cooldownMs);
-        const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${existing.token}`;
+        const accessUrl = `${getPublicBaseUrl(request)}/access/${existing.token}`;
         if (canSend && resolvedEmail) {
           await sendAccessTokenEmail({ purpose, accessUrl, recipientEmail: resolvedEmail, org });
           await db.collection('access_tokens').updateOne({ id: existing.id }, { $set: { last_email_sent_at: new Date(), updated_at: new Date() } });
@@ -4698,7 +4724,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         updated_at: new Date(),
         created_by: ctx.userId || 'admin',
       });
-      const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tokenStr}`;
+      const accessUrl = `${getPublicBaseUrl(request)}/access/${tokenStr}`;
 
       // Send email on first creation
       if (send_email && resolvedEmail) {
@@ -4748,7 +4774,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       if (!tk) return err('Lien introuvable', 404);
       if (tk.revoked_at) return err('Lien révoqué — créez-en un nouveau', 400);
       if (!tk.email) return err('Aucun email associé à ce lien', 400);
-      const accessUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/access/${tk.token}`;
+      const accessUrl = `${getPublicBaseUrl(request)}/access/${tk.token}`;
       const orgName = tk.label || 'Forum de la Rentrée 2026';
       sendMailAuto({
         to: tk.email,
@@ -4800,7 +4826,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return { reg, org, venue };
     };
     const aracomEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'agence@aracom-conseil.fr';
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+    const baseUrl = getPublicBaseUrl(request);
     const formatDateFr = (d) => {
       const dt = new Date(d);
       return dt.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
@@ -6209,7 +6235,7 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         const v = venueById[r.venue_id];
         if (!o?.main_email) continue;
         // 🔗 Get-or-create permanent magic link to exposant's space (replaces mailto: which fails on Safari/iCloud)
-        const accessUrl = await getOrCreateExposantAccessUrl(db, o.id, o.main_email);
+        const accessUrl = await getOrCreateExposantAccessUrl(db, o.id, o.main_email, request);
         const personalizedSubject = subject
           .replaceAll('[[NOM_EXPOSANT]]', o.name || '')
           .replaceAll('[[DISCIPLINE]]', o.discipline || '')
@@ -6231,7 +6257,7 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
         personalizedBody = guardLinks(personalizedBody, accessUrl);
 
         const messageId = uuid();
-        const trackedBody = injectTracking(personalizedBody, messageId);
+        const trackedBody = injectTracking(personalizedBody, messageId, getPublicBaseUrl(request));
 
         let sendStatus = 'envoye';
         let providerId = `mock_${messageId}`;
@@ -6391,7 +6417,7 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
           id: uuid(), campaign_id: campaignId, registration_id: r.id,
           to_email: org.main_email,
           subject: '📝 Votre retour sur le Forum de la Rentrée 2026',
-          body_html: `<p>Bonjour ${org.contact_name || ''},</p><p>Merci d'avoir participé au Forum de la Rentrée 2026 !</p><p>Votre avis nous est précieux pour améliorer les prochaines éditions. Merci de prendre 2 minutes pour remplir ce court questionnaire.</p><p><a href="${process.env.NEXT_PUBLIC_BASE_URL || ''}/exposant?tab=satisfaction" style="background:#10b981;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Donner mon avis →</a></p><p>Merci encore et à l'année prochaine !<br>L'équipe ARACOM</p>`,
+          body_html: `<p>Bonjour ${org.contact_name || ''},</p><p>Merci d'avoir participé au Forum de la Rentrée 2026 !</p><p>Votre avis nous est précieux pour améliorer les prochaines éditions. Merci de prendre 2 minutes pour remplir ce court questionnaire.</p><p><a href="${getPublicBaseUrl(request)}/exposant?tab=satisfaction" style="background:#10b981;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Donner mon avis →</a></p><p>Merci encore et à l'année prochaine !<br>L'équipe ARACOM</p>`,
           send_status: 'envoye', sent_at: new Date(),
           opened_at: null, clicked_at: null, response_status: 'attente',
           provider_message_id: `mock_${uuid()}`,

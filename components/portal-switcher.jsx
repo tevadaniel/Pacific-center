@@ -6,6 +6,26 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { LogIn, Eye, Users, Search, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { getSession } from '@/lib/auth-client';
+
+// Helper fetch with auth headers (similar à @/lib/auth-client.api mais avec gestion fine d'erreur)
+async function authFetch(path, options = {}) {
+  const session = getSession();
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (session?.id) headers['x-user-id'] = session.id;
+  if (session?.role) headers['x-user-role'] = session.role;
+  // Fallback admin (homepage admin login utilise localStorage 'aracom_admin_auth' au lieu de fr26_session)
+  if (!headers['x-user-role'] && typeof window !== 'undefined') {
+    try {
+      const homeAuth = localStorage.getItem('aracom_admin_auth');
+      if (homeAuth === 'true' || homeAuth === '1') {
+        headers['x-user-role'] = 'aracom_admin';
+        headers['x-user-id'] = 'u-admin';
+      }
+    } catch {}
+  }
+  return fetch(path, { ...options, headers });
+}
 
 export default function PortalSwitcher() {
   const router = useRouter();
@@ -20,7 +40,7 @@ export default function PortalSwitcher() {
     (async () => {
       setLoading(true);
       try {
-        const r = await fetch('/api/organizations');
+        const r = await authFetch('/api/organizations');
         const list = await r.json();
         if (!cancelled) setExposants(Array.isArray(list) ? list : []);
       } catch {}
@@ -47,7 +67,7 @@ export default function PortalSwitcher() {
     }
     setOpen(false);
     try {
-      const r = await fetch(`/api/organizations/${org.id}/access-link`);
+      const r = await authFetch(`/api/organizations/${org.id}/access-link`);
       const d = await r.json();
       if (r.ok && d?.access_url) {
         win.location.href = d.access_url;

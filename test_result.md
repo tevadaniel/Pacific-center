@@ -998,6 +998,40 @@ agent_communication:
     needs_retesting: false
     status_history:
       - working: true
+
+
+  - task: "🛡️ Cohérence URL Preview vs Production — getPublicBaseUrl(request) dynamique (session 18)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "User : 'la j'ai des bug tout le temps fait les verrifcation nécéssaire avant'. Cause racine : NEXT_PUBLIC_BASE_URL était hardcodé en .env vers preview, donc tous les liens (magic links, emails, badges, tracking, push) générés en PRODUCTION pointaient vers PREVIEW. Les utilisateurs cliquaient sur un lien email reçu en prod et atterrissaient sur preview."
+      - working: true
+
+
+  - task: "🔐 Fix auth headers manquants dans PortalSwitcher (session 18)"
+    implemented: true
+    working: true
+    file: "components/portal-switcher.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Cause profonde du 'portails inaccessibles' : portal-switcher.jsx utilisait fetch() brut SANS les headers x-user-id et x-user-role, donc /api/organizations/:id/access-link retournait 403. (Toutes les autres pages utilisent api() du lib/auth-client qui injecte ces headers depuis localStorage fr26_session)."
+      - working: true
+        agent: "main"
+        comment: "✅ FIX : Création d'un helper local authFetch() qui ajoute automatiquement x-user-id / x-user-role depuis getSession() (lib/auth-client) avec fallback aracom_admin si admin a loggé via la homepage. fetch() remplacé par authFetch() pour /api/organizations et /api/organizations/:id/access-link. Vérifié E2E : logs montrent maintenant `200 in 82ms` au lieu de 403. La popup s'ouvre, navigue vers /access/<token> et l'exposant entre dans son portail."
+
+        agent: "main"
+        comment: "✅ FIX : getPublicBaseUrl(request) est désormais DYNAMIQUE et lit en priorité les headers HTTP de la requête entrante (x-forwarded-host + x-forwarded-proto), avec fallback origin → request.url → .env. Tous les usages critiques mis à jour : (a) getOrCreateExposantAccessUrl signature étendue avec request, et tous ses 3 callers passent request. (b) `process.env.NEXT_PUBLIC_BASE_URL` remplacé par `getPublicBaseUrl(request)` dans 7 endpoints (wizard/finalize emails, push test url, access-tokens listing, post-event satisfaction email, reconnection email…). (c) injectTracking accepte baseUrl optionnel. Tests curl : (1) X-Forwarded-Host=aracompacificcenters.com → access_url=https://aracompacificcenters.com/access/... ✅. (2) X-Forwarded-Host=polynesie-event-hub.preview.emergentagent.com → access_url=https://polynesie-event-hub.preview.../access/... ✅. (3) Sans header → fallback localhost (mode dev). Résultat : preview et production sont désormais 100% cohérents, peu importe la valeur de .env."
+
         agent: "main"
         comment: "✅ NOUVEAU : Le bandeau profil persistant en haut du wizard (visible à toutes les étapes >1) affiche désormais TOUS les sites réservés par l'organisation. Fonctionnalités : (a) section 'Vos N sites réservés' avec badge 'Multi-sites' quand ≥2 sites. (b) Cartes cliquables par site (venue, stand, jours, animations, status). (c) Badge 'ICI' sur le site courant. (d) Click sur autre site → switch via localStorage + redirect /inscription. (e) Bouton '+ Réserver un site supplémentaire' (toujours visible si multi-sites, ou step≥4 si solo). (f) Action /api/wizard/add-site déclenchée avec confirmation. Vérifié screenshot E2E : multi-site banner OK, switch entre Faaa et Punaauia OK, badge 'ICI' bascule, header se met à jour. Lint clean. Aucune régression sur step 1 (banner caché en step 1)."
 
