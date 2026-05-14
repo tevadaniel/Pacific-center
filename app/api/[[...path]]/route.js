@@ -3026,7 +3026,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
   <h3 style="margin:0 0 10px 0;color:#166534">🎭 Votre animation</h3>
   <div><b>Nom :</b> ${a.title}</div>
   <div><b>Type :</b> ${a.slot_type}</div>
-  <div><b>Lieu :</b> ${a.location_type === 'sur_stand' ? 'Sur stand' : 'Zone de démonstration'}</div>
+  <div><b>Lieu :</b> ${(a.location_type === 'sur_stand' || a.location_type === 'stand') ? 'Sur le stand' : 'Zone de démonstration'}</div>
   <div><b>Horaire :</b> ${a.start_time}–${a.end_time}</div>
   <div><b>Public cible :</b> ${a.target_audience || '—'}</div>
 </div>` : ''}
@@ -4064,6 +4064,12 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
           return err(`Vous n'êtes pas inscrit le ${body.day_label}. Sélectionnez ce jour à l'étape 1.`, 400);
         }
       }
+      // Normalisation : valeurs canoniques sur_stand / zone_demo (anciennes valeurs remappées)
+      const normLoc = (v) => {
+        if (v === 'sur_stand' || v === 'stand') return 'sur_stand';
+        if (v === 'zone_demo' || v === 'zone_animation' || v === 'scene' || v === 'spectacle') return 'zone_demo';
+        return 'sur_stand';
+      };
       const s = {
         id: uuid(),
         registration_id: body.registration_id,
@@ -4075,8 +4081,8 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         duration_minutes: body.duration_minutes || null,
         title: body.title || 'Animation',
         description: body.description || null,
-        slot_type: body.slot_type || 'animation', // animation, stand, zone_animation, spectacle
-        location_type: body.location_type || 'stand', // stand, zone_animation
+        slot_type: body.slot_type || 'animation',
+        location_type: normLoc(body.location_type),
         status: body.status || 'planifié',
         notes: body.notes || null,
         created_at: new Date(), updated_at: new Date(),

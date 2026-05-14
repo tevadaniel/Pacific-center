@@ -39,11 +39,18 @@ const DOC_TYPES = [
   { key: 'autre', label: 'Autre document', icon: FileText, mandatory: false },
 ];
 
+// Lieux d'animation — uniquement 2 options officielles
 const SLOT_TYPES = [
-  { value: 'stand', label: 'Sur mon stand', color: 'bg-blue-50 text-blue-700' },
-  { value: 'zone_animation', label: "Zone d'animation centrale", color: 'bg-violet-50 text-violet-700' },
-  { value: 'spectacle', label: 'Spectacle / Démonstration', color: 'bg-orange-50 text-orange-700' },
+  { value: 'sur_stand', label: 'Sur le stand',           color: 'bg-blue-50 text-blue-700' },
+  { value: 'zone_demo', label: 'Zone de démonstration',  color: 'bg-violet-50 text-violet-700' },
 ];
+
+// Normalise toute valeur historique vers une des 2 valeurs canoniques
+const normalizeLocationType = (v) => {
+  if (v === 'sur_stand' || v === 'stand') return 'sur_stand';
+  if (v === 'zone_demo' || v === 'zone_animation' || v === 'scene' || v === 'spectacle') return 'zone_demo';
+  return 'sur_stand';
+};
 
 export default function ExposantPortal() {
   const [data, setData] = useState(null);
@@ -1293,8 +1300,8 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
   }
 
   // Stand = personnel (jamais de conflit). Démo = partagé (max 1 par créneau).
-  const standSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && s.location_type === 'stand');
-  const demoSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && s.location_type === 'zone_animation');
+  const standSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && normalizeLocationType(s.location_type) === 'sur_stand');
+  const demoSlotsByDay = (day) => allSlots.filter(s => s.day_label === day && normalizeLocationType(s.location_type) === 'zone_demo');
   const myCountForDay = (day) => allSlots.filter(s => s.day_label === day && s.registration_id === registrationId).length;
 
   const standMine = (day, slot) => standSlotsByDay(day).find(s => s.start_time === slot.start && s.end_time === slot.end && s.registration_id === registrationId);
@@ -1303,7 +1310,8 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
   const demoOccupiedBy = (day, slot) => demoBookings(day, slot).find(s => s.registration_id !== registrationId);
 
   const startBooking = (day, slot, location_type) => {
-    if (location_type === 'zone_animation' && demoOccupiedBy(day, slot)) {
+    const loc = normalizeLocationType(location_type);
+    if (loc === 'zone_demo' && demoOccupiedBy(day, slot)) {
       toast.error(`Créneau déjà réservé par ${demoOccupiedBy(day, slot).organization_name}`);
       return;
     }
@@ -1311,7 +1319,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
       toast.error(`Vous avez atteint la limite de ${MAX_ANIMATION_SLOTS_PER_DAY} créneaux/jour`);
       return;
     }
-    setEditing({ day, start: slot.start, end: slot.end, location_type });
+    setEditing({ day, start: slot.start, end: slot.end, location_type: loc });
     setForm({ title: '', description: '' });
   };
 
@@ -1327,7 +1335,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
           day_label: editing.day,
           start_time: editing.start,
           end_time: editing.end,
-          duration_minutes: editing.location_type === 'zone_animation' ? 30 : 60,
+          duration_minutes: editing.location_type === 'zone_demo' ? 30 : 60,
           title: form.title,
           description: form.description,
           slot_type: editing.location_type,
@@ -1425,7 +1433,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
                       key={slot.start}
                       type="button"
                       disabled={overLimit || busy}
-                      onClick={() => startBooking(d.label, slot, 'stand')}
+                      onClick={() => startBooking(d.label, slot, 'sur_stand')}
                       className={`border rounded-md p-2 text-xs text-left transition disabled:opacity-50 disabled:cursor-not-allowed ${
                         overLimit ? 'bg-slate-50 border-slate-200' :
                         'bg-white border-slate-200 hover:bg-blue-50 hover:border-blue-400'
@@ -1478,7 +1486,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
                       key={slot.start}
                       type="button"
                       disabled={overLimit || busy}
-                      onClick={() => startBooking(d.label, slot, 'zone_animation')}
+                      onClick={() => startBooking(d.label, slot, 'zone_demo')}
                       className={`border rounded-md p-2 text-[11px] text-left transition disabled:opacity-50 disabled:cursor-not-allowed ${
                         overLimit ? 'bg-slate-50 border-slate-200' :
                         'bg-white border-slate-200 hover:bg-orange-50 hover:border-orange-400'
@@ -1504,10 +1512,10 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
           <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                {editing.location_type === 'stand' ? <span className="w-3 h-3 rounded-full bg-blue-500" /> : <span className="w-3 h-3 rounded-full bg-orange-500" />}
+                {editing.location_type === 'sur_stand' ? <span className="w-3 h-3 rounded-full bg-blue-500" /> : <span className="w-3 h-3 rounded-full bg-orange-500" />}
                 Réserver {editing.start} → {editing.end}
               </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">{EVENT_DATES.find(d => d.label === editing.day)?.display} · {editing.location_type === 'stand' ? 'Sur votre stand' : 'Zone de démonstration centrale'}</p>
+              <p className="text-xs text-slate-500 mt-1">{EVENT_DATES.find(d => d.label === editing.day)?.display} · {editing.location_type === 'sur_stand' ? 'Sur votre stand' : 'Zone de démonstration'}</p>
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
@@ -1520,7 +1528,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
               </div>
               <div className="flex gap-2 justify-end pt-2">
                 <Button variant="ghost" onClick={() => setEditing(null)} disabled={busy}>Annuler</Button>
-                <Button onClick={submitBooking} disabled={busy} className={`gap-2 ${editing.location_type === 'stand' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700'}`}><CheckCircle2 className="w-4 h-4" /> {busy ? 'Réservation…' : 'Réserver'}</Button>
+                <Button onClick={submitBooking} disabled={busy} className={`gap-2 ${editing.location_type === 'sur_stand' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700'}`}><CheckCircle2 className="w-4 h-4" /> {busy ? 'Réservation…' : 'Réserver'}</Button>
               </div>
             </CardContent>
           </Card>

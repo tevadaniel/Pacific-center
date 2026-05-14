@@ -1125,7 +1125,7 @@ function FicheExposant({ id, onClose }) {
                           </div>
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {s.slot_type && <Badge variant="outline" className="text-[10px] border-violet-300 text-violet-700">{s.slot_type}</Badge>}
-                            {s.location_type && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700">{s.location_type === 'sur_stand' || s.location_type === 'stand' ? 'Sur stand' : 'Zone démo'}</Badge>}
+                            {s.location_type && <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700">{(s.location_type === 'zone_demo' || s.location_type === 'zone_animation' || s.location_type === 'scene' || s.location_type === 'spectacle') ? 'Zone démo' : 'Sur le stand'}</Badge>}
                             {s.target_audience && <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">{s.target_audience}</Badge>}
                           </div>
                           {s.description && (
@@ -6132,8 +6132,10 @@ function AnimationsView() {
         const a = filteredSlots[i], b = filteredSlots[j];
         if (a.venue_id !== b.venue_id) continue;
         if (a.day_label !== b.day_label) continue;
-        // Même lieu (location_type+stand si applicable) = conflit potentiel uniquement si même zone partagée
-        if (a.location_type === 'stand' && b.location_type === 'stand' && a.stand_code !== b.stand_code) continue;
+        // Même lieu : "sur le stand" est personnel (jamais de conflit) — "zone démo" est partagée
+        const aLoc = (a.location_type === 'sur_stand' || a.location_type === 'stand') ? 'sur_stand' : 'zone_demo';
+        const bLoc = (b.location_type === 'sur_stand' || b.location_type === 'stand') ? 'sur_stand' : 'zone_demo';
+        if (aLoc === 'sur_stand' && bLoc === 'sur_stand' && a.stand_code !== b.stand_code) continue;
         // Chevauchement
         const aS = (a.start_time || '00:00'), aE = (a.end_time || '00:00');
         const bS = (b.start_time || '00:00'), bE = (b.end_time || '00:00');
@@ -6350,6 +6352,13 @@ function AnimSlotsTable({ slots, conflicts, statusBadge, onEdit, onDelete, onOpe
 }
 
 function EditAnimationDialog({ slot, onClose, onSave }) {
+  // Normalisation : on accepte les anciennes valeurs en lecture mais on remap vers les 2 valeurs canoniques
+  const normalizeLocation = (v) => {
+    if (v === 'sur_stand' || v === 'stand') return 'sur_stand';
+    if (v === 'zone_demo' || v === 'zone_animation' || v === 'scene' || v === 'spectacle') return 'zone_demo';
+    // 'exterieur', 'autre' ou autre → par défaut "sur le stand"
+    return 'sur_stand';
+  };
   const [form, setForm] = useState({
     title: slot.title || '',
     slot_type: slot.slot_type || 'animation',
@@ -6357,7 +6366,7 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
     end_time: slot.end_time || '10:00',
     day_label: slot.day_label || 'vendredi',
     status: slot.status || 'planifié',
-    location_type: slot.location_type || 'stand',
+    location_type: normalizeLocation(slot.location_type),
     description: slot.description || '',
   });
 
@@ -6426,10 +6435,8 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
             <Select value={form.location_type} onValueChange={v => setForm({ ...form, location_type: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="stand">Sur le stand</SelectItem>
-                <SelectItem value="scene">Scène centrale</SelectItem>
-                <SelectItem value="exterieur">Extérieur</SelectItem>
-                <SelectItem value="autre">Autre</SelectItem>
+                <SelectItem value="sur_stand">Sur le stand</SelectItem>
+                <SelectItem value="zone_demo">Zone de démonstration</SelectItem>
               </SelectContent>
             </Select>
           </div>
