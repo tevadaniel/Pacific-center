@@ -2182,7 +2182,7 @@ export async function POST(request, { params }) {
         }
         const ok = await bcrypt.compare(password, org.access_password_hash);
         if (!ok) {
-          return json({ ok: false, error: 'Mot de passe incorrect', fallback_magic_link: true }, { status: 401 });
+          return json({ ok: false, error: 'Mot de passe incorrect', fallback_magic_link: true }, 401);
         }
         // Find or build a user-like object for the session (registration owner)
         const reg = await db.collection('registrations').findOne({ organization_id: org.id });
