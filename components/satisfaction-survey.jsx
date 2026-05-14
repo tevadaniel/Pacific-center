@@ -103,9 +103,18 @@ export default function SatisfactionSurvey({ organizationId, organizationName, r
       <Card className="border-emerald-200 bg-emerald-50/40">
         <CardContent className="p-8 text-center">
           <CheckCircle2 className="w-16 h-16 mx-auto text-emerald-600 mb-3" />
-          <h3 className="font-serif text-2xl text-aracom-black mb-1">Merci pour votre retour !</h3>
+          <h3 className="text-2xl font-bold text-aracom-black mb-1">Merci pour votre retour !</h3>
           <p className="text-sm text-slate-600">Vos réponses ont été enregistrées le {existing ? new Date(existing.submitted_at).toLocaleString('fr-FR') : 'à l\'instant'}.</p>
           <p className="text-xs text-slate-500 mt-3">L&apos;équipe ARACOM exploite ces retours pour améliorer la prochaine édition.</p>
+          <a
+            href={`/api/exposant/documents/questionnaire/${encodeURIComponent(organizationId)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-md bg-aracom-black text-aracom-beige-pale text-sm font-medium hover:bg-aracom-black/90 transition"
+            data-testid="download-questionnaire-filled"
+          >
+            📋 Télécharger mes réponses (PDF)
+          </a>
         </CardContent>
       </Card>
     );

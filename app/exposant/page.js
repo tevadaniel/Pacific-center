@@ -178,7 +178,7 @@ export default function ExposantPortal() {
                     <div className="text-xs text-slate-600">Convention & guide personnalisés avec vos données en temps réel.</div>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <a
                     href={`/api/exposant/documents/convention/${r.id}`}
                     target="_blank"
@@ -198,6 +198,16 @@ export default function ExposantPortal() {
                   >
                     <BookOpen className="w-4 h-4" />
                     Mon guide exposant
+                  </a>
+                  <a
+                    href={`/api/exposant/documents/questionnaire-blank/${r.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white border border-aracom-gold/40 text-aracom-black text-sm font-medium hover:bg-aracom-beige-pale transition"
+                    data-testid="download-questionnaire-blank"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Questionnaire vierge
                   </a>
                 </div>
               </div>
