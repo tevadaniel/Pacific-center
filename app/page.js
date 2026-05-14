@@ -84,7 +84,7 @@ export default function HomePage() {
           <div className="text-center space-y-2">
             <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Bienvenue</h1>
             <p className="text-aracom-gold/80 text-sm">
-              Une seule connexion pour <b className="text-aracom-beige-pale">tous</b> : exposants, ARACOM, Pacific Centers.
+              Espace officiel du <b className="text-aracom-beige-pale">Forum de la Rentrée 2026</b> · organisé par ARACOM.
             </p>
           </div>
 
