@@ -431,11 +431,11 @@ function DashboardView({ onGoto }) {
               {extended.at_risk.length === 0 ? <p className="text-sm text-slate-400">Aucun dossier à risque 👍</p> : extended.at_risk.map(r => (
                 <div key={r.id} className="border rounded-md p-3 flex items-center gap-3 hover:bg-slate-50 transition-colors">
                   <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 font-bold flex items-center justify-center text-xs">{r.risk_score}</div>
-                  <button onClick={() => openExposant(r.id)} className="flex-1 min-w-0 text-left">
+                  <div onClick={() => openExposant(r.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openExposant(r.id)} className="flex-1 min-w-0 text-left cursor-pointer">
                     <div className="flex items-center gap-2"><AiInsightTrigger registration={r} size="xs" /><span className="font-medium truncate hover:text-blue-600 hover:underline">{r.organization_name}</span><Badge variant="secondary" className="text-[10px] shrink-0">{r.completion_percent}%</Badge></div>
                     <div className="text-xs text-slate-500">{r.venue_name} · {r.discipline}</div>
                     <div className="flex flex-wrap gap-1 mt-1">{r.missing.map(m => <Badge key={m} className="text-[10px] bg-rose-100 text-rose-700 border-rose-200">❌ {m}</Badge>)}</div>
-                  </button>
+                  </div>
                   <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => openExposant(r.id)}>Ouvrir</Button>
                 </div>
               ))}
