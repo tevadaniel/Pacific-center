@@ -2039,6 +2039,50 @@ export async function POST(request, { params }) {
       const { email } = body;
       const cleanEmail = String(email || '').trim().toLowerCase();
       if (!cleanEmail || !/^[^@]+@[^@]+\.[^@]+$/.test(cleanEmail)) return err('Email invalide', 400);
+
+      // 🔍 1) Cherche d'abord dans users (admin / pacific_centers)
+      const user = await db.collection('users').findOne({ email: cleanEmail });
+      if (user) {
+        const purpose = user.role_code === 'aracom_admin' ? 'aracom_admin'
+                      : user.role_code === 'pacific_centers_readonly' ? 'pacific_centers'
+                      : 'exposant';
+        // Génère/réutilise un token permanent pour ce user
+        let tk = await db.collection('access_tokens').findOne({ email: cleanEmail, purpose, revoked_at: null });
+        if (!tk) {
+          const token = require('crypto').randomBytes(32).toString('hex');
+          tk = { id: uuid(), token, email: cleanEmail, user_id: user._id?.toString() || user.id || null,
+                 organization_id: null, purpose, role_code: user.role_code,
+                 created_at: new Date(), revoked_at: null };
+          await db.collection('access_tokens').insertOne(tk);
+        }
+        const url = `${getPublicBaseUrl(request)}/access/${tk.token}`;
+        try {
+          const { sendMailAuto } = await import('@/lib/mail-config');
+          const portalLabel = user.role_code === 'aracom_admin' ? 'Cockpit ARACOM'
+                            : user.role_code === 'pacific_centers_readonly' ? 'Portail Pacific Centers'
+                            : 'Espace exposant';
+          await sendMailAuto({
+            to: cleanEmail,
+            subject: `🔐 Votre lien de connexion — ${portalLabel}`,
+            html: `<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#F7F4EF">
+              <h2 style="color:#231F20">Bonjour ${user.full_name || ''},</h2>
+              <p>Voici votre lien d'accès personnel au <b>${portalLabel}</b> :</p>
+              <p style="margin:32px 0;text-align:center">
+                <a href="${url}" style="background:#231F20;color:#C9BC9E;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Accéder à mon espace</a>
+              </p>
+              <p style="color:#6b6258;font-size:13px">Ce lien est strictement personnel. Conservez-le précieusement.</p>
+              <hr style="border:0;border-top:1px solid #D5CAAF;margin:24px 0" />
+              <p style="color:#6b6258;font-size:12px">Forum de la Rentrée 2026 · ARACOM Conseil</p>
+            </div>`,
+          });
+        } catch (e) {
+          console.error('[magic-link] mail error (user):', e.message);
+          return err('Impossible d\'envoyer le lien pour le moment', 500);
+        }
+        return json({ ok: true, sent: true, role: user.role_code });
+      }
+
+      // 🔍 2) Sinon cherche dans organizations (exposant standard)
       const org = await db.collection('organizations').findOne({ main_email: cleanEmail });
       if (!org) {
         // Réponse volontairement générique pour ne pas leaker l'existence d'un compte
@@ -2046,21 +2090,20 @@ export async function POST(request, { params }) {
       }
       // Génère/récupère le magic link
       const url = await getOrCreateExposantAccessUrl(db, org.id, cleanEmail, request);
-      // Envoie l'email via sendMailAuto (respecte le mode TEST)
       try {
         const { sendMailAuto } = await import('@/lib/mail-config');
         await sendMailAuto({
           to: cleanEmail,
           subject: '🔐 Votre lien de connexion — Forum de la Rentrée 2026',
-          html: `<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px">
-            <h2 style="color:#1e40af">Bonjour ${org.contact_name || org.name || ''},</h2>
+          html: `<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#F7F4EF">
+            <h2 style="color:#231F20">Bonjour ${org.contact_name || org.name || ''},</h2>
             <p>Voici votre lien d'accès personnel à votre espace exposant :</p>
             <p style="margin:32px 0;text-align:center">
-              <a href="${url}" style="background:#1e40af;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Accéder à mon espace</a>
+              <a href="${url}" style="background:#231F20;color:#C9BC9E;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Accéder à mon espace</a>
             </p>
-            <p style="color:#64748b;font-size:13px">Ce lien est strictement personnel. Conservez-le précieusement.</p>
-            <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0" />
-            <p style="color:#94a3b8;font-size:12px">Forum de la Rentrée 2026 · ARACOM Conseil</p>
+            <p style="color:#6b6258;font-size:13px">Ce lien est strictement personnel. Conservez-le précieusement.</p>
+            <hr style="border:0;border-top:1px solid #D5CAAF;margin:24px 0" />
+            <p style="color:#6b6258;font-size:12px">Forum de la Rentrée 2026 · ARACOM Conseil</p>
           </div>`,
         });
         await db.collection('access_tokens').updateOne(
@@ -2071,7 +2114,7 @@ export async function POST(request, { params }) {
         console.error('[magic-link] mail error:', e.message);
         return err('Impossible d\'envoyer le lien pour le moment', 500);
       }
-      return json({ ok: true, sent: true });
+      return json({ ok: true, sent: true, role: 'exposant' });
     }
 
 

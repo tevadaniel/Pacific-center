@@ -77,11 +77,6 @@ module.exports = {
                                 orange:   '#E8500A'
                         }
                 },
-                fontFamily: {
-                        serif: ['Cormorant Garamond', 'Georgia', 'serif'],
-                        sans:  ['Josefin Sans', 'system-ui', 'sans-serif'],
-                        mono:  ['source-code-pro', 'Menlo', 'monospace']
-                },
                 borderRadius: {
                         lg: 'var(--radius)',
                         md: 'calc(var(--radius) - 2px)',

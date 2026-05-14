@@ -1,12 +1,9 @@
-/* @charset must be first if present */
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Josefin+Sans:wght@200;300;400;500;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* =====================================================================
-   🎨 CHARTE GRAPHIQUE ARACOM 2025
+   🎨 CHARTE GRAPHIQUE ARACOM 2025 (couleurs uniquement — typo système)
    ----------------------------------------------------------------------
    Palette officielle :
    • Noir          #231F20 — Principal (60%)
@@ -15,22 +12,18 @@
    • Beige Fond    #EDE8DC — Fonds champs
    • Beige Pâle    #F7F4EF — Fond page
    • Orange        #E8500A — Accent rare (5% max)
-   Typographie :
-   • Cormorant Garamond — titres / accents (300-600)
-   • Josefin Sans       — corps / interface (200-400)
+   Typographie : système / Inter (lisibilité prioritaire).
    ===================================================================== */
 
 @layer base {
   :root {
-    /* ─── Couleurs ARACOM (HSL pour shadcn) ─── */
-    --aracom-black-hsl: 351 4% 13%;       /* #231F20 */
-    --aracom-gold-hsl: 39 24% 70%;         /* #C9BC9E */
-    --aracom-beige-clair-hsl: 42 30% 76%;  /* #D5CAAF */
-    --aracom-beige-fond-hsl: 42 28% 89%;   /* #EDE8DC */
-    --aracom-beige-pale-hsl: 40 27% 95%;   /* #F7F4EF */
-    --aracom-orange-hsl: 18 91% 47%;       /* #E8500A */
+    --aracom-black-hsl: 351 4% 13%;
+    --aracom-gold-hsl: 39 24% 70%;
+    --aracom-beige-clair-hsl: 42 30% 76%;
+    --aracom-beige-fond-hsl: 42 28% 89%;
+    --aracom-beige-pale-hsl: 40 27% 95%;
+    --aracom-orange-hsl: 18 91% 47%;
 
-    /* ─── Shadcn variables remappées ARACOM ─── */
     --background: var(--aracom-beige-pale-hsl);
     --foreground: var(--aracom-black-hsl);
     --card: 0 0% 100%;
@@ -65,7 +58,6 @@
     --sidebar-border: 351 4% 22%;
     --sidebar-ring: var(--aracom-gold-hsl);
   }
-
   .dark {
     --background: var(--aracom-black-hsl);
     --foreground: var(--aracom-beige-pale-hsl);
@@ -98,36 +90,14 @@
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
+  * { @apply border-border; }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Josefin Sans', system-ui, -apple-system, sans-serif;
-    font-weight: 300;
-    letter-spacing: 0.01em;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  /* ─── Titres en Cormorant Garamond ─── */
-  h1, h2, h3, .font-serif {
-    font-family: 'Cormorant Garamond', Georgia, serif;
-    font-weight: 500;
-    letter-spacing: 0.005em;
-  }
-  h1 { font-weight: 600; }
-  /* ─── Garde Josefin Sans pour les UI (boutons, labels, badges, tabs) ─── */
-  button, label, input, select, textarea,
-  [role="tab"], [role="menuitem"], .font-sans-ui {
-    font-family: 'Josefin Sans', system-ui, sans-serif;
-  }
-  /* ─── Mono / code (inchangé) ─── */
-  code, pre, .font-mono {
-    font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
-  }
 }
 
-/* ─── Classes utilitaires ARACOM ─── */
 @layer utilities {
   .text-aracom-black     { color: #231F20; }
   .text-aracom-gold      { color: #C9BC9E; }
@@ -140,25 +110,6 @@
   .bg-aracom-orange      { background-color: #E8500A; }
   .border-aracom-gold    { border-color: #C9BC9E; }
   .border-aracom-beige   { border-color: #D5CAAF; }
-
-  /* Gradient signature ARACOM (utilisé sur hero / CTA) */
-  .bg-aracom-gradient {
-    background: linear-gradient(135deg, #231F20 0%, #2d2829 100%);
-  }
-  .bg-aracom-gradient-gold {
-    background: linear-gradient(135deg, #C9BC9E 0%, #D5CAAF 100%);
-  }
+  .bg-aracom-gradient    { background: linear-gradient(135deg, #231F20 0%, #2d2829 100%); }
+  .bg-aracom-gradient-gold { background: linear-gradient(135deg, #C9BC9E 0%, #D5CAAF 100%); }
 }
-
-/* Logo App helpers (legacy, conservés) */
-.App { text-align: center; }
-.App-logo { height: 40vmin; pointer-events: none; }
-.App-header {
-  background-color: #231F20;
-  min-height: 100vh;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: #F7F4EF;
-}
-.App-link { color: #C9BC9E; }
