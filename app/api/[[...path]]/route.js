@@ -708,6 +708,7 @@ export async function GET(request, { params }) {
       return json({ response: resp || null });
     }
 
+
     // 📊 Admin : liste toutes les réponses satisfaction
     if (route === 'admin/satisfaction-responses') {
       const ctx = getUserContext(request);
@@ -2342,6 +2343,13 @@ export async function POST(request, { params }) {
     // 📝 EXPOSANT — Soumettre les réponses du questionnaire de satisfaction
     if (route === 'exposant/satisfaction') {
       const ctx = getUserContext(request);
+      // 🔒 Vérifier que le questionnaire est ouvert par l'admin (sauf admin)
+      if (ctx.role !== 'aracom_admin') {
+        const setting = await db.collection('app_settings').findOne({ key: 'post_event_status' });
+        if (!setting?.unlocked && !setting?.value) {
+          return err("Le questionnaire de satisfaction n'est pas encore ouvert. Vous serez notifié(e) par ARACOM quand il sera disponible.", 403);
+        }
+      }
       const orgId = body?.organization_id || ctx.organization_id;
       if (!orgId) return err('organization_id requis', 400);
       // Données structurées

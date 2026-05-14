@@ -164,52 +164,94 @@ export default function ExposantPortal() {
           />
         )}
 
-        {/* 📄 Bandeau "Mes documents officiels" — téléchargement Convention + Guide en PDF */}
+        {/* 📄 Bandeau "Mes documents officiels" — exhaustif (auto-générés + reçu) */}
         {r?.id && (
           <Card className="border-aracom-gold/40 bg-gradient-to-br from-aracom-beige-pale to-white">
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-md bg-aracom-black flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-aracom-gold" />
-                  </div>
-                  <div>
-                    <div className="font-serif text-lg text-aracom-black">Mes documents officiels</div>
-                    <div className="text-xs text-slate-600">Convention & guide personnalisés avec vos données en temps réel.</div>
-                  </div>
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-md bg-aracom-black flex items-center justify-center">
+                  <FileText className="w-6 h-6 text-aracom-gold" />
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  <a
-                    href={`/api/exposant/documents/convention/${r.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-aracom-black text-aracom-beige-pale text-sm font-medium hover:bg-aracom-black/90 transition"
-                    data-testid="download-convention"
-                  >
-                    <Download className="w-4 h-4" />
-                    Télécharger ma convention
-                  </a>
-                  <a
-                    href={`/api/exposant/documents/guide/${r.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-aracom-gold text-aracom-black text-sm font-medium hover:bg-aracom-beige-clair transition"
-                    data-testid="download-guide"
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    Mon guide exposant
-                  </a>
-                  <a
-                    href={`/api/exposant/documents/questionnaire-blank/${r.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white border border-aracom-gold/40 text-aracom-black text-sm font-medium hover:bg-aracom-beige-pale transition"
-                    data-testid="download-questionnaire-blank"
-                  >
-                    <FileText className="w-4 h-4" />
-                    Questionnaire vierge
-                  </a>
+                <div className="flex-1">
+                  <div className="font-serif text-lg text-aracom-black">Mes documents officiels</div>
+                  <div className="text-xs text-slate-600">PDFs générés automatiquement avec vos données. Téléchargez, signez et déposez ci-dessous l&apos;assurance et la convention signée.</div>
                 </div>
+              </div>
+
+              {/* Ligne 1 — PDFs auto-générés (toujours dispo) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <a
+                  href={`/api/exposant/documents/convention/${r.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center gap-3 p-3 rounded-lg bg-aracom-black text-aracom-beige-pale hover:bg-aracom-black/90 transition shadow-sm"
+                  data-testid="download-convention"
+                >
+                  <div className="w-9 h-9 rounded-md bg-aracom-gold/20 flex items-center justify-center">
+                    <FileText className="w-4 h-4 text-aracom-gold" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] uppercase tracking-wider text-aracom-gold/70">Convention</div>
+                    <div className="text-sm font-medium truncate">Convention de participation</div>
+                  </div>
+                  <Download className="w-4 h-4 text-aracom-gold opacity-70 group-hover:opacity-100" />
+                </a>
+
+                <a
+                  href={`/api/exposant/documents/guide/${r.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center gap-3 p-3 rounded-lg bg-aracom-gold text-aracom-black hover:bg-aracom-beige-clair transition shadow-sm"
+                  data-testid="download-guide"
+                >
+                  <div className="w-9 h-9 rounded-md bg-aracom-black/15 flex items-center justify-center">
+                    <BookOpen className="w-4 h-4 text-aracom-black" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] uppercase tracking-wider text-aracom-black/70">Guide</div>
+                    <div className="text-sm font-medium truncate">Guide de l&apos;exposant</div>
+                  </div>
+                  <Download className="w-4 h-4 text-aracom-black opacity-70 group-hover:opacity-100" />
+                </a>
+
+                {/* Reçu de caution : visible si caution reçue (sinon état grisé) */}
+                {cautionReceiptDoc ? (
+                  <a
+                    href={`/api/documents/${cautionReceiptDoc.id}/download`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group flex items-center gap-3 p-3 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition shadow-sm"
+                    data-testid="download-receipt"
+                  >
+                    <div className="w-9 h-9 rounded-md bg-white/15 flex items-center justify-center">
+                      <Wallet className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] uppercase tracking-wider text-white/70">Reçu officiel</div>
+                      <div className="text-sm font-medium truncate">Reçu de caution</div>
+                    </div>
+                    <Download className="w-4 h-4 opacity-70 group-hover:opacity-100" />
+                  </a>
+                ) : (
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-100 text-slate-500 border border-dashed border-slate-300">
+                    <div className="w-9 h-9 rounded-md bg-white flex items-center justify-center">
+                      <Wallet className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400">En attente</div>
+                      <div className="text-sm font-medium truncate">Reçu de caution</div>
+                    </div>
+                    <Lock className="w-4 h-4 text-slate-400" />
+                  </div>
+                )}
+              </div>
+
+              <div className="text-[11px] text-slate-500 pt-2 border-t border-aracom-gold/15">
+                💡 Pour déposer votre <b>convention signée</b>, votre <b>attestation d&apos;assurance</b> ou tout autre document, allez dans l&apos;onglet
+                <button
+                  onClick={() => setActiveTab('docs')}
+                  className="ml-1 text-aracom-orange underline-offset-4 hover:underline font-medium"
+                >Documents</button>.
               </div>
             </CardContent>
           </Card>
