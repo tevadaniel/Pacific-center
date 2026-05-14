@@ -2111,6 +2111,102 @@ export async function POST(request, { params }) {
     }
 
     // 🌐 Self-register pour le tunnel public (création registration + organization vides)
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 🔐 LOGIN PAR MOT DE PASSE UNIFIÉ (email + password)
+    //    - Admin ARACOM : mot de passe universel (UNIVERSAL_ACCESS_CODE)
+    //    - Exposant : mot de passe créé après magic link (bcrypt)
+    //    - Pacific Centers : NON autorisé → magic link uniquement
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (route === 'auth/password-login') {
+      const { email, password } = body || {};
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      if (!cleanEmail || !/^[^@]+@[^@]+\.[^@]+$/.test(cleanEmail)) return err('Email invalide', 400);
+      if (!password) return err('Mot de passe requis', 400);
+
+      const UNIVERSAL_PWD = process.env.UNIVERSAL_ACCESS_CODE || 'Projetaracom12';
+
+      // 🔍 1) Cherche d'abord dans users (admin / pacific_centers)
+      const user = await db.collection('users').findOne({ email: cleanEmail });
+      if (user) {
+        // 🎯 ADMIN ARACOM → mot de passe universel
+        if (user.role_code === 'aracom_admin') {
+          if (password !== UNIVERSAL_PWD) {
+            return json({ ok: false, error: 'Mot de passe incorrect', fallback_magic_link: false }, 401);
+          }
+          delete user.password; delete user._id;
+          return json({ ok: true, user, organization: null, redirect: '/aracom', method: 'admin_password' });
+        }
+        // 🚫 PACIFIC CENTERS → pas de password login, magic link uniquement
+        if (user.role_code === 'pacific_centers_readonly') {
+          return json({
+            ok: false,
+            error: 'L\'accès Pacific Centers se fait uniquement par lien envoyé par email.',
+            requires_magic_link: true,
+            fallback_magic_link: true,
+          }, 403);
+        }
+        // 🎯 Exposant lié à un user (rare cas) → check sa password via org
+        if (user.organization_id) {
+          const bcrypt = require('bcryptjs');
+          const org = await db.collection('organizations').findOne({ id: user.organization_id });
+          if (org?.access_password_hash) {
+            const ok = await bcrypt.compare(password, org.access_password_hash);
+            if (ok) {
+              delete user.password; delete user._id; delete org._id;
+              return json({ ok: true, user, organization: org, redirect: '/exposant', method: 'exposant_password' });
+            }
+            return json({ ok: false, error: 'Mot de passe incorrect', fallback_magic_link: true }, 401);
+          }
+        }
+        // user existe mais pas de password configuré
+        return json({
+          ok: false,
+          error: 'Aucun mot de passe défini pour cet email. Recevez un lien magique pour en créer un.',
+          no_password_set: true,
+          fallback_magic_link: true,
+        }, 404);
+      }
+
+      // 🔍 2) Sinon cherche dans organizations (exposant standard via main_email)
+      const org = await db.collection('organizations').findOne({ main_email: cleanEmail });
+      if (org) {
+        const bcrypt = require('bcryptjs');
+        if (!org.access_password_hash) {
+          return json({
+            ok: false,
+            error: 'Aucun mot de passe défini pour ce compte. Recevez un lien magique pour en créer un.',
+            no_password_set: true,
+            fallback_magic_link: true,
+          }, 404);
+        }
+        const ok = await bcrypt.compare(password, org.access_password_hash);
+        if (!ok) {
+          return json({ ok: false, error: 'Mot de passe incorrect', fallback_magic_link: true }, { status: 401 });
+        }
+        // Find or build a user-like object for the session (registration owner)
+        const reg = await db.collection('registrations').findOne({ organization_id: org.id });
+        const sessionUser = {
+          id: `exp-${org.id}`,
+          email: cleanEmail,
+          name: org.contact_name || org.name,
+          full_name: org.contact_name || org.name,
+          role_code: 'exposant',
+          organization_id: org.id,
+          registration_id: reg?.id || null,
+        };
+        delete org._id;
+        return json({ ok: true, user: sessionUser, organization: org, redirect: '/exposant', method: 'exposant_password' });
+      }
+
+      // 🔒 Email inconnu — réponse générique (sans leak d'existence)
+      return json({
+        ok: false,
+        error: 'Identifiants invalides',
+        fallback_magic_link: false,
+      }, 401);
+    }
+
     // 🪄 Magic link exposant — envoi par email
     if (route === 'auth/request-magic-link') {
       const { email } = body;

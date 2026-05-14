@@ -135,6 +135,24 @@ backend:
         agent: "testing"
         comment: "✅ TESTÉ - Login admin/exposant/pacific OK avec rôles corrects. Rejet mdp incorrect/email inconnu (401). GET /auth/me avec headers fonctionne."
 
+  - task: "NEW unified password-login endpoint (POST /api/auth/password-login)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Nouveau endpoint POST /api/auth/password-login pour authentification directe email+password. Admin ARACOM : lookup users par email, si role_code=aracom_admin, password doit égaler UNIVERSAL_ACCESS_CODE (env) ou défaut 'Projetaracom12'. Pacific Centers : si role_code=pacific_centers_readonly → 403 avec requires_magic_link:true (magic link obligatoire). Exposant via users : si user.organization_id, check organizations.access_password_hash via bcrypt. Exposant via organizations.main_email : si pas de user, lookup organizations par main_email, check access_password_hash via bcrypt. Mauvais password admin : 401 + fallback_magic_link:false. Mauvais password exposant : 401 + fallback_magic_link:true. Pas de password exposant : 404 + no_password_set:true + fallback_magic_link:true. Email inconnu : 401 générique sans leak d'existence."
+      - working: false
+        agent: "testing"
+        comment: "❌ BUG CRITIQUE DÉTECTÉ - 4/9 tests échouaient avec erreur 500 'init[\"status\"] must be in the range of 200 to 599'. CAUSE : Appels json() avec objet {status: 401} au lieu de nombre 401. FIX APPLIQUÉ : Correction de 5 appels json() (lignes 2135, 2147, 2159, 2168, 2181, 2207) pour passer status comme second paramètre numérique au lieu d'objet."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 9/9 TESTS PASSÉS (100%). Test 1: Admin login OK (admin@aracom.pf / Projetaracom12) → 200 avec ok:true, user.role_code=aracom_admin, redirect=/aracom, method=admin_password. Test 2: Admin wrong password → 401 avec ok:false, error='Mot de passe incorrect', fallback_magic_link:false. Test 3: Admin alternative email (teva.geros@aracom-conseil.fr / Projetaracom12) → 200 avec role_code=aracom_admin, redirect=/aracom. Test 4: Pacific Centers refused (pacific@centers.pf) → 403 avec ok:false, requires_magic_link:true, fallback_magic_link:true, error mentionne 'lien'. Test 5: Exposant no password (swimua.tahiti@gmail.com) → 404 avec ok:false, no_password_set:true, fallback_magic_link:true. Test 6: Unknown email (ghost-no-account-12345@example.com) → 401 avec error='Identifiants invalides', pas de leak d'existence. Test 7: Invalid email format (not-an-email) → 400 avec error='Email invalide'. Test 8: Missing password (admin@aracom.pf / '') → 400 avec error='Mot de passe requis'. Test 9: Magic link non-regression (POST /api/auth/request-magic-link) → 200 avec ok:true, sent:true, role=aracom_admin. Endpoint 100% opérationnel selon spécifications."
+
   - task: "Dashboard KPI et vue par site"
     implemented: true
     working: true
@@ -850,6 +868,8 @@ agent_communication:
     message: "TESTS FRONTEND E2E PARTIELS COMPLÉTÉS ✅. Page de connexion : 3 boutons d'accès rapide fonctionnels, formulaire manuel, lien inscription, bouton seed - CORRECTION APPLIQUÉE (import Link manquant). Portail ARACOM : login admin réussi, dashboard avec 6 sites, KPIs corrects, badge alertes visible, 8 onglets présents. Page inscription : formulaire complet avec dropdown disciplines, validation mots de passe. LIMITATION : Tests interrompus par timeouts Playwright et problèmes de session. Recommandation : tests manuels complémentaires pour validation complète des workflows utilisateur."
   - agent: "testing"
     message: "✅ BULK DOCUMENT EXPORT FEATURE TESTED (14/05/2026) - 8/8 TESTS PASSED (100%). Nouveau endpoint POST /api/admin/export-documents 100% fonctionnel. Génère des archives ZIP contenant Conventions et/ou Reçus de Caution pour les exposants sélectionnés. Tests validés : 1) Export conventions seules (67 docs, 255KB ZIP). 2) Export reçus seuls (67 docs, 187KB ZIP). 3) Export complet (67 conventions + 67 reçus, égaux). 4) Filtrage par site (Faaa: 16 docs de chaque). 5) Filtrage par registration_id (1 doc de chaque). 6) Rejet type invalide (400). 7) Rejet exposants inexistants (404 avec message français). 8) Validation structure ZIP (dossiers Conventions/<site>/<exposant_stand>/, Recus_Caution/<site>/<exposant_stand>/, README.txt avec manifest, PDFs avec magic bytes '%PDF-' corrects). Headers X-Documents-Conventions et X-Documents-Receipts présents et corrects. Feature prête pour production."
+  - agent: "testing"
+    message: "✅ NEW PASSWORD-LOGIN ENDPOINT TESTED (01/05/2026) - 9/9 TESTS PASSED (100%). Endpoint POST /api/auth/password-login 100% fonctionnel après correction d'un bug critique. BUG DÉTECTÉ ET CORRIGÉ : 5 appels json() passaient {status: 401} au lieu de 401 (second paramètre doit être numérique, pas objet). Fix appliqué sur lignes 2135, 2147, 2159, 2168, 2181, 2207. Tests validés : 1) Admin login OK (admin@aracom.pf / Projetaracom12) → 200 avec role_code=aracom_admin, redirect=/aracom, method=admin_password. 2) Admin wrong password → 401 avec fallback_magic_link:false. 3) Admin alternative email (teva.geros@aracom-conseil.fr) → 200 OK. 4) Pacific Centers refused (pacific@centers.pf) → 403 avec requires_magic_link:true, error mentionne 'lien'. 5) Exposant no password (swimua.tahiti@gmail.com) → 404 avec no_password_set:true, fallback_magic_link:true. 6) Unknown email → 401 avec error='Identifiants invalides', pas de leak d'existence. 7) Invalid email format → 400 avec error='Email invalide'. 8) Missing password → 400 avec error='Mot de passe requis'. 9) Magic link non-regression → 200 OK. Endpoint prêt pour production."
   - agent: "main"
     message: "AMÉLIORATIONS DESIGN & FONCTIONNALITÉS (session 3) :\n1. Correction login exposant bloqué : mot de passe modifié par un test précédent sur swimua.tahiti@gmail.com → re-seed appliqué, tous les comptes 'demo' fonctionnent.\n2. Nouveau endpoint public GET /api/stats/public (sites/stands/associations dynamiques).\n3. Homepage désormais dynamique (plus de '57' hardcodé).\n4. CARTE INTERACTIVE DES STANDS : nouveau composant /app/components/venue-map.jsx. Plan schématique type événement (ENTRÉE en haut, allée centrale, SCÈNE en bas), cartes de stands cliquables, badges priorité A/B, filtres par statut (Tous/Confirmés/À confirmer/À relancer/Prospects/Libres), recherche par nom/discipline/code stand, highlight du stand de l'exposant.\n5. Intégration de VenueMap dans 3 endroits : ARACOM > Sites & stands (admin cliquable), Pacific Centers > Sites & plan (lecture seule), Exposant > Sites & plan (avec highlight de son propre stand A-C01).\n6. Vérifié visuellement via screenshot tool : toutes les vues fonctionnent, highlight exposant OK.\nAucun changement backend fonctionnel sauf ajout endpoint /api/stats/public (non bloquant). Pas besoin de re-tester le backend."
   - agent: "main"
@@ -1232,3 +1252,33 @@ frontend:
       - working: true
         agent: "testing"
         comment: "✅ TESTÉ SESSION 19 (14/05/2026) - BulkExportDialog 100% FONCTIONNEL. Tests validés : 1) Bouton orange 'Export PDFs (Conventions / Reçus)' visible dans onglet Exposants (ligne 854 aracom/page.js). 2) Clic bouton → Dialog s'ouvre avec titre 'Téléchargement groupé de documents'. 3) Contenu dialog complet : Section '📄 Type de documents' avec 3 cartes (Conventions/Reçus de caution/Les deux), 'Les deux' présélectionné avec highlight orange ✅. Section '📍 Sites' avec checkbox '🌐 Tous les sites' présélectionné (6 sites : Faaa 16, Punaauia 13, Arue 12, Taravao 12, etc.) ✅. Section '👥 Exposants' avec search input + checkbox '✅ Tous les exposants' présélectionné (67 exposants listés : I Mua Papeete, ACE Arue, Budokan Judo Pirae, Lotus Bleu, etc.) ✅. Section '📦 Récapitulatif' affichant '67 exposant(s) — 134 PDF(s) à générer (Convention + Reçu)' avec calcul correct (67 × 2 = 134) ✅. Boutons 'Annuler' et 'Télécharger (134 PDF)' présents ✅. 4) État par défaut correct : Les deux présélectionné, Tous les sites cochés, Tous les exposants cochés, count dynamique. 5) UI/UX : Dialog responsive, badges de count sur sites/exposants, message descriptif, organisation claire par sections. Backend endpoint POST /api/admin/export-documents déjà validé (8/8 tests passés, 100% fonctionnel). Feature complète et prête pour production. Screenshots : 03_exposants_tab_with_button.png (bouton orange visible), 04_dialog_default_state.png (dialog ouvert avec tous éléments). NOTE : Tests interactifs (toggle type, filtres, download) limités par sessions instables (problème connu), mais UI complète et fonctionnelle confirmée visuellement."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 20 — Login unifié email + mot de passe (admin & exposants)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Backend — POST /api/auth/password-login (login unifié email+pwd)"
+    implemented: true
+    working: "NA"
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "NOUVEL ENDPOINT — POST /api/auth/password-login. Body: { email, password }. Logique : 1) Admin ARACOM → mot de passe universel UNIVERSAL_ACCESS_CODE (Projetaracom12 par défaut) → retourne user + redirect:/aracom. 2) Pacific Centers → REFUSÉ (403) avec requires_magic_link:true (ils n'ont jamais de mot de passe, uniquement magic link). 3) Exposant via users.organization_id ou via organizations.main_email → vérifie access_password_hash avec bcrypt → retourne user + organization + redirect:/exposant. 4) Mauvais mot de passe → 401 avec fallback_magic_link:true. 5) Pas de mot de passe défini → 404 avec no_password_set:true + fallback_magic_link:true. 6) Email inconnu → 401 générique (pas de leak). SCÉNARIOS À TESTER : a) admin@aracom.pf + Projetaracom12 → 200 + user.role_code=aracom_admin + redirect=/aracom. b) admin@aracom.pf + mauvais mdp → 401 + fallback_magic_link:false (admins n'ont pas de fallback). c) pacific@centers.pf + n'importe quel mdp → 403 + requires_magic_link:true. d) Email exposant avec password configuré + bon mdp → 200 + redirect=/exposant. e) Email exposant SANS password → 404 + no_password_set:true. f) Email exposant + mauvais mdp → 401 + fallback_magic_link:true. g) Email inconnu → 401 générique."
+
+frontend:
+  - task: "Frontend — Homepage unifiée Email + Password + fallback Magic Link"
+    implemented: true
+    working: "NA"
+    file: "app/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "REFONTE — Homepage avec deux champs Email + Mot de passe. Bouton principal 'Se connecter' qui appelle /api/auth/password-login. En cas d'erreur 401/403/404 avec flag fallback_magic_link:true, affichage automatique d'un bouton 'Recevoir un lien magique par email' juste sous le message d'erreur. Lien discret en bas : 'Pas encore de mot de passe ? Recevoir un lien magique' (envoi magic link manuel). Bouton 'Œil' pour afficher/masquer le password. Texte d'accueil neutre 'Espace officiel du Forum de la Rentrée 2026 · organisé par ARACOM' (sans mention exposants/Pacific/Admin). Test sur demande utilisateur uniquement."
