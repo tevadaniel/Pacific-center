@@ -18,6 +18,7 @@ import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import ExposantPasswordGate, { ExposantPasswordManager } from '@/components/exposant-password-gate';
+import SatisfactionSurvey from '@/components/satisfaction-survey';
 import { toast } from 'sonner';
 import {
   Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
@@ -162,6 +163,47 @@ export default function ExposantPortal() {
             onUpdated={() => loadPasswordStatus(o.id)}
           />
         )}
+
+        {/* 📄 Bandeau "Mes documents officiels" — téléchargement Convention + Guide en PDF */}
+        {r?.id && (
+          <Card className="border-aracom-gold/40 bg-gradient-to-br from-aracom-beige-pale to-white">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-md bg-aracom-black flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-aracom-gold" />
+                  </div>
+                  <div>
+                    <div className="font-serif text-lg text-aracom-black">Mes documents officiels</div>
+                    <div className="text-xs text-slate-600">Convention & guide personnalisés avec vos données en temps réel.</div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <a
+                    href={`/api/exposant/documents/convention/${r.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-aracom-black text-aracom-beige-pale text-sm font-medium hover:bg-aracom-black/90 transition"
+                    data-testid="download-convention"
+                  >
+                    <Download className="w-4 h-4" />
+                    Télécharger ma convention
+                  </a>
+                  <a
+                    href={`/api/exposant/documents/guide/${r.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-aracom-gold text-aracom-black text-sm font-medium hover:bg-aracom-beige-clair transition"
+                    data-testid="download-guide"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    Mon guide exposant
+                  </a>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card className="bg-gradient-to-br from-blue-50 to-emerald-50 border-blue-100">
           <CardContent className="p-6 flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex-1">
@@ -256,12 +298,15 @@ export default function ExposantPortal() {
         }} />}
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="w-full grid grid-cols-2 md:grid-cols-4">
+          <TabsList className="w-full grid grid-cols-2 md:grid-cols-5">
             <TabsTrigger value="parcours" className="font-bold">🎯 Mon parcours</TabsTrigger>
             <TabsTrigger value="profil">👤 Mon profil</TabsTrigger>
             <TabsTrigger value="infos">📦 Infos pratiques</TabsTrigger>
             <TabsTrigger value="postevent" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
               🏆 Post-événement {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
+            </TabsTrigger>
+            <TabsTrigger value="satisfaction" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
+              📝 Satisfaction {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
             </TabsTrigger>
           </TabsList>
 
@@ -373,6 +418,28 @@ export default function ExposantPortal() {
                   <span className="text-5xl">🔒</span>
                   <p className="text-lg font-bold mt-3">Espace post-événement verrouillé</p>
                   <p className="text-sm text-slate-500 mt-2">La satisfaction et le bilan seront <b>activés par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié par email dès qu&apos;ils seront disponibles.</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* 📝 SATISFACTION — Questionnaire post-événement (20 questions officielles) */}
+          <TabsContent value="satisfaction" className="space-y-4">
+            {postEvent.unlocked ? (
+              <SatisfactionSurvey
+                organizationId={o?.id}
+                organizationName={o?.name}
+                registrationId={r?.id}
+                venueId={r?.venue_id}
+                standCode={r?.stand_code}
+                defaultDays={r?.attending_days || []}
+              />
+            ) : (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <span className="text-5xl">🔒</span>
+                  <p className="text-lg font-bold mt-3">Questionnaire de satisfaction verrouillé</p>
+                  <p className="text-sm text-slate-500 mt-2">Le questionnaire sera <b>activé par ARACOM</b> après l&apos;événement (15 août 2026). Votre retour aidera à améliorer la prochaine édition.</p>
                 </CardContent>
               </Card>
             )}

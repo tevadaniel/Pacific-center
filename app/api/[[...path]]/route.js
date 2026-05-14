@@ -572,6 +572,108 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
+    // 📄 Génère la Convention de Participation en PDF (avec données live)
+    if (route.match(/^exposant\/documents\/convention\/[^/]+$/)) {
+      const regId = p[3];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const animations = await db.collection('animation_slots').find({ registration_id: regId, status: { $ne: 'annulé' } }).toArray();
+      try {
+        const { generateConventionPDF } = await import('@/lib/document-generator');
+        const pdf = await generateConventionPDF({ registration: reg, organization: org, venue, animations });
+        return new NextResponse(pdf, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `inline; filename="Convention_${(org?.name || 'exposant').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
+            'Cache-Control': 'no-cache',
+          },
+        });
+      } catch (e) {
+        console.error('[convention-pdf]', e);
+        return err('Erreur génération PDF : ' + e.message, 500);
+      }
+    }
+
+    // 📕 Génère le Guide de l'Exposant en PDF (personnalisé)
+    if (route.match(/^exposant\/documents\/guide\/[^/]+$/)) {
+      const regId = p[3];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const animations = await db.collection('animation_slots').find({ registration_id: regId, status: { $ne: 'annulé' } }).toArray();
+      try {
+        const { generateGuidePDF } = await import('@/lib/document-generator');
+        const pdf = await generateGuidePDF({ registration: reg, organization: org, venue, animations });
+        return new NextResponse(pdf, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `inline; filename="Guide_Exposant_${(org?.name || 'exposant').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
+            'Cache-Control': 'no-cache',
+          },
+        });
+      } catch (e) {
+        console.error('[guide-pdf]', e);
+        return err('Erreur génération PDF : ' + e.message, 500);
+      }
+    }
+
+    // 📝 Récupère la réponse satisfaction d'un exposant (own or admin)
+    if (route === 'exposant/satisfaction') {
+      const ctx = getUserContext(request);
+      const orgId = url.searchParams.get('organization_id') || ctx.organization_id;
+      if (!orgId) return err('organization_id requis', 400);
+      const resp = await db.collection('satisfaction_responses').findOne({ organization_id: orgId });
+      return json({ response: resp || null });
+    }
+
+    // 📊 Admin : liste toutes les réponses satisfaction
+    if (route === 'admin/satisfaction-responses') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const responses = await db.collection('satisfaction_responses').find({}).sort({ submitted_at: -1 }).toArray();
+      const orgIds = [...new Set(responses.map(r => r.organization_id))];
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const orgMap = new Map(orgs.map(o => [o.id, o]));
+      // Calcul agrégats
+      const avg = (key) => {
+        const arr = responses.map(r => r.ratings?.[key]).filter(v => typeof v === 'number');
+        if (arr.length === 0) return null;
+        return Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10;
+      };
+      const nps = (() => {
+        const arr = responses.map(r => r.nps).filter(v => typeof v === 'number');
+        if (arr.length === 0) return null;
+        const promoters = arr.filter(v => v >= 7).length;
+        const detractors = arr.filter(v => v <= 2).length;
+        return Math.round(((promoters - detractors) / arr.length) * 100);
+      })();
+      return json({
+        count: responses.length,
+        nps_score: nps,
+        averages: {
+          procedure_clarte: avg('procedure_clarte'),
+          infos_pre_event: avg('infos_pre_event'),
+          reactivite_aracom: avg('reactivite_aracom'),
+          accueil_aracom: avg('accueil_aracom'),
+          materiel_quality: avg('materiel_quality'),
+          animation_fluidite: avg('animation_fluidite'),
+          visiteurs_count: avg('visiteurs_count'),
+          objectifs_atteints: avg('objectifs_atteints'),
+          satisfaction_globale: avg('satisfaction_globale'),
+        },
+        responses: responses.map(r => ({
+          ...r,
+          organization_name: orgMap.get(r.organization_id)?.name || '—',
+          venue_id: orgMap.get(r.organization_id)?.venue_id || null,
+        })),
+      });
+    }
+
     // 🔐 GET /api/exposant/password/status — check if password is set for current/specified org
     if (route === 'exposant/password/status') {
       const ctx = getUserContext(request);
@@ -2019,6 +2121,53 @@ export async function POST(request, { params }) {
       const ok = await bcrypt.compare(password, org.access_password_hash);
       if (!ok) return err('Mot de passe incorrect', 403);
       return json({ ok: true, method: 'own_password' });
+    }
+
+    // 📝 EXPOSANT — Soumettre les réponses du questionnaire de satisfaction
+    if (route === 'exposant/satisfaction') {
+      const ctx = getUserContext(request);
+      const orgId = body?.organization_id || ctx.organization_id;
+      if (!orgId) return err('organization_id requis', 400);
+      // Données structurées
+      const payload = {
+        id: body?.id || uuid(),
+        organization_id: orgId,
+        registration_id: body?.registration_id || null,
+        venue_id: body?.venue_id || null,
+        // Identification
+        stand_code: body?.stand_code || null,
+        contact: body?.contact || null,
+        attending_days: body?.attending_days || [],
+        first_time: body?.first_time || null, // 'first' | '1-2' | '3+'
+        // Notations 1-5 (préparation + logistique)
+        ratings: {
+          procedure_clarte:    body?.ratings?.procedure_clarte ?? null,
+          infos_pre_event:     body?.ratings?.infos_pre_event ?? null,
+          reactivite_aracom:   body?.ratings?.reactivite_aracom ?? null,
+          accueil_aracom:      body?.ratings?.accueil_aracom ?? null,
+          materiel_quality:    body?.ratings?.materiel_quality ?? null,
+          animation_fluidite:  body?.ratings?.animation_fluidite ?? null,
+          visiteurs_count:     body?.ratings?.visiteurs_count ?? null,
+          objectifs_atteints:  body?.ratings?.objectifs_atteints ?? null,
+          satisfaction_globale: body?.ratings?.satisfaction_globale ?? null,
+        },
+        emplacement_conforme: body?.emplacement_conforme || null, // 'oui'|'leger'|'non'
+        electricity_issue:    body?.electricity_issue || null,    // 'aucun'|'mineur'|'majeur'|'na'
+        contacts_collected:   body?.contacts_collected || null,   // '0'|'1-5'|'6-15'|'15+'
+        nps:                  typeof body?.nps === 'number' ? body.nps : null, // 0-10
+        return_2027:          body?.return_2027 || null,          // 'oui'|'peutetre'|'non'
+        // Commentaires libres
+        positives:  body?.positives || '',
+        improvements: body?.improvements || '',
+        free_comment: body?.free_comment || '',
+        submitted_at: new Date(),
+      };
+      await db.collection('satisfaction_responses').replaceOne(
+        { organization_id: orgId },
+        payload,
+        { upsert: true }
+      );
+      return json({ ok: true, id: payload.id });
     }
 
 
