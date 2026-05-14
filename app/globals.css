@@ -1,141 +1,164 @@
+/* @charset must be first if present */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Josefin+Sans:wght@200;300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
-        "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
-        "Helvetica Neue", sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-code {
-    font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
-        monospace;
-}
-
-.App {
-    text-align: center;
-}
-
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
-}
-
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
-}
-
-.App-link {
-    color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-
+/* =====================================================================
+   🎨 CHARTE GRAPHIQUE ARACOM 2025
+   ----------------------------------------------------------------------
+   Palette officielle :
+   • Noir          #231F20 — Principal (60%)
+   • Beige Doré    #C9BC9E — Secondaire dominant (35%)
+   • Beige Clair   #D5CAAF — Bordures
+   • Beige Fond    #EDE8DC — Fonds champs
+   • Beige Pâle    #F7F4EF — Fond page
+   • Orange        #E8500A — Accent rare (5% max)
+   Typographie :
+   • Cormorant Garamond — titres / accents (300-600)
+   • Josefin Sans       — corps / interface (200-400)
+   ===================================================================== */
 
 @layer base {
   :root {
-        --background: 0 0% 100%;
-        --foreground: 222.2 84% 4.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 222.2 84% 4.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 222.2 84% 4.9%;
-        --primary: 222.2 47.4% 11.2%;
-        --primary-foreground: 210 40% 98%;
-        --secondary: 210 40% 96.1%;
-        --secondary-foreground: 222.2 47.4% 11.2%;
-        --muted: 210 40% 96.1%;
-        --muted-foreground: 215.4 16.3% 46.9%;
-        --accent: 210 40% 96.1%;
-        --accent-foreground: 222.2 47.4% 11.2%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 214.3 31.8% 91.4%;
-        --input: 214.3 31.8% 91.4%;
-        --ring: 222.2 84% 4.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-        --sidebar-background: 0 0% 98%;
-        --sidebar-foreground: 240 5.3% 26.1%;
-        --sidebar-primary: 240 5.9% 10%;
-        --sidebar-primary-foreground: 0 0% 98%;
-        --sidebar-accent: 240 4.8% 95.9%;
-        --sidebar-accent-foreground: 240 5.9% 10%;
-        --sidebar-border: 220 13% 91%;
-        --sidebar-ring: 217.2 91.2% 59.8%;
-    }
+    /* ─── Couleurs ARACOM (HSL pour shadcn) ─── */
+    --aracom-black-hsl: 351 4% 13%;       /* #231F20 */
+    --aracom-gold-hsl: 39 24% 70%;         /* #C9BC9E */
+    --aracom-beige-clair-hsl: 42 30% 76%;  /* #D5CAAF */
+    --aracom-beige-fond-hsl: 42 28% 89%;   /* #EDE8DC */
+    --aracom-beige-pale-hsl: 40 27% 95%;   /* #F7F4EF */
+    --aracom-orange-hsl: 18 91% 47%;       /* #E8500A */
+
+    /* ─── Shadcn variables remappées ARACOM ─── */
+    --background: var(--aracom-beige-pale-hsl);
+    --foreground: var(--aracom-black-hsl);
+    --card: 0 0% 100%;
+    --card-foreground: var(--aracom-black-hsl);
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--aracom-black-hsl);
+    --primary: var(--aracom-black-hsl);
+    --primary-foreground: var(--aracom-beige-pale-hsl);
+    --secondary: var(--aracom-gold-hsl);
+    --secondary-foreground: var(--aracom-black-hsl);
+    --muted: var(--aracom-beige-fond-hsl);
+    --muted-foreground: 351 4% 35%;
+    --accent: var(--aracom-gold-hsl);
+    --accent-foreground: var(--aracom-black-hsl);
+    --destructive: var(--aracom-orange-hsl);
+    --destructive-foreground: 0 0% 100%;
+    --border: var(--aracom-beige-clair-hsl);
+    --input: var(--aracom-beige-clair-hsl);
+    --ring: var(--aracom-gold-hsl);
+    --chart-1: 39 24% 70%;
+    --chart-2: 351 4% 13%;
+    --chart-3: 18 91% 47%;
+    --chart-4: 42 30% 76%;
+    --chart-5: 42 28% 89%;
+    --radius: 0.625rem;
+    --sidebar-background: var(--aracom-black-hsl);
+    --sidebar-foreground: var(--aracom-beige-pale-hsl);
+    --sidebar-primary: var(--aracom-gold-hsl);
+    --sidebar-primary-foreground: var(--aracom-black-hsl);
+    --sidebar-accent: 351 4% 20%;
+    --sidebar-accent-foreground: var(--aracom-beige-pale-hsl);
+    --sidebar-border: 351 4% 22%;
+    --sidebar-ring: var(--aracom-gold-hsl);
+  }
+
   .dark {
-        --background: 222.2 84% 4.9%;
-        --foreground: 210 40% 98%;
-        --card: 222.2 84% 4.9%;
-        --card-foreground: 210 40% 98%;
-        --popover: 222.2 84% 4.9%;
-        --popover-foreground: 210 40% 98%;
-        --primary: 210 40% 98%;
-        --primary-foreground: 222.2 47.4% 11.2%;
-        --secondary: 217.2 32.6% 17.5%;
-        --secondary-foreground: 210 40% 98%;
-        --muted: 217.2 32.6% 17.5%;
-        --muted-foreground: 215 20.2% 65.1%;
-        --accent: 217.2 32.6% 17.5%;
-        --accent-foreground: 210 40% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 217.2 32.6% 17.5%;
-        --input: 217.2 32.6% 17.5%;
-        --ring: 212.7 26.8% 83.9%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-        --sidebar-background: 240 5.9% 10%;
-        --sidebar-foreground: 240 4.8% 95.9%;
-        --sidebar-primary: 224.3 76.3% 48%;
-        --sidebar-primary-foreground: 0 0% 100%;
-        --sidebar-accent: 240 3.7% 15.9%;
-        --sidebar-accent-foreground: 240 4.8% 95.9%;
-        --sidebar-border: 240 3.7% 15.9%;
-        --sidebar-ring: 217.2 91.2% 59.8%;
-    }
+    --background: var(--aracom-black-hsl);
+    --foreground: var(--aracom-beige-pale-hsl);
+    --card: 351 4% 18%;
+    --card-foreground: var(--aracom-beige-pale-hsl);
+    --popover: 351 4% 18%;
+    --popover-foreground: var(--aracom-beige-pale-hsl);
+    --primary: var(--aracom-gold-hsl);
+    --primary-foreground: var(--aracom-black-hsl);
+    --secondary: 351 4% 25%;
+    --secondary-foreground: var(--aracom-beige-pale-hsl);
+    --muted: 351 4% 22%;
+    --muted-foreground: 39 12% 70%;
+    --accent: var(--aracom-gold-hsl);
+    --accent-foreground: var(--aracom-black-hsl);
+    --destructive: var(--aracom-orange-hsl);
+    --destructive-foreground: 0 0% 100%;
+    --border: 351 4% 25%;
+    --input: 351 4% 22%;
+    --ring: var(--aracom-gold-hsl);
+    --sidebar-background: var(--aracom-black-hsl);
+    --sidebar-foreground: var(--aracom-beige-pale-hsl);
+    --sidebar-primary: var(--aracom-gold-hsl);
+    --sidebar-primary-foreground: var(--aracom-black-hsl);
+    --sidebar-accent: 351 4% 20%;
+    --sidebar-accent-foreground: var(--aracom-beige-pale-hsl);
+    --sidebar-border: 351 4% 22%;
+    --sidebar-ring: var(--aracom-gold-hsl);
+  }
 }
-
-
 
 @layer base {
   * {
     @apply border-border;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+    font-family: 'Josefin Sans', system-ui, -apple-system, sans-serif;
+    font-weight: 300;
+    letter-spacing: 0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* ─── Titres en Cormorant Garamond ─── */
+  h1, h2, h3, .font-serif {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+  }
+  h1 { font-weight: 600; }
+  /* ─── Garde Josefin Sans pour les UI (boutons, labels, badges, tabs) ─── */
+  button, label, input, select, textarea,
+  [role="tab"], [role="menuitem"], .font-sans-ui {
+    font-family: 'Josefin Sans', system-ui, sans-serif;
+  }
+  /* ─── Mono / code (inchangé) ─── */
+  code, pre, .font-mono {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  }
 }
+
+/* ─── Classes utilitaires ARACOM ─── */
+@layer utilities {
+  .text-aracom-black     { color: #231F20; }
+  .text-aracom-gold      { color: #C9BC9E; }
+  .text-aracom-orange    { color: #E8500A; }
+  .bg-aracom-black       { background-color: #231F20; }
+  .bg-aracom-gold        { background-color: #C9BC9E; }
+  .bg-aracom-beige-clair { background-color: #D5CAAF; }
+  .bg-aracom-beige-fond  { background-color: #EDE8DC; }
+  .bg-aracom-beige-pale  { background-color: #F7F4EF; }
+  .bg-aracom-orange      { background-color: #E8500A; }
+  .border-aracom-gold    { border-color: #C9BC9E; }
+  .border-aracom-beige   { border-color: #D5CAAF; }
+
+  /* Gradient signature ARACOM (utilisé sur hero / CTA) */
+  .bg-aracom-gradient {
+    background: linear-gradient(135deg, #231F20 0%, #2d2829 100%);
+  }
+  .bg-aracom-gradient-gold {
+    background: linear-gradient(135deg, #C9BC9E 0%, #D5CAAF 100%);
+  }
+}
+
+/* Logo App helpers (legacy, conservés) */
+.App { text-align: center; }
+.App-logo { height: 40vmin; pointer-events: none; }
+.App-header {
+  background-color: #231F20;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: #F7F4EF;
+}
+.App-link { color: #C9BC9E; }
