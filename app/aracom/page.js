@@ -32,6 +32,7 @@ import PushToggle from '@/components/push-toggle';
 import PortalSwitcher from '@/components/portal-switcher';
 import MultiSiteCockpit from '@/components/multi-site-cockpit';
 import StatusLegend from '@/components/status-legend';
+import BulkExportDialog from '@/components/bulk-export-dialog';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -756,6 +757,7 @@ function ExposantsView() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
   const [showNew, setShowNew] = useState(false);
+  const [showBulkExport, setShowBulkExport] = useState(false);
   const { open: openExposant, refreshTrigger } = useExposantPanel();
 
   // 🔗 Ouvre directement la fiche si un registration_id est passé dans l'URL (?open=...)
@@ -849,11 +851,25 @@ function ExposantsView() {
             <div className="flex gap-2">
               <Button size="sm" className="gap-2 bg-blue-600 hover:bg-blue-700" onClick={() => setShowNew(true)}><Plus className="w-3.5 h-3.5" /> Nouveau exposant</Button>
               <Button size="sm" variant="outline" onClick={() => exportExposantsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
+              <Button size="sm" onClick={() => setShowBulkExport(true)} className="gap-2 bg-orange-600 hover:bg-orange-700 text-white"><FileText className="w-3.5 h-3.5" /> Export PDFs (Conventions / Reçus)</Button>
             </div>
           </div>
         </CardContent>
       </Card>
       {showNew && <NewExposantDialog venues={venues} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
+
+      <BulkExportDialog
+        open={showBulkExport}
+        onOpenChange={setShowBulkExport}
+        rows={rows.map(r => ({
+          id: r.id,
+          org_name: r.organization?.name || '',
+          venue_id: r.venue_id,
+          venue_name: r.venue?.name || '',
+          stand_code: r.stand_code || '',
+        }))}
+        venues={venues}
+      />
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">

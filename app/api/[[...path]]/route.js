@@ -4277,6 +4277,122 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       }
       return json({ ok: true, generated });
     }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 📦 ADMIN — Export groupé de documents (Conventions + Reçus de caution)
+    //    Body : { type: 'conventions'|'receipts'|'all',
+    //             site_ids?: string[]|['all'],
+    //             registration_ids?: string[]|['all'] }
+    //    Retour : Fichier ZIP (application/zip) avec PDFs nommés clairement
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (route === 'admin/export-documents') {
+      const type = (body.type || 'all').toLowerCase();
+      if (!['conventions', 'receipts', 'all'].includes(type)) {
+        return err("type doit être 'conventions', 'receipts' ou 'all'", 400);
+      }
+      const siteIds = Array.isArray(body.site_ids) ? body.site_ids : ['all'];
+      const regIds = Array.isArray(body.registration_ids) ? body.registration_ids : ['all'];
+      const wantAllSites = siteIds.includes('all') || siteIds.length === 0;
+      const wantAllRegs = regIds.includes('all') || regIds.length === 0;
+
+      // Build registrations filter
+      const regFilter = {};
+      if (!wantAllRegs) regFilter.id = { $in: regIds };
+      if (!wantAllSites) regFilter.venue_id = { $in: siteIds };
+
+      const registrations = await db.collection('registrations').find(regFilter).toArray();
+      if (registrations.length === 0) {
+        return err("Aucun exposant ne correspond aux filtres sélectionnés.", 404);
+      }
+
+      // Preload organizations and venues for performance
+      const orgIds = [...new Set(registrations.map(r => r.organization_id).filter(Boolean))];
+      const venueIdsAll = [...new Set(registrations.map(r => r.venue_id).filter(Boolean))];
+      const [orgs, venues] = await Promise.all([
+        db.collection('organizations').find({ id: { $in: orgIds } }).toArray(),
+        db.collection('venues').find({ id: { $in: venueIdsAll } }).toArray(),
+      ]);
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      // Preload deposits & animations
+      const allRegIds = registrations.map(r => r.id);
+      const [deposits, animations] = await Promise.all([
+        db.collection('deposit_transactions').find({ registration_id: { $in: allRegIds } }).toArray(),
+        db.collection('animation_slots').find({ registration_id: { $in: allRegIds }, status: { $ne: 'annulé' } }).toArray(),
+      ]);
+      const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
+      const animByReg = animations.reduce((acc, a) => {
+        (acc[a.registration_id] = acc[a.registration_id] || []).push(a); return acc;
+      }, {});
+
+      const { generateConventionPDF, generateReceiptPDF } = await import('@/lib/document-generator');
+      const zip = new JSZip();
+      const safeName = (s) => String(s || 'exposant').replace(/[^a-z0-9_-]/gi, '_').replace(/_+/g, '_').slice(0, 60);
+
+      let conventionsCount = 0;
+      let receiptsCount = 0;
+      const errors = [];
+
+      for (const reg of registrations) {
+        const org = orgById[reg.organization_id] || null;
+        const venue = venueById[reg.venue_id] || null;
+        const dep = depByReg[reg.id] || null;
+        const anims = animByReg[reg.id] || [];
+
+        const expName = safeName(org?.name);
+        const siteName = safeName(venue?.name || 'sans-site');
+        const stand = safeName(reg?.stand_code || 'sans-stand');
+        const baseFolder = `${siteName}/${expName}_${stand}`;
+
+        if (type === 'conventions' || type === 'all') {
+          try {
+            const pdf = await generateConventionPDF({ registration: reg, organization: org, venue, animations: anims });
+            zip.file(`Conventions/${baseFolder}/Convention_${expName}_${stand}.pdf`, pdf);
+            conventionsCount++;
+          } catch (e) {
+            errors.push(`Convention ${org?.name || reg.id} : ${e.message}`);
+          }
+        }
+        if (type === 'receipts' || type === 'all') {
+          try {
+            const pdf = await generateReceiptPDF({ registration: reg, organization: org, venue, deposit: dep });
+            zip.file(`Recus_Caution/${baseFolder}/Recu_Caution_${expName}_${stand}.pdf`, pdf);
+            receiptsCount++;
+          } catch (e) {
+            errors.push(`Reçu ${org?.name || reg.id} : ${e.message}`);
+          }
+        }
+      }
+
+      // Manifest README inside the ZIP for traceability
+      const manifest = [
+        `Export Forum de la Rentrée 2026 — ARACOM`,
+        `Généré le : ${new Date().toLocaleString('fr-FR')}`,
+        `Type demandé : ${type}`,
+        `Filtre sites : ${wantAllSites ? 'TOUS' : siteIds.join(', ')}`,
+        `Filtre exposants : ${wantAllRegs ? 'TOUS' : `${regIds.length} sélectionnés`}`,
+        `Conventions générées : ${conventionsCount}`,
+        `Reçus de caution générés : ${receiptsCount}`,
+        errors.length ? `\nErreurs (${errors.length}) :\n - ${errors.join('\n - ')}` : '',
+      ].join('\n');
+      zip.file('README.txt', manifest);
+
+      const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      const ts = new Date().toISOString().slice(0, 10);
+      const fname = `Export_${type === 'all' ? 'Documents' : (type === 'conventions' ? 'Conventions' : 'Recus_Caution')}_${ts}.zip`;
+      return new NextResponse(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${fname}"`,
+          'Cache-Control': 'no-cache',
+          'X-Documents-Conventions': String(conventionsCount),
+          'X-Documents-Receipts': String(receiptsCount),
+        },
+      });
+    }
+
     if (route === 'deposits/bulk-update-status') {
       const { ids, status } = body;
       if (!Array.isArray(ids) || !status) return err('ids et status requis', 400);

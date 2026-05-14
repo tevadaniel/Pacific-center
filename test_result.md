@@ -375,6 +375,18 @@ backend:
         agent: "testing"
         comment: "✅ TESTÉ - POST /api/emails/send-satisfaction avec body vide {} retourne 200 avec sent=46, campaign_id généré. Crée campagne avec template 'satisfaction_invite' et 46 messages email avec subject '📝 Votre retour sur le Forum de la Rentrée 2026'. Emails envoyés aux registrations avec status confirme/a_confirmer/a_relancer ayant un main_email. Campagne visible via GET /api/emails."
 
+  - task: "Bulk document export (Conventions & Receipts ZIP) — POST /api/admin/export-documents"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/document-generator.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 8/8 TESTS PASSÉS (100%). Endpoint POST /api/admin/export-documents 100% fonctionnel. Test 1: type='conventions', site_ids=['all'], registration_ids=['all'] → 200 avec ZIP (254989 bytes), X-Documents-Conventions=67, X-Documents-Receipts=0, Content-Type=application/zip, signature ZIP 'PK' vérifiée. Test 2: type='receipts' → 200 avec ZIP (186815 bytes), Conventions=0, Receipts=67. Test 3: type='all' → 200, Conventions=67, Receipts=67 (égaux, un de chaque par exposant). Test 4: Filtre par site (venue-faaa) → 200, Conventions=16, Receipts=16 (sous-ensemble correct). Test 5: Filtre par registration_id spécifique (reg-arue-A-C01) → 200, Conventions=1, Receipts=1 (exactement 1 de chaque). Test 6: type='bogus' → 400 avec message d'erreur français 'type doit être...'. Test 7: registration_ids=['nonexistent-id-12345'] → 404 avec message français 'Aucun exposant ne correspond...'. Test 8: Validation contenu ZIP (scenario 5) → structure correcte avec dossiers Conventions/<site>/<exposant_stand>/, Recus_Caution/<site>/<exposant_stand>/, README.txt présent avec manifest, PDFs vérifiés avec magic bytes '%PDF-' corrects. Organisation ZIP: Conventions/Arue/I_Mua_Papeete_A-C01/Convention_I_Mua_Papeete_A-C01.pdf, Recus_Caution/Arue/I_Mua_Papeete_A-C01/Recu_Caution_I_Mua_Papeete_A-C01.pdf. Tous les scénarios fonctionnent parfaitement. Feature 100% opérationnelle."
+
 frontend:
   - task: "Page de connexion + seed démo"
     implemented: true
@@ -834,6 +846,8 @@ agent_communication:
     message: "TESTS BACKEND COMPLETS - 69/69 TESTS PASSÉS ✅. Testé exhaustivement selon l'ordre requis : seed (66 associations, 67 stands), auth 3 rôles, dashboard KPIs, registrations CRUD + filtres, attendance Jour J avec anomalies auto, bilans (exposant/site/global), documents upload/validation, field media, tâches, créneaux animation, préférences sites, emails mock, timeline activité. Vérifications : pas de _id MongoDB, gestion erreurs 404/400, recommandations cautions automatiques. Tous les workflows critiques fonctionnent parfaitement. API prête pour production."
   - agent: "testing"
     message: "TESTS FRONTEND E2E PARTIELS COMPLÉTÉS ✅. Page de connexion : 3 boutons d'accès rapide fonctionnels, formulaire manuel, lien inscription, bouton seed - CORRECTION APPLIQUÉE (import Link manquant). Portail ARACOM : login admin réussi, dashboard avec 6 sites, KPIs corrects, badge alertes visible, 8 onglets présents. Page inscription : formulaire complet avec dropdown disciplines, validation mots de passe. LIMITATION : Tests interrompus par timeouts Playwright et problèmes de session. Recommandation : tests manuels complémentaires pour validation complète des workflows utilisateur."
+  - agent: "testing"
+    message: "✅ BULK DOCUMENT EXPORT FEATURE TESTED (14/05/2026) - 8/8 TESTS PASSED (100%). Nouveau endpoint POST /api/admin/export-documents 100% fonctionnel. Génère des archives ZIP contenant Conventions et/ou Reçus de Caution pour les exposants sélectionnés. Tests validés : 1) Export conventions seules (67 docs, 255KB ZIP). 2) Export reçus seuls (67 docs, 187KB ZIP). 3) Export complet (67 conventions + 67 reçus, égaux). 4) Filtrage par site (Faaa: 16 docs de chaque). 5) Filtrage par registration_id (1 doc de chaque). 6) Rejet type invalide (400). 7) Rejet exposants inexistants (404 avec message français). 8) Validation structure ZIP (dossiers Conventions/<site>/<exposant_stand>/, Recus_Caution/<site>/<exposant_stand>/, README.txt avec manifest, PDFs avec magic bytes '%PDF-' corrects). Headers X-Documents-Conventions et X-Documents-Receipts présents et corrects. Feature prête pour production."
   - agent: "main"
     message: "AMÉLIORATIONS DESIGN & FONCTIONNALITÉS (session 3) :\n1. Correction login exposant bloqué : mot de passe modifié par un test précédent sur swimua.tahiti@gmail.com → re-seed appliqué, tous les comptes 'demo' fonctionnent.\n2. Nouveau endpoint public GET /api/stats/public (sites/stands/associations dynamiques).\n3. Homepage désormais dynamique (plus de '57' hardcodé).\n4. CARTE INTERACTIVE DES STANDS : nouveau composant /app/components/venue-map.jsx. Plan schématique type événement (ENTRÉE en haut, allée centrale, SCÈNE en bas), cartes de stands cliquables, badges priorité A/B, filtres par statut (Tous/Confirmés/À confirmer/À relancer/Prospects/Libres), recherche par nom/discipline/code stand, highlight du stand de l'exposant.\n5. Intégration de VenueMap dans 3 endroits : ARACOM > Sites & stands (admin cliquable), Pacific Centers > Sites & plan (lecture seule), Exposant > Sites & plan (avec highlight de son propre stand A-C01).\n6. Vérifié visuellement via screenshot tool : toutes les vues fonctionnent, highlight exposant OK.\nAucun changement backend fonctionnel sauf ajout endpoint /api/stats/public (non bloquant). Pas besoin de re-tester le backend."
   - agent: "main"
@@ -1165,3 +1179,45 @@ agent_communication:
 agent_communication:
   - agent: "testing"
     message: "🎉 FRONTEND E2E VALIDATION SESSION 18 COMPLÉTÉE (12/05/2026 23:32 UTC). RÉSULTATS : ✅ 8/10 TESTS FULLY PASSED, ⚠️ 2/10 TESTS PARTIALLY PASSED. TESTS VALIDÉS : 1) Homepage Login ARACOM unifié (password unique, redirection /aracom OK). 2) Magic Link request exposant (email swimua.tahiti@gmail.com, toast confirmation). 3) Cockpit ARACOM (Briefing 3 colonnes, 6 KPIs, PortalSwitcher, Alertes multi-sites avec I Mua Papeete sur 5 sites). 4) Multi-Site Cockpit (alertes intégrées dans dashboard). 5) ⭐ Wizard Multi-site Profile Banner (HIGH PRIORITY) — 100% FONCTIONNEL : bandeau 'VOS 2 SITES RÉSERVÉS', 2 cartes (Faaa F-Z02 avec badge ICI + Punaauia P-Z02), bouton '+ Réserver un site supplémentaire', screenshot 16_multisite_banner_faaa.png confirme. 6) Cleanup test data (DB restaurée : 67 regs, 66 orgs, I Mua Papeete intact). 7) Chatbot IA bulle flottante (badge AI, panel 'Assistant ARACOM', suggestions). 8) Bannière TEST MAIL (bouton rouge pulsant visible). 9) Wizard Step 1 non-régression (pas de banner pour nouvelle inscription). TESTS PARTIELS : AdminOverridePanel (navigation OK, clic exposant impossible via Playwright, nécessite test manuel). POINTS MINEURS NON BLOQUANTS : 1) Lien 'Pacific Centers' visible sur homepage (spec demande masquage). 2) Onglet 'Multi-sites' séparé non trouvé (fonctionnalité intégrée dans Dashboard). CONCLUSION : ✅ APPLICATION 100% PRÊTE POUR PRODUCTION. Toutes les fonctionnalités critiques validées. HIGH PRIORITY TEST 6 (Multi-site banner) FULLY VALIDATED. Aucun bug critique détecté. Mode mail TEST actif et sécurisé. 📸 Screenshots : 01_homepage_login.png, 06_aracom_logged_in.png, 07_cockpit_kpis.png, 10_chatbot_panel.png, 12_test_mail_banner.png, 13_magic_link_sent.png, 14_wizard_step1.png, 16_multisite_banner_faaa.png (PRIORITÉ HAUTE)."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 19 — Bulk Export (Conventions + Reçus de caution en ZIP)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Backend — Endpoint POST /api/admin/export-documents (ZIP bulk download)"
+    implemented: true
+    working: "NA"
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "NOUVEL ENDPOINT — POST /api/admin/export-documents. Body: { type: 'conventions'|'receipts'|'all', site_ids: string[]|['all'], registration_ids: string[]|['all'] }. Génère un ZIP (application/zip) contenant des PDFs nommés clairement et organisés par site/exposant (Conventions/<site>/<exposant_stand>/Convention_X.pdf et Recus_Caution/<site>/<exposant_stand>/Recu_Caution_X.pdf). Inclut un README.txt avec le manifest (type, filtres, comptes, erreurs éventuelles). Renvoie aussi les headers X-Documents-Conventions et X-Documents-Receipts. Utilise JSZip (déjà présent) + nouvelle fonction generateReceiptPDF dans lib/document-generator.js. SCÉNARIOS À TESTER : 1) type='conventions' + site_ids=['all'] + registration_ids=['all'] → ZIP contient des PDFs Conventions seulement (~67 PDFs). 2) type='receipts' + filtre site spécifique → ZIP contient uniquement les reçus du site demandé. 3) type='all' + registration_ids=[1 ou 2 IDs spécifiques] → ZIP contient 2-4 PDFs au total pour ces exposants uniquement. 4) Filtres invalides → erreur 400. 5) Aucun match → erreur 404. 6) Vérifier que les PDFs sont des PDFs valides (magic bytes %PDF) et téléchargeables. 7) Vérifier que les headers Content-Type et Content-Disposition sont corrects."
+
+  - task: "Backend — generateReceiptPDF (Reçu de caution PDF)"
+    implemented: true
+    working: "NA"
+    file: "lib/document-generator.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Nouvelle fonction generateReceiptPDF({ registration, organization, venue, deposit }) ajoutée. Génère un PDF A4 avec en-tête ARACOM, infos exposant/site/stand/contact, mode de paiement, montant 20 000 XPF, conditions de restitution et signatures. Couleurs charte ARACOM. À VALIDER : appel direct via une URL test ou via l'endpoint d'export pour vérifier que les buffers PDF sont valides."
+
+frontend:
+  - task: "Frontend — BulkExportDialog dans Cockpit ARACOM (onglet Exposants)"
+    implemented: true
+    working: "NA"
+    file: "components/bulk-export-dialog.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Nouveau composant BulkExportDialog ajouté dans /components/. Intégré dans ExposantsView de /aracom/page.js avec un bouton orange '📥 Export PDFs (Conventions / Reçus)' à côté de 'Export CSV'. Le dialog propose : 1) Choix du type (Conventions / Reçus / Les deux). 2) Multi-sélection des sites avec checkbox 'Tous les sites'. 3) Multi-sélection des exposants avec recherche et checkbox 'Tous les exposants'. 4) Récapitulatif dynamique du nombre de PDFs à générer. 5) Bouton de téléchargement qui appelle POST /api/admin/export-documents et déclenche le download du fichier ZIP côté navigateur. Test frontend uniquement sur demande utilisateur."
