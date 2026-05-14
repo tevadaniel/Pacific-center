@@ -1187,27 +1187,33 @@ agent_communication:
 
   - task: "Backend — Endpoint POST /api/admin/export-documents (ZIP bulk download)"
     implemented: true
-    working: "NA"
+    working: true
     file: "app/api/[[...path]]/route.js"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "NOUVEL ENDPOINT — POST /api/admin/export-documents. Body: { type: 'conventions'|'receipts'|'all', site_ids: string[]|['all'], registration_ids: string[]|['all'] }. Génère un ZIP (application/zip) contenant des PDFs nommés clairement et organisés par site/exposant (Conventions/<site>/<exposant_stand>/Convention_X.pdf et Recus_Caution/<site>/<exposant_stand>/Recu_Caution_X.pdf). Inclut un README.txt avec le manifest (type, filtres, comptes, erreurs éventuelles). Renvoie aussi les headers X-Documents-Conventions et X-Documents-Receipts. Utilise JSZip (déjà présent) + nouvelle fonction generateReceiptPDF dans lib/document-generator.js. SCÉNARIOS À TESTER : 1) type='conventions' + site_ids=['all'] + registration_ids=['all'] → ZIP contient des PDFs Conventions seulement (~67 PDFs). 2) type='receipts' + filtre site spécifique → ZIP contient uniquement les reçus du site demandé. 3) type='all' + registration_ids=[1 ou 2 IDs spécifiques] → ZIP contient 2-4 PDFs au total pour ces exposants uniquement. 4) Filtres invalides → erreur 400. 5) Aucun match → erreur 404. 6) Vérifier que les PDFs sont des PDFs valides (magic bytes %PDF) et téléchargeables. 7) Vérifier que les headers Content-Type et Content-Disposition sont corrects."
+        comment: "NOUVEL ENDPOINT — POST /api/admin/export-documents. Body: { type: 'conventions'|'receipts'|'all', site_ids: string[]|['all'], registration_ids: string[]|['all'] }. Génère un ZIP (application/zip) contenant des PDFs nommés clairement et organisés par site/exposant."
+      - working: true
+        agent: "testing"
+        comment: "✅ 8/8 TESTS PASSÉS (100%). Conventions seules: 67 PDFs/255KB. Reçus seuls: 67 PDFs/187KB. Les deux: 134 PDFs total. Filtre par site Faaa: 16+16. Filtre par reg ID unique: 1+1. Type invalide → 400. Aucun match → 404. ZIP structure validée + magic bytes %PDF- présents."
 
   - task: "Backend — generateReceiptPDF (Reçu de caution PDF)"
     implemented: true
-    working: "NA"
+    working: true
     file: "lib/document-generator.js"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Nouvelle fonction generateReceiptPDF({ registration, organization, venue, deposit }) ajoutée. Génère un PDF A4 avec en-tête ARACOM, infos exposant/site/stand/contact, mode de paiement, montant 20 000 XPF, conditions de restitution et signatures. Couleurs charte ARACOM. À VALIDER : appel direct via une URL test ou via l'endpoint d'export pour vérifier que les buffers PDF sont valides."
+        comment: "Nouvelle fonction generateReceiptPDF ajoutée. Génère un PDF A4 ARACOM avec en-tête, infos exposant/site/stand/contact, mode de paiement, montant 20 000 XPF, conditions de restitution."
+      - working: true
+        agent: "testing"
+        comment: "✅ VALIDÉ via l'endpoint bulk export — PDFs générés ont les magic bytes %PDF- corrects et sont des PDFs valides."
 
 frontend:
   - task: "Frontend — BulkExportDialog dans Cockpit ARACOM (onglet Exposants)"
