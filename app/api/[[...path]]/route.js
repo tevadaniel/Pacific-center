@@ -416,7 +416,15 @@ function guardLinks(html, accessUrl) {
 
 const EDITION_ID = 'edition-2026';
 
-const json = (data, status = 200) => NextResponse.json(data, { status });
+// 🆕 No-cache headers pour éviter que le navigateur garde des réponses obsolètes
+//    (notamment pour /api/venues, /api/dashboard/*, /api/registrations etc.)
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+  'Surrogate-Control': 'no-store',
+};
+const json = (data, status = 200) => NextResponse.json(data, { status, headers: NO_CACHE_HEADERS });
 const err = (message, status = 400) => NextResponse.json({ error: message }, { status });
 
 function getUserContext(request) {
