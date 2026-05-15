@@ -1101,6 +1101,44 @@ export async function GET(request, { params }) {
       return json(cfg?.value || defaults);
     }
 
+    // 🆕 GET /api/admin/exposant-limits — config max sites par exposant (lue par exposant ET admin)
+    if (route === 'admin/exposant-limits') {
+      const cfg = await db.collection('app_settings').findOne({ key: 'exposant_limits' });
+      return json(cfg?.value || { max_sites_per_exposant: 3 });
+    }
+
+    // 🆕 GET /api/exposant/my-sites — liste de toutes les registrations de l'organisation connectée
+    if (route === 'exposant/my-sites') {
+      const orgId = ctx.organization_id || url.searchParams.get('organization_id');
+      if (!orgId) return err('organization_id requis', 400);
+      const regs = await db.collection('registrations').find({ organization_id: orgId, edition_id: EDITION_ID }).toArray();
+      const venues = await db.collection('venues').find({}).toArray();
+      const vById = Object.fromEntries(venues.map(v => [v.id, v]));
+      const slots = await db.collection('animation_slots').find({ registration_id: { $in: regs.map(r => r.id) } }).toArray();
+      const slotsByReg = {};
+      for (const s of slots) { (slotsByReg[s.registration_id] = slotsByReg[s.registration_id] || []).push(s); }
+      const deposits = await db.collection('deposit_transactions').find({ registration_id: { $in: regs.map(r => r.id) } }).toArray();
+      const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
+      const out = regs.map(r => {
+        const v = vById[r.venue_id];
+        const regSlots = slotsByReg[r.id] || [];
+        const has_vendredi = regSlots.some(s => s.day_label === 'vendredi');
+        const has_samedi = regSlots.some(s => s.day_label === 'samedi');
+        delete r._id;
+        return {
+          ...r,
+          site_priority: r.site_priority || 1,
+          venue: v ? { id: v.id, name: v.name, code: v.code, capacity_stands: v.capacity_stands } : null,
+          deposit: depByReg[r.id] || null,
+          animations_count: regSlots.length,
+          has_vendredi_animation: has_vendredi,
+          has_samedi_animation: has_samedi,
+          is_complete: has_vendredi && has_samedi && !!r.venue_id && !!r.stand_code,
+        };
+      }).sort((a, b) => (a.site_priority || 99) - (b.site_priority || 99));
+      return json(out);
+    }
+
     // 🆕 GET /api/admin/document-templates — liste des 4 templates éditables
     if (route === 'admin/document-templates') {
       const userRole = request.headers.get('x-user-role');
@@ -5316,6 +5354,105 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         { upsert: true }
       );
       return json({ ok: true, rib });
+    }
+
+    // 🆕 POST /api/admin/exposant-limits — limite max de sites par exposant
+    if (route === 'admin/exposant-limits') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const max = parseInt(body?.max_sites_per_exposant, 10) || 3;
+      const clamped = Math.max(1, Math.min(6, max));
+      await db.collection('app_settings').updateOne(
+        { key: 'exposant_limits' },
+        { $set: { key: 'exposant_limits', value: { max_sites_per_exposant: clamped }, updated_at: new Date() } },
+        { upsert: true }
+      );
+      return json({ ok: true, max_sites_per_exposant: clamped });
+    }
+
+    // 🆕 POST /api/exposant/sites/add — ajoute une nouvelle registration (= un site supplémentaire) sur la même organisation
+    if (route === 'exposant/sites/add') {
+      const orgId = body?.organization_id || ctx.organization_id;
+      const venueId = body?.venue_id;
+      if (!orgId || !venueId) return err('organization_id et venue_id requis', 400);
+      // Vérifie la limite max sites
+      const limCfg = await db.collection('app_settings').findOne({ key: 'exposant_limits' });
+      const maxSites = limCfg?.value?.max_sites_per_exposant || 3;
+      const existing = await db.collection('registrations').find({ organization_id: orgId, edition_id: EDITION_ID }).toArray();
+      if (existing.length >= maxSites) {
+        return err(`Limite atteinte : maximum ${maxSites} site(s) par exposant.`, 400);
+      }
+      // Vérifie qu'il n'a pas déjà ce site
+      if (existing.some(r => r.venue_id === venueId)) {
+        return err('Vous êtes déjà inscrit(e) sur ce site. 1 stand max par site.', 400);
+      }
+      // Vérifie que le site est ouvert aux exposants
+      const venue = await db.collection('venues').findOne({ id: venueId });
+      if (!venue) return err('Site introuvable', 404);
+      if (venue.is_available_2026 === false || venue.exposant_visible === false) {
+        return err('Ce site n\'est pas ouvert aux inscriptions exposants.', 400);
+      }
+      // Crée la registration avec priority = next available
+      const nextPriority = (Math.max(0, ...existing.map(r => r.site_priority || 1)) + 1);
+      const newReg = {
+        id: uuid(),
+        edition_id: EDITION_ID,
+        organization_id: orgId,
+        venue_id: venueId,
+        stand_code: null,
+        status: 'a_confirmer',
+        is_pre_reserved: false,
+        is_deposit_received: false,
+        is_locked: false,
+        is_convention_signed: false,
+        is_insurance_uploaded: false,
+        is_guide_sent: false,
+        completion_percent: 10,
+        site_priority: nextPriority,
+        friday_slot_label: null,
+        saturday_slot_label: null,
+        exposant_notes: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('registrations').insertOne(newReg);
+      delete newReg._id;
+      return json({ ok: true, registration: newReg });
+    }
+
+    // 🆕 DELETE/POST /api/exposant/sites/:regId/remove — retire un site (registration) si pas locked
+    if (route.match(/^exposant\/sites\/[^/]+\/remove$/)) {
+      const regId = p[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      if (reg.is_locked) return err('Impossible de retirer ce site : la caution a déjà été reçue par ARACOM.', 400);
+      if (reg.is_deposit_received) return err('Impossible de retirer ce site : caution déjà encaissée.', 400);
+      // Vérifier qu'il restera au moins 1 site
+      const orgId = reg.organization_id;
+      const otherRegs = await db.collection('registrations').countDocuments({ organization_id: orgId, edition_id: EDITION_ID, id: { $ne: regId } });
+      if (otherRegs === 0) return err('Vous devez conserver au moins 1 site.', 400);
+      // Suppression cascade : registration + animation_slots + stand_assignments + deposit (en attente)
+      await db.collection('animation_slots').deleteMany({ registration_id: regId });
+      await db.collection('stand_assignments').deleteMany({ registration_id: regId });
+      await db.collection('deposit_transactions').deleteMany({ registration_id: regId, status: { $ne: 'recue' } });
+      await db.collection('registrations').deleteOne({ id: regId });
+      return json({ ok: true });
+    }
+
+    // 🆕 POST /api/exposant/sites/:regId/priority — changer la priorité d'un site (1 = principal)
+    if (route.match(/^exposant\/sites\/[^/]+\/priority$/)) {
+      const regId = p[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const newPriority = parseInt(body?.priority, 10) || 1;
+      // Décale les autres registrations de la même organisation si conflit
+      const others = await db.collection('registrations').find({ organization_id: reg.organization_id, edition_id: EDITION_ID, id: { $ne: regId } }).toArray();
+      const conflicting = others.find(r => (r.site_priority || 1) === newPriority);
+      if (conflicting) {
+        // Swap priorities
+        await db.collection('registrations').updateOne({ id: conflicting.id }, { $set: { site_priority: reg.site_priority || 1, updated_at: new Date() } });
+      }
+      await db.collection('registrations').updateOne({ id: regId }, { $set: { site_priority: newPriority, updated_at: new Date() } });
+      return json({ ok: true, priority: newPriority });
     }
 
     // POST /api/admin/document-templates — sauvegarde d'un template (textes + logo)

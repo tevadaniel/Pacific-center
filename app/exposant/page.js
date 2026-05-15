@@ -97,17 +97,20 @@ export default function ExposantPortal() {
       const me = await api('/api/auth/me');
       setUser(me.user);
       if (!me.organization) { toast.error('Aucune organisation liée'); setLoading(false); return; }
-      const regs = await api('/api/registrations');
-      const mine = regs.find(r => r.organization_id === me.organization.id);
-      if (!mine) { setData({ me, registration: null }); setLoading(false); return; }
-      const full = await api(`/api/registrations/${mine.id}`);
-      setData({ me, ...full });
+      // 🆕 MULTI-SITES : charger toutes les registrations de l'organisation
+      const mySites = await api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(me.organization.id)}`).catch(() => []);
+      if (!Array.isArray(mySites) || mySites.length === 0) { setData({ me, registration: null }); setLoading(false); return; }
+      // Sélection du site actif : ?reg=<id> dans l'URL OU priorité 1 (principal) par défaut
+      const wantedRegId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('reg') : null;
+      const chosen = (wantedRegId && mySites.find(s => s.id === wantedRegId)) || mySites[0];
+      const full = await api(`/api/registrations/${chosen.id}`);
+      setData({ me, ...full, allSites: mySites });
       // 🔐 Statut mot de passe (pour le bandeau de gestion)
       loadPasswordStatus(me.organization.id);
       // Charge la demande de validation existante (si présente)
       try {
         const vrList = await api('/api/validation-requests');
-        const myVr = (Array.isArray(vrList) ? vrList : []).find(x => x.registration_id === mine.id);
+        const myVr = (Array.isArray(vrList) ? vrList : []).find(x => x.registration_id === chosen.id);
         setValidationRequest(myVr || null);
       } catch {}
     } catch (e) { toast.error(e.message); }
@@ -380,6 +383,13 @@ export default function ExposantPortal() {
 
           {/* 🎯 ÉTAPE STRUCTURANTE — Mon parcours en 3 étapes */}
           <TabsContent value="parcours" className="space-y-4">
+            {/* 🆕 MULTI-SITES : panneau de gestion des sites */}
+            <MultiSitesPanel
+              allSites={data.allSites || []}
+              currentRegId={r.id}
+              organizationId={o.id}
+              onRefresh={load}
+            />
             <ParcoursWizard
               registration={r}
               organization={o}
@@ -506,6 +516,182 @@ export default function ExposantPortal() {
 // =====================================================================
 // 🎯 PARCOURS WIZARD — Les 3 étapes structurantes (Dates / Animations / Validation)
 // =====================================================================
+// 🆕 MULTI-SITES — Panneau de gestion des sites de l'exposant
+function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) {
+  const [venues, setVenues] = useState([]);
+  const [maxSites, setMaxSites] = useState(3);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addVenueId, setAddVenueId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api('/api/venues').then(setVenues).catch(() => {});
+    api('/api/admin/exposant-limits').then(d => setMaxSites(d?.max_sites_per_exposant || 3)).catch(() => {});
+  }, []);
+
+  const usedVenueIds = new Set(allSites.map(s => s.venue_id));
+  const availableVenues = venues.filter(v => !usedVenueIds.has(v.id));
+  const canAddMore = allSites.length < maxSites && availableVenues.length > 0;
+
+  const switchTo = (regId) => {
+    if (regId === currentRegId) return;
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('reg', regId);
+      window.history.pushState({}, '', url);
+      window.location.reload();
+    }
+  };
+
+  const addSite = async () => {
+    if (!addVenueId) return toast.error('Choisissez un site à ajouter');
+    setBusy(true);
+    try {
+      await api('/api/exposant/sites/add', {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: organizationId, venue_id: addVenueId }),
+      });
+      toast.success('🎉 Nouveau site ajouté à votre inscription !');
+      setShowAdd(false);
+      setAddVenueId('');
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const removeSite = async (regId, venueName) => {
+    if (!confirm(`Retirer le site "${venueName}" de votre inscription ?\n\nVotre stand sera libéré et vos animations sur ce site seront supprimées. Cette action est définitive.`)) return;
+    try {
+      await api(`/api/exposant/sites/${regId}/remove`, { method: 'POST', body: '{}' });
+      toast.success('Site retiré de votre inscription');
+      if (regId === currentRegId && typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('reg');
+        window.history.pushState({}, '', url);
+      }
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const setPriority = async (regId, priority) => {
+    try {
+      await api(`/api/exposant/sites/${regId}/priority`, { method: 'POST', body: JSON.stringify({ priority }) });
+      toast.success('Priorité mise à jour');
+      onRefresh();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2 text-blue-900">
+          <Building2 className="w-5 h-5 text-blue-600" /> Mes sites de participation
+          <Badge className="bg-blue-600 text-white">{allSites.length} / {maxSites}</Badge>
+        </CardTitle>
+        <p className="text-xs text-blue-800 mt-1 leading-relaxed">
+          ℹ️ Vous pouvez vous inscrire sur <b>jusqu&apos;à {maxSites} site(s)</b>. Pour chaque site :
+          <br />• <b>1 stand maximum</b> par site (réservé via l&apos;Étape 1 du parcours)
+          <br />• <b>Au moins 1 animation par jour</b> (vendredi ET samedi) — Étape 2
+          <br />• <b>Caution de 20 000 XPF par site</b> (chèque, espèces ou virement)
+          <br />• Vous pouvez <b>modifier ou retirer un site</b> tant qu&apos;ARACOM n&apos;a pas reçu votre caution.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {allSites.map((s) => {
+          const isActive = s.id === currentRegId;
+          const isLocked = s.is_locked || s.is_deposit_received;
+          return (
+            <div key={s.id} className={`rounded-md border-2 p-3 transition ${isActive ? 'bg-white border-blue-500 shadow-sm' : 'bg-white/50 border-slate-200 hover:border-blue-300'}`}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+                  <Select value={String(s.site_priority || 1)} onValueChange={(v) => setPriority(s.id, parseInt(v, 10))} disabled={isLocked}>
+                    <SelectTrigger className="w-20 h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">⭐ 1</SelectItem>
+                      <SelectItem value="2">2</SelectItem>
+                      <SelectItem value="3">3</SelectItem>
+                      <SelectItem value="4">4</SelectItem>
+                      <SelectItem value="5">5</SelectItem>
+                      <SelectItem value="6">6</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="flex-1">
+                    <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
+                      {s.site_priority === 1 && <span className="text-amber-500" title="Site principal">⭐</span>}
+                      {s.venue?.name || '— site à choisir —'}
+                      {isActive && <Badge className="bg-blue-600 text-white text-[10px]">Actif</Badge>}
+                      {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
+                      {s.is_complete && !isLocked && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
+                    </div>
+                    <div className="text-xs text-slate-600 mt-0.5 flex flex-wrap gap-x-3">
+                      <span>Stand : <b>{s.stand_code || '— à réserver —'}</b></span>
+                      <span>Anim. vendredi : {s.has_vendredi_animation ? '✅' : '⚠️'}</span>
+                      <span>Anim. samedi : {s.has_samedi_animation ? '✅' : '⚠️'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-1 flex-wrap">
+                  {!isActive && (
+                    <Button size="sm" variant="outline" onClick={() => switchTo(s.id)} className="text-xs gap-1 h-8">
+                      → Travailler sur ce site
+                    </Button>
+                  )}
+                  {!isLocked && allSites.length > 1 && (
+                    <Button size="sm" variant="outline" onClick={() => removeSite(s.id, s.venue?.name || 'ce site')} className="text-xs gap-1 h-8 border-red-300 text-red-700 hover:bg-red-50">
+                      Retirer
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {canAddMore && !showAdd && (
+          <Button variant="outline" onClick={() => setShowAdd(true)} className="w-full border-dashed border-2 border-blue-300 text-blue-700 hover:bg-blue-100 gap-2">
+            ➕ Ajouter un autre site ({allSites.length} sur {maxSites} utilisé{allSites.length > 1 ? 's' : ''})
+          </Button>
+        )}
+
+        {showAdd && (
+          <div className="rounded-md border-2 border-blue-400 bg-white p-3 space-y-2">
+            <div className="text-sm font-semibold text-blue-900">Choisissez un nouveau site :</div>
+            <Select value={addVenueId} onValueChange={setAddVenueId}>
+              <SelectTrigger><SelectValue placeholder="Sélectionner un site disponible…" /></SelectTrigger>
+              <SelectContent>
+                {availableVenues.map(v => (
+                  <SelectItem key={v.id} value={v.id}>📍 {v.name} ({v.capacity_stands} stands)</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-slate-600">
+              💡 Une nouvelle inscription va être créée pour ce site. Vous devrez ensuite y réserver un stand et y planifier vos animations.
+              <br />💰 Une caution séparée de 20 000 XPF sera demandée pour ce site.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setShowAdd(false); setAddVenueId(''); }} disabled={busy}>Annuler</Button>
+              <Button size="sm" onClick={addSite} disabled={busy || !addVenueId} className="bg-blue-600 hover:bg-blue-700 gap-1">
+                {busy ? 'Création…' : '✅ Ajouter ce site'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {!canAddMore && allSites.length >= maxSites && (
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            🚫 Limite atteinte : vous avez utilisé les {maxSites} sites maximum autorisés par ARACOM.
+          </div>
+        )}
+        {!canAddMore && availableVenues.length === 0 && allSites.length < maxSites && (
+          <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
+            Vous êtes inscrit(e) sur tous les sites disponibles.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ParcoursWizard({ registration, organization, venue, docs, slots, validationRequest, onRefresh }) {
   const r = registration;
   const isLocked = r.status === 'verrouille' || validationRequest?.status === 'verrouille';

@@ -405,7 +405,18 @@ backend:
         agent: "testing"
         comment: "✅ TESTÉ EXHAUSTIVEMENT - 8/8 TESTS PASSÉS (100%). Endpoint POST /api/admin/export-documents 100% fonctionnel. Test 1: type='conventions', site_ids=['all'], registration_ids=['all'] → 200 avec ZIP (254989 bytes), X-Documents-Conventions=67, X-Documents-Receipts=0, Content-Type=application/zip, signature ZIP 'PK' vérifiée. Test 2: type='receipts' → 200 avec ZIP (186815 bytes), Conventions=0, Receipts=67. Test 3: type='all' → 200, Conventions=67, Receipts=67 (égaux, un de chaque par exposant). Test 4: Filtre par site (venue-faaa) → 200, Conventions=16, Receipts=16 (sous-ensemble correct). Test 5: Filtre par registration_id spécifique (reg-arue-A-C01) → 200, Conventions=1, Receipts=1 (exactement 1 de chaque). Test 6: type='bogus' → 400 avec message d'erreur français 'type doit être...'. Test 7: registration_ids=['nonexistent-id-12345'] → 404 avec message français 'Aucun exposant ne correspond...'. Test 8: Validation contenu ZIP (scenario 5) → structure correcte avec dossiers Conventions/<site>/<exposant_stand>/, Recus_Caution/<site>/<exposant_stand>/, README.txt présent avec manifest, PDFs vérifiés avec magic bytes '%PDF-' corrects. Organisation ZIP: Conventions/Arue/I_Mua_Papeete_A-C01/Convention_I_Mua_Papeete_A-C01.pdf, Recus_Caution/Arue/I_Mua_Papeete_A-C01/Recu_Caution_I_Mua_Papeete_A-C01.pdf. Tous les scénarios fonctionnent parfaitement. Feature 100% opérationnelle."
 
-  - task: "🆕 VAGUE 1+2+3+4 — Pack de 8 features (Pacific masqué, Delete bilans, Auto-docs, Templates, Relances, Animations slot edit, Discipline Autre, Virement)"
+  - task: "🆕 MULTI-SITES Exposants — Inscription sur plusieurs sites avec priorité (configurable ARACOM)"
+    implemented: true
+    working: false
+    file: "app/api/[[...path]]/route.js, app/aracom/page.js, app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Nouvelle feature multi-sites pour les exposants. Tests backend à effectuer : (1) GET /api/admin/exposant-limits → {max_sites_per_exposant: 3} par défaut. POST /api/admin/exposant-limits body {max_sites_per_exposant: 5} avec admin → 200, valeur persistée. Sans admin → 403. (2) GET /api/exposant/my-sites?organization_id=<orgId> avec admin → array de registrations avec champs site_priority, has_vendredi_animation, has_samedi_animation, is_complete, venue, deposit. Triées par site_priority ASC. (3) POST /api/exposant/sites/add body {organization_id, venue_id} → crée nouvelle registration avec site_priority = max(existing) + 1, status='a_confirmer'. Erreurs attendues: 400 si org déjà inscrite sur ce site, 400 si limite atteinte (max_sites), 400 si site désactivé (is_available_2026=false OR exposant_visible=false), 404 si venue inexistant. (4) POST /api/exposant/sites/<regId>/remove avec admin → supprime registration + cascade animation_slots + stand_assignments + deposits (sauf recue). 400 si is_locked ou is_deposit_received true. 400 si dernier site (au moins 1 doit rester). (5) POST /api/exposant/sites/<regId>/priority body {priority: 1} avec admin → met à jour site_priority + swap automatique si conflit avec une autre reg de la même org."
+
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js, app/aracom/page.js, app/exposant/page.js"
@@ -552,7 +563,8 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "🆕 MULTI-SITES Exposants — Inscription sur plusieurs sites avec priorité (configurable ARACOM)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -1357,3 +1369,10 @@ agent_communication:
 
   - agent: "testing"
     message: "✅ TESTING SESSION COMPLETE (15/05/2026 03:01 UTC) - Admin caution appointments management endpoints testés avec succès. 11/11 tests passés (100%). Tous les endpoints fonctionnent correctement : GET /api/admin/caution-appointments (liste enrichie + filtre status), POST /api/admin/caution-appointments/create (upsert + email), POST /api/admin/caution-appointments/update (statuts + emails). Permissions admin strictes validées (403 pour non-admin). Alert '🗓️ RDV de restitution caution à confirmer' présente dans /api/dashboard/extended smart_alerts quand status='demande'. DISCREPANCY NOTED: Review request mentionnait /api/alerts mais l'implémentation est dans /api/dashboard/extended. Emails envoyés en mode test (redirect tevageros@me.com). Cleanup effectué. Feature production-ready."
+      - working: false
+        agent: "testing"
+        comment: "✅ TESTÉ BACKEND MULTI-SITES - 21/27 TESTS PASSÉS (77.8%). ❌ 2 BUGS CRITIQUES DÉTECTÉS + 4 échecs de conception de test. BUG 1 (CRITIQUE): POST /api/admin/exposant-limits avec max_sites_per_exposant=0 retourne 3 au lieu de 1 (clamping échoue). CAUSE: Ligne 5362 route.js utilise `parseInt(body?.max_sites_per_exposant, 10) || 3` - quand la valeur est 0, parseInt retourne 0 (falsy), donc le fallback || 3 s'active. FIX REQUIS: Remplacer par `parseInt(body?.max_sites_per_exposant, 10) ?? 3` ou vérifier explicitement !== undefined. BUG 2 (MINEUR): GET /api/exposant/my-sites ne retourne pas le champ is_locked pour les registrations existantes (créées avant l'ajout du champ). Les nouvelles registrations ont le champ. FIX SUGGÉRÉ: Ajouter is_locked: r.is_locked ?? false dans la réponse (ligne 1128). TESTS PASSÉS: (1) GET/POST exposant-limits avec admin (5/7 tests, échec sur value=0), (2) GET my-sites avec organization_id retourne array avec tous champs sauf is_locked (3/4 tests), (3) POST sites/add crée nouvelle registration avec site_priority correct (2/2 tests), (4) Erreurs sites/add: missing params OK (2/5 tests, 3 échecs dus à limite déjà atteinte dans les données de test), (5) POST sites/priority change priorité + swap automatique (2/2 tests), (6) POST sites/remove supprime registration + cascade (2/2 tests), (7) Erreurs sites/remove: non-existent regId 404 OK (1/2 tests, échec test dernier site car org a 2 sites au lieu de 1), (8) GET /api/registrations et /api/dashboard/by-site comptent correctement les multi-sites (2/2 tests). FONCTIONNALITÉS VALIDÉES: Config limite max sites (sauf bug value=0), liste my-sites avec enrichissement venue/deposit/animations, ajout site avec validation limite/duplicate/disabled, suppression site avec cascade + validation locked/dernier site, changement priorité avec swap automatique, comptage multi-sites dans dashboard. FEATURE 77.8% OPÉRATIONNELLE, 2 bugs à corriger."
+
+agent_communication:
+    - agent: "testing"
+      message: "MULTI-SITES feature testé. 21/27 tests passés (77.8%). 2 BUGS DÉTECTÉS: (1) CRITIQUE - POST /api/admin/exposant-limits avec value=0 retourne 3 au lieu de 1 (bug ligne 5362: parseInt || 3 au lieu de ?? 3). (2) MINEUR - GET /api/exposant/my-sites ne retourne pas is_locked pour registrations existantes (ajouter is_locked: r.is_locked ?? false ligne 1128). Feature globalement fonctionnelle: config limite, ajout/suppression sites, changement priorité, validation erreurs, comptage dashboard. Recommandation: Corriger bug critique value=0, puis re-tester."

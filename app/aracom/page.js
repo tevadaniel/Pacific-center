@@ -1472,6 +1472,38 @@ function NextActionCard({ action, registration, organization, venue, onCopyLink,
   );
 }
 
+// 🆕 Config admin : limite de sites par exposant
+function ExposantLimitsConfig() {
+  const [max, setMax] = useState(3);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    api('/api/admin/exposant-limits').then(d => setMax(d?.max_sites_per_exposant || 3)).catch(() => {});
+  }, []);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api('/api/admin/exposant-limits', { method: 'POST', body: JSON.stringify({ max_sites_per_exposant: max }) });
+      toast.success(`✅ Limite définie à ${max} site(s) par exposant`);
+    } catch (e) { toast.error(e.message); }
+    setSaving(false);
+  };
+  return (
+    <div className="mt-2 pt-3 border-t border-blue-200 flex items-center gap-3 flex-wrap">
+      <span className="text-xs font-semibold text-blue-900">🔢 Limite de sites par exposant :</span>
+      <Select value={String(max)} onValueChange={v => setMax(parseInt(v, 10))}>
+        <SelectTrigger className="w-24 h-8 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {[1, 2, 3, 4, 5, 6].map(n => <SelectItem key={n} value={String(n)}>{n} site{n > 1 ? 's' : ''}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Button size="sm" onClick={save} disabled={saving} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 gap-1">
+        💾 {saving ? 'Enregistrement…' : 'Enregistrer'}
+      </Button>
+      <span className="text-[11px] text-slate-600 italic">L&apos;exposant peut s&apos;inscrire sur au plus N sites. Caution séparée par site.</span>
+    </div>
+  );
+}
+
 function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvailability, onTogglePacific, onToggleExposantVisible, onSaveReferent }) {
   const [open, setOpen] = useState(false);
   const initial = venue.referent_aracom || {};
@@ -1666,6 +1698,8 @@ function SitesView() {
               <p className="text-xs text-violet-800 mt-1">👁️ <b>Pacific Centers</b> / 👁️ <b>Exposants</b> : visibilité par portail. Désactivés automatiquement quand le toggle principal est OFF.</p>
             </div>
           </div>
+          {/* 🆕 Config : Limite max de sites par exposant */}
+          <ExposantLimitsConfig />
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
             {venues.map(v => {
               const active = v.is_available_2026 !== false;
