@@ -1127,6 +1127,8 @@ export async function GET(request, { params }) {
         delete r._id;
         return {
           ...r,
+          is_locked: r.is_locked ?? false,
+          is_deposit_received: r.is_deposit_received ?? false,
           site_priority: r.site_priority || 1,
           venue: v ? { id: v.id, name: v.name, code: v.code, capacity_stands: v.capacity_stands } : null,
           deposit: depByReg[r.id] || null,
@@ -5359,7 +5361,9 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
     // 🆕 POST /api/admin/exposant-limits — limite max de sites par exposant
     if (route === 'admin/exposant-limits') {
       if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
-      const max = parseInt(body?.max_sites_per_exposant, 10) || 3;
+      const raw = body?.max_sites_per_exposant;
+      const parsed = parseInt(raw, 10);
+      const max = Number.isFinite(parsed) ? parsed : 3;
       const clamped = Math.max(1, Math.min(6, max));
       await db.collection('app_settings').updateOne(
         { key: 'exposant_limits' },
