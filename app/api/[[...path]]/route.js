@@ -1454,16 +1454,69 @@ export async function GET(request, { params }) {
       historicCounts['2026'] = regs.length;
       const historic = Object.entries(historicCounts).map(([year, count]) => ({ year, count }));
 
-      // 2. Top disciplines (top 10)
-      const discCounts = {};
-      orgs.forEach(o => {
-        const d = o.discipline || 'Autre';
-        discCounts[d] = (discCounts[d] || 0) + 1;
+      // 2. Top disciplines — par site + global + détection multi-sites
+      // 2a. Calcule pour chaque org sur quels sites il est présent (via registrations)
+      const orgSitesMap = {}; // org_id → Set of venue_id
+      regs.forEach(r => {
+        if (!r.organization_id || !r.venue_id) return;
+        if (!orgSitesMap[r.organization_id]) orgSitesMap[r.organization_id] = new Set();
+        orgSitesMap[r.organization_id].add(r.venue_id);
       });
-      const disciplines = Object.entries(discCounts)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
+      // 2b. Set des org_ids présentes sur ≥2 sites
+      const multiSiteOrgIds = new Set(
+        Object.entries(orgSitesMap).filter(([, sites]) => sites.size >= 2).map(([id]) => id)
+      );
+      // 2c. Récupère venues pour libellés
+      const venues = await db.collection('venues').find({}).toArray();
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      // 2d. Construction des disciplines globales (toutes confondues) + per-site
+      const buildDiscList = (orgList) => {
+        const counts = {};
+        const multiInDisc = {};
+        orgList.forEach(o => {
+          const d = o.discipline || 'Autre';
+          counts[d] = (counts[d] || 0) + 1;
+          if (multiSiteOrgIds.has(o.id)) {
+            multiInDisc[d] = (multiInDisc[d] || 0) + 1;
+          }
+        });
+        return Object.entries(counts)
+          .map(([name, count]) => ({ name, count, multi_site_count: multiInDisc[name] || 0 }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 15);
+      };
+
+      // Global = toutes les orgs
+      const disciplines = buildDiscList(orgs);
+
+      // Par site : map venue_id → liste d'orgs présentes sur ce site
+      const orgsByVenue = {};
+      regs.forEach(r => {
+        if (!r.organization_id || !r.venue_id) return;
+        if (!orgsByVenue[r.venue_id]) orgsByVenue[r.venue_id] = new Set();
+        orgsByVenue[r.venue_id].add(r.organization_id);
+      });
+      const disciplines_by_site = {};
+      Object.entries(orgsByVenue).forEach(([venueId, orgIdSet]) => {
+        const venueOrgs = orgs.filter(o => orgIdSet.has(o.id));
+        disciplines_by_site[venueId] = {
+          venue_name: venueById[venueId]?.name || 'Site inconnu',
+          venue_code: venueById[venueId]?.code || '',
+          total_orgs: venueOrgs.length,
+          disciplines: buildDiscList(venueOrgs),
+        };
+      });
+
+      // Liste pour le sélecteur (sites avec au moins 1 inscription)
+      const sites_list = Object.keys(orgsByVenue).map(vid => ({
+        id: vid,
+        name: venueById[vid]?.name || 'Site inconnu',
+        count: orgsByVenue[vid].size,
+      })).sort((a, b) => b.count - a.count);
+
+      // Stats globales multi-sites
+      const multi_site_orgs_count = multiSiteOrgIds.size;
 
       // 3. Completion distribution (histogram)
       const buckets = { '0–25%': 0, '26–50%': 0, '51–75%': 0, '76–99%': 0, '100%': 0 };
@@ -1521,6 +1574,9 @@ export async function GET(request, { params }) {
       return json({
         historic,
         disciplines,
+        disciplines_by_site,
+        sites_list,
+        multi_site_orgs_count,
         completion,
         cautions_status: cautionsStatus,
         mailing_funnel: mailingFunnel,

@@ -603,23 +603,7 @@ function DashboardView({ onGoto }) {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Activity className="w-4 h-4 text-violet-600" /> Top disciplines</CardTitle>
-              <p className="text-[11px] text-slate-500 mt-0.5">Répartition des associations par activité</p>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={analytics.disciplines} layout="vertical" margin={{ left: 30 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+          <DisciplinesCard analytics={analytics} />
 
           <Card>
             <CardHeader>
@@ -6540,4 +6524,117 @@ function AdminOverridePanel({ data, onReload, onClose }) {
 
 
 
+
+
+// =====================================================================
+// 📊 Top disciplines avec sélecteur de site + pastilles multi-sites
+// =====================================================================
+function DisciplinesCard({ analytics }) {
+  const [selectedSite, setSelectedSite] = useState('all');
+
+  // Récupère les disciplines selon le filtre
+  const data = useMemo(() => {
+    if (selectedSite === 'all') {
+      return {
+        list: analytics.disciplines || [],
+        total: analytics.total_organizations || 0,
+        multiSites: analytics.multi_site_orgs_count || 0,
+        label: 'Tous sites confondus',
+      };
+    }
+    const site = analytics.disciplines_by_site?.[selectedSite];
+    if (!site) return { list: [], total: 0, multiSites: 0, label: '—' };
+    return {
+      list: site.disciplines,
+      total: site.total_orgs,
+      multiSites: site.disciplines.reduce((s, d) => s + (d.multi_site_count || 0), 0),
+      label: site.venue_name,
+    };
+  }, [analytics, selectedSite]);
+
+  const sites = analytics.sites_list || [];
+
+  // Custom Tooltip qui affiche le détail multi-sites
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0].payload;
+    return (
+      <div className="bg-white border border-violet-200 rounded-md p-3 shadow-lg text-xs">
+        <div className="font-bold text-slate-800">{d.name}</div>
+        <div className="mt-1">
+          <b>{d.count}</b> exposant{d.count > 1 ? 's' : ''}
+        </div>
+        {d.multi_site_count > 0 && (
+          <div className="mt-1 text-orange-700 flex items-center gap-1">
+            🔄 <b>{d.multi_site_count}</b> sur plusieurs sites
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="w-4 h-4 text-violet-600" /> Top disciplines
+            </CardTitle>
+            <p className="text-[11px] text-slate-500 mt-0.5">{data.label} · {data.total} exposant{data.total > 1 ? 's' : ''}</p>
+          </div>
+          <Select value={selectedSite} onValueChange={setSelectedSite}>
+            <SelectTrigger className="w-44 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">🌐 Tous les sites</SelectItem>
+              {sites.map(s => (
+                <SelectItem key={s.id} value={s.id}>📍 {s.name} ({s.count})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {/* Légende multi-sites */}
+        {data.multiSites > 0 && (
+          <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md p-2 mt-2 flex items-center gap-2">
+            <span className="text-lg">🔄</span>
+            <span><b>{data.multiSites}</b> exposant{data.multiSites > 1 ? 's' : ''} {selectedSite === 'all' ? 'inscrit(s) sur plusieurs sites' : 'aussi présent(s) sur un autre site'}</span>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent>
+        {data.list.length === 0 ? (
+          <div className="text-sm text-slate-500 italic text-center py-8">Aucune donnée pour ce site.</div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data.list} layout="vertical" margin={{ left: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            {/* Liste détaillée avec pastilles */}
+            <div className="mt-3 pt-3 border-t border-slate-100 max-h-32 overflow-y-auto space-y-1">
+              {data.list.map(d => (
+                <div key={d.name} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-slate-50">
+                  <span className="text-slate-700 truncate flex-1">{d.name}</span>
+                  <div className="flex items-center gap-2">
+                    {d.multi_site_count > 0 && (
+                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] gap-1" title={`${d.multi_site_count} exposant(s) sur plusieurs sites`}>
+                        🔄 {d.multi_site_count}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] font-bold">{d.count}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
