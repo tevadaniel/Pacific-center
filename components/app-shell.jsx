@@ -15,10 +15,13 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
   useEffect(() => {
     const s = getSession();
     if (!s) { router.replace('/'); return; }
+    // 🔧 BUG FIX : supporter session.role ET session.role_code (compatibilité backend)
+    const role = s.role || s.role_code;
     // 🛡️ Bypass admin : l'admin ARACOM peut accéder à TOUS les portails (mode aperçu/audit)
-    const isAdmin = s.role === 'aracom_admin';
-    if (allowedRoles && !isAdmin && !allowedRoles.includes(s.role)) { router.replace('/'); return; }
-    setSession(s);
+    const isAdmin = role === 'aracom_admin';
+    if (allowedRoles && !isAdmin && !allowedRoles.includes(role)) { router.replace('/'); return; }
+    // Normalise la session pour les composants enfants (rôle toujours accessible via .role)
+    setSession({ ...s, role });
   }, [router, allowedRoles]);
 
   const logout = () => {

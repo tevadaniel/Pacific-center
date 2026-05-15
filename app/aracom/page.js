@@ -4215,7 +4215,7 @@ function ImportExcelView() {
       fd.append('file', file);
       const res = await fetch('/api/import/exposants-excel', {
         method: 'POST', body: fd,
-        headers: { 'x-user-id': (getSession()?.id || 'u-admin'), 'x-user-role': (getSession()?.role || 'aracom_admin') },
+        headers: { 'x-user-id': (getSession()?.id || 'u-admin'), 'x-user-role': (getSession()?.role || getSession()?.role_code || 'aracom_admin') },
       });
       const data = await res.json();
       toast.dismiss(toastId);

@@ -6,14 +6,16 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { LogIn, Eye, Users, Search, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { getSession } from '@/lib/auth-client';
+import { getSession, saveSession } from '@/lib/auth-client';
 
 // Helper fetch with auth headers (similar à @/lib/auth-client.api mais avec gestion fine d'erreur)
 async function authFetch(path, options = {}) {
   const session = getSession();
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (session?.id) headers['x-user-id'] = session.id;
-  if (session?.role) headers['x-user-role'] = session.role;
+  // 🔧 BUG FIX : supporter session.role ET session.role_code
+  const role = session?.role || session?.role_code;
+  if (role) headers['x-user-role'] = role;
   // Fallback admin (homepage admin login utilise localStorage 'aracom_admin_auth' au lieu de fr26_session)
   if (!headers['x-user-role'] && typeof window !== 'undefined') {
     try {
@@ -55,6 +57,26 @@ export default function PortalSwitcher() {
 
   const goPacific = () => {
     setOpen(false);
+    // 🔧 FIX CRITIQUE : injecter une session Pacific avec rôle correct
+    // Cela permet à la page /pacific d'envoyer x-user-role: pacific_centers_readonly aux APIs
+    // (sans cela, l'utilisateur admin n'aurait pas de session fr26_session et l'API ne filtrerait pas)
+    try {
+      const currentSession = getSession();
+      const homeAdmin = typeof window !== 'undefined' && localStorage.getItem('aracom_admin_auth') === 'true';
+      // Sauvegarde sous une clé séparée pour pouvoir restaurer
+      if (currentSession) {
+        try { sessionStorage.setItem('fr26_session_before_pacific', JSON.stringify(currentSession)); } catch {}
+      }
+      saveSession({
+        id: currentSession?.id || 'u-admin-as-pacific',
+        email: currentSession?.email || 'admin-as-pacific@aracom.pf',
+        name: currentSession?.name || 'Admin (vue Pacific)',
+        role: 'pacific_centers_readonly',
+        role_code: 'pacific_centers_readonly',
+        admin_view_as_pacific: true,
+        admin_origin_authenticated: !!homeAdmin || currentSession?.role === 'aracom_admin' || currentSession?.role_code === 'aracom_admin',
+      });
+    } catch {}
     router.push('/pacific');
   };
 
