@@ -1499,26 +1499,35 @@ function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvail
           <span className="text-sm font-semibold truncate">{venue.name}</span>
           <Badge variant="secondary" className="text-[10px] shrink-0">{venue.code}</Badge>
         </div>
-        <Switch checked={active} onCheckedChange={onToggleAvailability} />
+        <Switch checked={active} onCheckedChange={onToggleAvailability} title="Site actif pour l'édition 2026 (impacte tous les portails)" />
       </div>
+      {!active && (
+        <div className="text-[10px] text-slate-500 italic bg-slate-50 rounded px-2 py-1 mb-1 border border-slate-200">
+          ⛔ Site désactivé — invisible pour Pacific Centers et Exposants
+        </div>
+      )}
       <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
-        <span className="text-slate-600 flex items-center gap-1">
-          {pacific ? '👁️' : '🙈'} Pacific Centers
+        <span className={`flex items-center gap-1 ${!active ? 'text-slate-400' : 'text-slate-600'}`}>
+          {(pacific && active) ? '👁️' : '🙈'} Pacific Centers
         </span>
         <Switch
-          checked={pacific}
+          checked={pacific && active}
+          disabled={!active}
           onCheckedChange={onTogglePacific}
           className="data-[state=checked]:bg-violet-500 scale-75"
+          title={!active ? 'Activez d\'abord le site globalement' : 'Visibilité pour le portail Pacific Centers'}
         />
       </div>
       <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
-        <span className="text-slate-600 flex items-center gap-1" title="Visibilité du site dans le portail exposant (sélection lors de l'inscription)">
-          {exposantVisible ? '👁️' : '🙈'} Exposants
+        <span className={`flex items-center gap-1 ${!active ? 'text-slate-400' : 'text-slate-600'}`} title="Visibilité du site dans le portail exposant (sélection lors de l'inscription)">
+          {(exposantVisible && active) ? '👁️' : '🙈'} Exposants
         </span>
         <Switch
-          checked={!!exposantVisible}
+          checked={!!exposantVisible && active}
+          disabled={!active}
           onCheckedChange={onToggleExposantVisible}
           className="data-[state=checked]:bg-blue-500 scale-75"
+          title={!active ? 'Activez d\'abord le site globalement' : 'Visibilité pour le portail Exposants'}
         />
       </div>
       <div className="pt-1.5 mt-1.5 border-t border-emerald-100/50">
@@ -1651,8 +1660,10 @@ function SitesView() {
             <MapPin className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <div className="flex-1">
               <h3 className="font-bold text-blue-900">Sites disponibles pour l&apos;édition 2026</h3>
-              <p className="text-xs text-blue-800">Activez ou désactivez chaque site. Les sites désactivés ne sont plus visibles côté exposant.</p>
-              <p className="text-xs text-violet-800 mt-1">👁️ <b>Visibilité Pacific Centers</b> : contrôlez quels sites apparaissent dans le portail Pacific.</p>
+              <p className="text-xs text-blue-800">
+                <b>Toggle principal</b> : active/désactive le site globalement. Si désactivé, le site est <b>invisible</b> pour Pacific Centers ET Exposants.
+              </p>
+              <p className="text-xs text-violet-800 mt-1">👁️ <b>Pacific Centers</b> / 👁️ <b>Exposants</b> : visibilité par portail. Désactivés automatiquement quand le toggle principal est OFF.</p>
             </div>
           </div>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
@@ -6781,6 +6792,15 @@ function EditAnimationDialog({ slot, venues = [], onClose, onSave }) {
     form.day_label !== (slot.day_label || 'vendredi') ||
     form.venue_id !== (slot.venue_id || '');
 
+  // 🆕 Amplitude autorisée selon le jour (Vendredi 11h→17h · Samedi 9h→17h)
+  const dayBounds = form.day_label === 'vendredi'
+    ? { open: '11:00', close: '17:00' }
+    : { open: '09:00', close: '17:00' };
+  const isStartValid = form.start_time >= dayBounds.open && form.start_time < dayBounds.close;
+  const isEndValid = form.end_time > dayBounds.open && form.end_time <= dayBounds.close;
+  const isOrderValid = form.start_time < form.end_time;
+  const isTimeValid = isStartValid && isEndValid && isOrderValid;
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -6844,12 +6864,19 @@ function EditAnimationDialog({ slot, venues = [], onClose, onSave }) {
             </div>
             <div>
               <Label>Début</Label>
-              <Input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} />
+              <Input type="time" min={dayBounds.open} max={dayBounds.close} step="900" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} className={!isStartValid || !isOrderValid ? 'border-red-400' : ''} />
             </div>
             <div>
               <Label>Fin</Label>
-              <Input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} />
+              <Input type="time" min={dayBounds.open} max={dayBounds.close} step="900" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} className={!isEndValid || !isOrderValid ? 'border-red-400' : ''} />
             </div>
+          </div>
+          {/* 🆕 Indicateur d'amplitude autorisée */}
+          <div className={`text-xs rounded-md px-3 py-2 ${isTimeValid ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-red-50 border border-red-300 text-red-900'}`}>
+            {isTimeValid ? '✅' : '❌'} <b>Amplitude {form.day_label === 'vendredi' ? 'Vendredi' : 'Samedi'} :</b> ouverture <b>{dayBounds.open}</b> → fermeture <b>{dayBounds.close}</b>
+            {!isStartValid && <div className="mt-1 text-red-700">⚠️ Début hors plage : doit être entre {dayBounds.open} et {dayBounds.close}</div>}
+            {!isEndValid && <div className="mt-1 text-red-700">⚠️ Fin hors plage : doit être entre {dayBounds.open} et {dayBounds.close}</div>}
+            {!isOrderValid && <div className="mt-1 text-red-700">⚠️ L&apos;heure de fin doit être après le début</div>}
           </div>
           <div>
             <Label>Lieu</Label>
@@ -6877,7 +6904,9 @@ function EditAnimationDialog({ slot, venues = [], onClose, onSave }) {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Annuler</Button>
-          <Button onClick={() => onSave(form)} className="bg-emerald-600 hover:bg-emerald-700">Enregistrer</Button>
+          <Button onClick={() => onSave(form)} disabled={!isTimeValid} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
+            {isTimeValid ? 'Enregistrer' : '⛔ Horaires invalides'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

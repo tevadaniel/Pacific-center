@@ -5148,8 +5148,16 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
     if (route.match(/^venues\/[^/]+\/set-availability$/)) {
       const id = p[1];
       const { is_available_2026 } = body;
-      await db.collection('venues').updateOne({ id }, { $set: { is_available_2026: Boolean(is_available_2026), updated_at: new Date() } });
-      return json({ ok: true });
+      const newVal = Boolean(is_available_2026);
+      // 🆕 Synchronisation : si on active globalement le site, on active aussi Pacific et Exposants
+      //                     si on désactive, le filtrage par is_available_2026 masque le site partout (Pacific + Exposants)
+      const upd = { is_available_2026: newVal, updated_at: new Date() };
+      if (newVal) {
+        upd.pacific_visible = true;
+        upd.exposant_visible = true;
+      }
+      await db.collection('venues').updateOne({ id }, { $set: upd });
+      return json({ ok: true, is_available_2026: newVal, synced: newVal });
     }
 
     // 🆕 Toggle visibility côté Pacific Centers (admin only)
@@ -7891,6 +7899,29 @@ export async function PUT(request, { params }) {
       const id = p[1];
       const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes','venue_id'];
       const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
+
+      // 🆕 Validation amplitude horaires (cohérence avec les créneaux exposants)
+      // Vendredi 11h→17h · Samedi 9h→17h
+      const existing = await db.collection('animation_slots').findOne({ id });
+      if (!existing) return err('Créneau introuvable', 404);
+      const dayLabel = upd.day_label || existing.day_label || 'vendredi';
+      const startTime = upd.start_time || existing.start_time;
+      const endTime = upd.end_time || existing.end_time;
+      if (startTime && endTime) {
+        const dayBounds = dayLabel === 'vendredi'
+          ? { open: '11:00', close: '17:00' }
+          : { open: '09:00', close: '17:00' };
+        if (startTime < dayBounds.open) {
+          return err(`Horaire invalide : le ${dayLabel} commence à ${dayBounds.open}. Début demandé : ${startTime}`, 400);
+        }
+        if (endTime > dayBounds.close) {
+          return err(`Horaire invalide : le ${dayLabel} se termine à ${dayBounds.close}. Fin demandée : ${endTime}`, 400);
+        }
+        if (startTime >= endTime) {
+          return err(`Horaire invalide : l'heure de fin (${endTime}) doit être après le début (${startTime})`, 400);
+        }
+      }
+
       upd.updated_at = new Date();
       await db.collection('animation_slots').updateOne({ id }, { $set: upd });
       const s = await db.collection('animation_slots').findOne({ id }); delete s._id;
