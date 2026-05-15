@@ -699,6 +699,19 @@ export async function GET(request, { params }) {
       }
     }
 
+    // 🗓️ EXPOSANT — Demande de RDV pour récupérer sa caution (GET)
+    if (route === 'exposant/caution-appointment') {
+      const ctx = getUserContext(request);
+      const regId = url.searchParams.get('registration_id') || ctx.registration_id;
+      if (!regId) return err('registration_id requis', 400);
+      const appt = await db.collection('caution_appointments').findOne(
+        { registration_id: regId },
+        { sort: { created_at: -1 } }
+      );
+      if (appt) delete appt._id;
+      return json({ appointment: appt || null });
+    }
+
     // 📝 Récupère la réponse satisfaction d'un exposant (own or admin)
     if (route === 'exposant/satisfaction') {
       const ctx = getUserContext(request);
@@ -2339,6 +2352,46 @@ export async function POST(request, { params }) {
       const ok = await bcrypt.compare(password, org.access_password_hash);
       if (!ok) return err('Mot de passe incorrect', 403);
       return json({ ok: true, method: 'own_password' });
+    }
+
+    // 🗓️ EXPOSANT — Création d'une demande de RDV pour restitution caution
+    if (route === 'exposant/caution-appointment') {
+      const { registration_id, organization_id, requested_date, requested_time, notes } = body || {};
+      if (!registration_id || !requested_date || !requested_time) {
+        return err('Champs requis : registration_id, requested_date, requested_time', 400);
+      }
+      // Upsert (un RDV par registration)
+      const existing = await db.collection('caution_appointments').findOne({ registration_id });
+      const appt = {
+        id: existing?.id || uuid(),
+        registration_id,
+        organization_id: organization_id || existing?.organization_id || null,
+        requested_date,
+        requested_time,
+        notes: notes || '',
+        status: 'demande',
+        created_at: existing?.created_at || new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('caution_appointments').updateOne(
+        { registration_id },
+        { $set: appt },
+        { upsert: true }
+      );
+      delete appt._id;
+      // Notification admin (mail interne — best effort)
+      try {
+        const org = await db.collection('organizations').findOne({ id: appt.organization_id });
+        await sendMail({
+          to: process.env.ARACOM_ADMIN_EMAIL || 'tevageros@me.com',
+          subject: `🗓️ Demande de RDV caution — ${org?.name || 'Exposant'}`,
+          html: `<p><b>${org?.name || 'Exposant'}</b> demande un RDV pour récupérer sa caution.</p>
+                 <p>Créneau souhaité : <b>${new Date(requested_date).toLocaleDateString('fr-FR')} à ${requested_time}</b></p>
+                 ${notes ? `<p>Note : ${notes}</p>` : ''}
+                 <p>Validez ou proposez un autre créneau depuis le cockpit ARACOM.</p>`,
+        });
+      } catch (_e) { /* best effort */ }
+      return json({ ok: true, appointment: appt });
     }
 
     // 📝 EXPOSANT — Soumettre les réponses du questionnaire de satisfaction

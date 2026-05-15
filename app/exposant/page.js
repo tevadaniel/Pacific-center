@@ -76,7 +76,7 @@ export default function ExposantPortal() {
     if (typeof window === 'undefined') return;
     const sync = () => {
       const t = new URLSearchParams(window.location.search).get('tab');
-      const valid = ['parcours', 'profil', 'sites', 'animation', 'docs', 'logistique', 'satisfaction', 'guide'];
+      const valid = ['parcours', 'profil', 'infos', 'jourj', 'bilan'];
       if (t && valid.includes(t)) setActiveTab(t);
     };
     sync();
@@ -361,11 +361,9 @@ export default function ExposantPortal() {
             <TabsTrigger value="parcours" className="font-bold">🎯 Mon parcours</TabsTrigger>
             <TabsTrigger value="profil">👤 Mon profil</TabsTrigger>
             <TabsTrigger value="infos">📦 Infos pratiques</TabsTrigger>
-            <TabsTrigger value="postevent" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
-              🏆 Post-événement {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
-            </TabsTrigger>
-            <TabsTrigger value="satisfaction" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? 'Activé après l\'événement par ARACOM' : ''}>
-              📝 Satisfaction {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
+            <TabsTrigger value="jourj">📅 Jour J</TabsTrigger>
+            <TabsTrigger value="bilan" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? "Activé après l'événement par ARACOM" : ''}>
+              ⭐ Satisfaction & Caution {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
             </TabsTrigger>
           </TabsList>
 
@@ -444,61 +442,25 @@ export default function ExposantPortal() {
             </div>
           </TabsContent>
 
-          <TabsContent value="postevent" className="space-y-4">
-            {postEvent.unlocked ? (
-              <>
-                {/* ⭐ Section SATISFACTION */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-xl">⭐</span>
-                    <h2 className="text-lg font-semibold">Votre satisfaction</h2>
-                  </div>
-                  <SatisfactionBlock registration={r} />
-                </div>
-                {/* 📋 Section BILAN */}
-                <div className="pt-4 border-t border-slate-200">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-xl">📋</span>
-                    <h2 className="text-lg font-semibold">Bilan de l&apos;événement</h2>
-                  </div>
-                  <Card className="border-emerald-200 bg-emerald-50/30">
-                    <CardContent className="p-8 text-center">
-                      <span className="text-4xl">📋</span>
-                      <p className="text-lg font-bold mt-3">Bilan de l&apos;événement</p>
-                      <p className="text-sm text-slate-600 mt-2">Vous pouvez consulter le bilan global de l&apos;édition 2026, ainsi que vos statistiques personnalisées (présence, animations, satisfaction).</p>
-                      <Button variant="outline" className="mt-4 gap-2"><Download className="w-4 h-4" /> Télécharger mon bilan PDF</Button>
-                    </CardContent>
-                  </Card>
-                </div>
-              </>
-            ) : (
-              <Card className="border-slate-200">
-                <CardContent className="p-12 text-center">
-                  <span className="text-5xl">🔒</span>
-                  <p className="text-lg font-bold mt-3">Espace post-événement verrouillé</p>
-                  <p className="text-sm text-slate-500 mt-2">La satisfaction et le bilan seront <b>activés par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié par email dès qu&apos;ils seront disponibles.</p>
-                </CardContent>
-              </Card>
-            )}
+          {/* 📅 JOUR J — Check-in / Check-out renseignés par l'agent ARACOM sur le terrain */}
+          <TabsContent value="jourj" className="space-y-4">
+            <JourJBlock registration={r} />
           </TabsContent>
 
-          {/* 📝 SATISFACTION — Questionnaire post-événement (20 questions officielles) */}
-          <TabsContent value="satisfaction" className="space-y-4">
+          {/* ⭐ SATISFACTION & CAUTION — Questionnaire + RDV restitution caution (post-event) */}
+          <TabsContent value="bilan" className="space-y-4">
             {postEvent.unlocked ? (
-              <SatisfactionSurvey
-                organizationId={o?.id}
-                organizationName={o?.name}
-                registrationId={r?.id}
-                venueId={r?.venue_id}
-                standCode={r?.stand_code}
-                defaultDays={r?.attending_days || []}
+              <BilanSatisfactionView
+                registration={r}
+                organization={o}
+                deposit={d}
               />
             ) : (
               <Card>
                 <CardContent className="p-12 text-center">
                   <span className="text-5xl">🔒</span>
-                  <p className="text-lg font-bold mt-3">Questionnaire de satisfaction verrouillé</p>
-                  <p className="text-sm text-slate-500 mt-2">Le questionnaire sera <b>activé par ARACOM</b> après l&apos;événement (15 août 2026). Votre retour aidera à améliorer la prochaine édition.</p>
+                  <p className="text-lg font-bold mt-3">Bilan & questionnaire verrouillés</p>
+                  <p className="text-sm text-slate-500 mt-2">Le questionnaire de satisfaction et la prise de RDV pour récupérer votre caution seront <b>activés par ARACOM</b> après l&apos;événement (15 août 2026). Vous serez notifié(e) par email dès que ce sera disponible.</p>
                 </CardContent>
               </Card>
             )}
@@ -2207,6 +2169,302 @@ function ExposantBriefing({ onAction }) {
             </div>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+
+// =====================================================================
+// 📅 JOUR J — Affichage des check-in / check-out renseignés par l'agent ARACOM
+// =====================================================================
+function JourJBlock({ registration }) {
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!registration?.id) return;
+    api(`/api/registrations/${registration.id}`).then(d => {
+      setSessions(d.attendance_sessions || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [registration?.id]);
+
+  const dayInfo = [
+    { date: '2026-08-14', label: 'Vendredi 14 août 2026', hours: '11h – 17h' },
+    { date: '2026-08-15', label: 'Samedi 15 août 2026',   hours: '9h – 17h'  },
+  ];
+
+  if (loading) return <div className="text-sm text-slate-500 p-4">Chargement…</div>;
+
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+
+  return (
+    <div className="space-y-4">
+      {/* En-tête pédagogique */}
+      <Card className="border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50">
+        <CardContent className="p-5">
+          <div className="flex items-start gap-3">
+            <div className="text-3xl">📅</div>
+            <div className="flex-1">
+              <h3 className="font-bold text-orange-900">Votre présence sur site (Jour J)</h3>
+              <p className="text-sm text-orange-800 mt-1">L&apos;agent ARACOM sur le terrain pointe votre arrivée et votre départ via son application mobile. Voici un suivi en temps réel de votre journée — utile pour la restitution de votre caution.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 2 jours possibles */}
+      <div className="grid md:grid-cols-2 gap-4">
+        {dayInfo.map(day => {
+          const session = sessions.find(s => s.event_date === day.date);
+          const checkIn  = fmtTime(session?.check_in_at);
+          const checkOut = fmtTime(session?.check_out_at);
+          const present = !!session?.check_in_at;
+          return (
+            <Card key={day.date} className={present ? 'border-emerald-300' : 'border-slate-200'}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-orange-600" /> {day.label}
+                  </span>
+                  {present ? (
+                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Présent ✓</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-slate-500">En attente</Badge>
+                  )}
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-1">Horaires officiels : {day.hours}</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border bg-emerald-50/40 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Check-in</div>
+                    <div className="text-2xl font-bold text-emerald-700 mt-1">{checkIn || '—'}</div>
+                  </div>
+                  <div className="rounded-md border bg-blue-50/40 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">Check-out</div>
+                    <div className="text-2xl font-bold text-blue-700 mt-1">{checkOut || '—'}</div>
+                  </div>
+                </div>
+                {session?.notes && (
+                  <div className="text-xs text-slate-600 bg-slate-50 rounded-md p-2 border">
+                    <b>Note de l&apos;agent :</b> {session.notes}
+                  </div>
+                )}
+                {!present && (
+                  <p className="text-xs text-slate-500 italic">Aucun pointage enregistré pour cette journée. L&apos;agent ARACOM vous accueillera à votre arrivée sur site.</p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Pédagogie : comment ça marche */}
+      <Card className="border-slate-200 bg-slate-50/30">
+        <CardContent className="p-4 text-xs text-slate-600 space-y-1.5">
+          <div className="font-semibold text-slate-800">💡 Comment ça marche ?</div>
+          <p>• À votre arrivée sur site, présentez-vous à l&apos;agent ARACOM qui pointe votre <b>check-in</b>.</p>
+          <p>• À votre départ (17h ou plus tôt avec accord ARACOM), l&apos;agent pointe votre <b>check-out</b>.</p>
+          <p>• Ces données conditionnent la <b>restitution de votre caution</b> (présence effective + horaires respectés).</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// ⭐ BILAN & SATISFACTION — Questionnaire + RDV restitution caution
+// =====================================================================
+function BilanSatisfactionView({ registration, organization, deposit }) {
+  const r = registration;
+  const o = organization;
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (!o?.id) return;
+    api(`/api/exposant/satisfaction?organization_id=${o.id}`).then(d => {
+      if (d.response) setHasSubmitted(true);
+    }).catch(() => {});
+  }, [o?.id]);
+
+  return (
+    <div className="space-y-5">
+      {/* Bandeau pédagogique */}
+      <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
+        <CardContent className="p-5">
+          <div className="flex items-start gap-3">
+            <div className="text-3xl">⭐</div>
+            <div className="flex-1">
+              <h3 className="font-bold text-amber-900">Bilan & restitution de votre caution</h3>
+              <p className="text-sm text-amber-800 mt-1">
+                Pour récupérer votre caution de 20 000 XPF, suivez ces 2 étapes :
+              </p>
+              <ol className="text-sm text-amber-900 mt-2 space-y-1 list-decimal list-inside">
+                <li><b>Remplissez le questionnaire de satisfaction</b> ci-dessous (5 minutes).</li>
+                <li><b>Prenez un RDV</b> pour récupérer votre caution (vous serez guidé après soumission).</li>
+              </ol>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Questionnaire (inchangé — toast/UI gérés par le composant) */}
+      <SatisfactionSurvey
+        organizationId={o?.id}
+        organizationName={o?.name}
+        registrationId={r?.id}
+        venueId={r?.venue_id}
+        standCode={r?.stand_code}
+        defaultDays={r?.attending_days || []}
+      />
+
+      {/* RDV pour récupérer la caution — apparaît après soumission */}
+      {hasSubmitted && (
+        <CautionAppointmentBlock registration={r} organization={o} deposit={deposit} />
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 🗓️ PRISE DE RDV pour récupérer la caution (post-questionnaire)
+// =====================================================================
+function CautionAppointmentBlock({ registration, organization, deposit }) {
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [existing, setExisting] = useState(null);
+
+  useEffect(() => {
+    if (!registration?.id) return;
+    api(`/api/exposant/caution-appointment?registration_id=${registration.id}`).then(d => {
+      if (d?.appointment) {
+        setExisting(d.appointment);
+        setSubmitted(true);
+      }
+    }).catch(() => {});
+  }, [registration?.id]);
+
+  // Créneaux suggérés
+  const suggestedDates = [
+    { value: '2026-08-17', label: 'Lundi 17 août 2026' },
+    { value: '2026-08-18', label: 'Mardi 18 août 2026' },
+    { value: '2026-08-19', label: 'Mercredi 19 août 2026' },
+    { value: '2026-08-20', label: 'Jeudi 20 août 2026' },
+    { value: '2026-08-21', label: 'Vendredi 21 août 2026' },
+    { value: '2026-08-24', label: 'Lundi 24 août 2026' },
+    { value: '2026-08-25', label: 'Mardi 25 août 2026' },
+  ];
+  const suggestedTimes = ['09:00', '10:00', '11:00', '13:30', '14:30', '15:30', '16:30'];
+
+  const submit = async () => {
+    if (!date || !time) { toast.error('Choisissez une date et une heure'); return; }
+    setBusy(true);
+    try {
+      const res = await api('/api/exposant/caution-appointment', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registration.id,
+          organization_id: organization.id,
+          requested_date: date,
+          requested_time: time,
+          notes,
+        }),
+      });
+      setExisting(res.appointment);
+      setSubmitted(true);
+      toast.success('Demande de RDV envoyée à ARACOM ✅');
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (submitted && existing) {
+    return (
+      <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+        <CardContent className="p-6">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="w-8 h-8 text-emerald-600 shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-emerald-900">RDV de restitution enregistré ✓</h3>
+              <p className="text-sm text-emerald-800 mt-1">
+                Vous serez accueilli(e) le <b>{new Date(existing.requested_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {existing.requested_time}</b> dans les locaux d&apos;ARACOM à Paea.
+              </p>
+              <div className="mt-3 text-xs text-emerald-700 bg-white/60 rounded-md p-3">
+                <p className="font-semibold mb-1">📍 Adresse : ARACOM Conseil — Paea, Polynésie française</p>
+                <p>Munissez-vous d&apos;une pièce d&apos;identité. La caution de <b>20 000 XPF</b> vous sera restituée sous la forme acceptée à l&apos;origine (espèces, chèque ou virement).</p>
+              </div>
+              <p className="text-xs text-emerald-600 mt-2">Statut : <b>{existing.status || 'demandé'}</b>. Vous recevrez une confirmation par email dès qu&apos;ARACOM aura validé votre créneau.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-orange-300 shadow-lg">
+      <CardHeader className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-t-lg">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Wallet className="w-5 h-5" /> Récupérer ma caution (20 000 XPF)
+        </CardTitle>
+        <p className="text-sm text-white/90 mt-1">Choisissez un créneau pour passer dans nos locaux à Paea récupérer votre caution.</p>
+      </CardHeader>
+      <CardContent className="p-5 space-y-4">
+        <div className="grid md:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Date souhaitée</Label>
+            <div className="grid grid-cols-1 gap-1 mt-2">
+              {suggestedDates.map(d => (
+                <button
+                  key={d.value}
+                  onClick={() => setDate(d.value)}
+                  className={`text-left px-3 py-2 rounded-md border text-sm transition ${date === d.value ? 'border-orange-500 bg-orange-50 text-orange-900 font-semibold' : 'border-slate-200 hover:border-orange-300'}`}
+                >{d.label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Heure souhaitée</Label>
+            <div className="grid grid-cols-2 gap-1 mt-2">
+              {suggestedTimes.map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTime(t)}
+                  className={`px-3 py-2 rounded-md border text-sm transition ${time === t ? 'border-orange-500 bg-orange-50 text-orange-900 font-semibold' : 'border-slate-200 hover:border-orange-300'}`}
+                >{t}</button>
+              ))}
+            </div>
+            <div className="mt-3">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Note (optionnel)</Label>
+              <Input
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Précisions, contraintes…"
+                className="mt-1"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+          <b>Info :</b> ARACOM peut vous proposer un autre créneau si le vôtre n&apos;est pas disponible. Vous recevrez un email de confirmation.
+        </div>
+
+        <Button
+          onClick={submit}
+          disabled={busy || !date || !time}
+          className="w-full bg-orange-600 hover:bg-orange-700 gap-2"
+        >
+          {busy ? 'Envoi…' : '🗓️ Demander ce créneau'}
+        </Button>
       </CardContent>
     </Card>
   );
