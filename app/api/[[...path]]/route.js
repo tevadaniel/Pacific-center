@@ -1113,12 +1113,22 @@ export async function GET(request, { params }) {
       const search = url.searchParams.get('search');
       if (venue_id) q.venue_id = venue_id;
       if (status) q.status = status;
+      // 🆕 Filtrage par rôle : Pacific Centers ne voit que les exposants des sites visibles pour Pacific
+      //                       Exposants externes : sites visibles pour exposants
+      const userRole = request.headers.get('x-user-role');
+      const allVenues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+      if (userRole === 'pacific_centers_readonly') {
+        const allowedVenues = allVenues.filter(v => v.is_available_2026 !== false && v.pacific_visible !== false).map(v => v.id);
+        q.venue_id = q.venue_id && allowedVenues.includes(q.venue_id) ? q.venue_id : { $in: allowedVenues };
+      } else if (userRole === 'exposant') {
+        const allowedVenues = allVenues.filter(v => v.is_available_2026 !== false && v.exposant_visible !== false).map(v => v.id);
+        q.venue_id = q.venue_id && allowedVenues.includes(q.venue_id) ? q.venue_id : { $in: allowedVenues };
+      }
       const regs = await db.collection('registrations').find(q).toArray();
       const orgIds = [...new Set(regs.map(r => r.organization_id))];
       const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
-      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-      const vById = Object.fromEntries(venues.map(v => [v.id, v]));
+      const vById = Object.fromEntries(allVenues.map(v => [v.id, v]));
       const deposits = await db.collection('deposit_transactions').find({}).toArray();
       const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
       let rows = regs.map(r => {
