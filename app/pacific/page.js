@@ -19,6 +19,8 @@ import { MapPin, Users, TrendingUp, FileDown, AlertTriangle, Eye, Calendar, Spar
 import { PROSPECT_STATUS_DEFINITIONS } from '@/lib/constants';
 import HelpCard from '@/components/help-card';
 import SmartVenueMap from '@/components/smart-venue-map';
+import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV, exportAnimationsCSV, exportAllZIP } from '@/lib/csv-export';
+import { Package, Loader2, Wallet, FileSpreadsheet } from 'lucide-react';
 
 export default function PacificCentersPage() {
   return (
@@ -253,7 +255,58 @@ function PlanningView() {
 function ReportingView() {
   const [anomalies, setAnomalies] = useState([]);
   const [reports, setReports] = useState([]);
+  const [exporting, setExporting] = useState(null);
+
   useEffect(() => { api('/api/anomalies').then(setAnomalies); api('/api/reports').then(setReports); }, []);
+
+  // 📦 Téléchargements (chaque bouton charge à la demande pour éviter de tout précharger)
+  const exportExposants = async () => {
+    setExporting('exposants');
+    try {
+      const rows = await api('/api/registrations');
+      exportExposantsCSV(rows);
+      toast.success(`${rows.length} exposants exportés ✅`);
+    } catch (e) { toast.error(e.message); } finally { setExporting(null); }
+  };
+  const exportCautions = async () => {
+    setExporting('cautions');
+    try {
+      const rows = await api('/api/registrations');
+      exportCautionsCSV(rows);
+      toast.success(`${rows.length} cautions exportées ✅`);
+    } catch (e) { toast.error(e.message); } finally { setExporting(null); }
+  };
+  const exportAnimations = async () => {
+    setExporting('animations');
+    try {
+      const rows = await api('/api/animation-slots');
+      exportAnimationsCSV(rows);
+      toast.success(`${rows.length} animations exportées ✅`);
+    } catch (e) { toast.error(e.message); } finally { setExporting(null); }
+  };
+  const exportSatisfaction = async () => {
+    setExporting('satisfaction');
+    try {
+      const rows = await api('/api/admin/satisfaction-responses').catch(() => []);
+      exportSatisfactionCSV(rows);
+      toast.success(`${rows.length} réponses exportées ✅`);
+    } catch (e) { toast.error(e.message); } finally { setExporting(null); }
+  };
+  const exportAll = async () => {
+    setExporting('all');
+    const tId = toast.loading('Génération du ZIP complet…');
+    try {
+      const [exposants, animations, satisfaction] = await Promise.all([
+        api('/api/registrations'),
+        api('/api/animation-slots'),
+        api('/api/admin/satisfaction-responses').catch(() => []),
+      ]);
+      await exportAllZIP({ exposants, cautions: exposants, animations, satisfaction });
+      toast.success('Archive ZIP complète téléchargée 📦', { id: tId });
+    } catch (e) {
+      toast.error(`Échec : ${e.message}`, { id: tId });
+    } finally { setExporting(null); }
+  };
 
   const byType = anomalies.reduce((a, x) => { a[x.anomaly_type] = (a[x.anomaly_type] || 0) + 1; return a; }, {});
   const bySev = anomalies.reduce((a, x) => { a[x.severity_level] = (a[x.severity_level] || 0) + 1; return a; }, {});
@@ -269,6 +322,38 @@ function ReportingView() {
 
   return (
     <div className="space-y-4">
+      {/* 📦 EXPORTS — Pacific Centers peut télécharger toutes les données */}
+      <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-cyan-50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Package className="w-4 h-4 text-violet-700" /> Exporter les données
+          </CardTitle>
+          <p className="text-xs text-slate-600 mt-1">Téléchargez les données du Forum 2026 au format CSV (Excel-compatible). Pour tout obtenir en une fois, utilisez le ZIP complet.</p>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <Button variant="outline" onClick={exportExposants} disabled={!!exporting} className="gap-1 justify-start text-xs">
+            {exporting === 'exposants' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5 text-blue-600" />}
+            Exposants
+          </Button>
+          <Button variant="outline" onClick={exportCautions} disabled={!!exporting} className="gap-1 justify-start text-xs">
+            {exporting === 'cautions' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wallet className="w-3.5 h-3.5 text-emerald-600" />}
+            Cautions
+          </Button>
+          <Button variant="outline" onClick={exportAnimations} disabled={!!exporting} className="gap-1 justify-start text-xs">
+            {exporting === 'animations' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calendar className="w-3.5 h-3.5 text-orange-600" />}
+            Animations
+          </Button>
+          <Button variant="outline" onClick={exportSatisfaction} disabled={!!exporting} className="gap-1 justify-start text-xs">
+            {exporting === 'satisfaction' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+            Satisfaction
+          </Button>
+          <Button onClick={exportAll} disabled={!!exporting} className="gap-1 justify-start text-xs bg-violet-700 hover:bg-violet-800 text-white">
+            {exporting === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
+            ZIP complet
+          </Button>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Anomalies totales" value={anomalies.length} accent="violet" icon={AlertTriangle} />
         <KpiCard label="Ouvertes" value={openCount} accent={openCount ? 'orange' : 'emerald'} />

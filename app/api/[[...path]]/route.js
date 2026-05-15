@@ -712,7 +712,8 @@ export async function GET(request, { params }) {
     // 📊 Admin : liste toutes les réponses satisfaction
     if (route === 'admin/satisfaction-responses') {
       const ctx = getUserContext(request);
-      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      // Admin OR Pacific Centers (read-only) peuvent consulter les réponses agrégées
+      if (ctx.role !== 'aracom_admin' && ctx.role !== 'pacific_centers_readonly') return err('Accès réservé', 403);
       const responses = await db.collection('satisfaction_responses').find({}).sort({ submitted_at: -1 }).toArray();
       const orgIds = [...new Set(responses.map(r => r.organization_id))];
       const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
