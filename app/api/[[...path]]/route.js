@@ -712,6 +712,51 @@ export async function GET(request, { params }) {
       return json({ appointment: appt || null });
     }
 
+    // 🗓️ ADMIN — Liste des RDV caution (avec infos org pour le cockpit)
+    if (route === 'admin/caution-appointments') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const status = url.searchParams.get('status'); // filtre optionnel : demande, confirme, propose, restitue, annule
+      const q = status ? { status } : {};
+      const appts = await db.collection('caution_appointments').find(q).sort({ created_at: -1 }).toArray();
+      const orgIds = [...new Set(appts.map(a => a.organization_id).filter(Boolean))];
+      const regIds = [...new Set(appts.map(a => a.registration_id).filter(Boolean))];
+      const [orgs, regs, surveys, deposits] = await Promise.all([
+        orgIds.length ? db.collection('organizations').find({ id: { $in: orgIds } }).toArray() : [],
+        regIds.length ? db.collection('registrations').find({ id: { $in: regIds } }).toArray() : [],
+        orgIds.length ? db.collection('satisfaction_responses').find({ organization_id: { $in: orgIds } }).toArray() : [],
+        regIds.length ? db.collection('deposit_transactions').find({ registration_id: { $in: regIds } }).toArray() : [],
+      ]);
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+      const regById = Object.fromEntries(regs.map(r => [r.id, r]));
+      const surveyByOrg = Object.fromEntries(surveys.map(s => [s.organization_id, s]));
+      const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
+
+      const venues = await db.collection('venues').find({}).toArray();
+      const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+
+      return json(appts.map(a => {
+        delete a._id;
+        const org = orgById[a.organization_id];
+        const reg = regById[a.registration_id];
+        const survey = surveyByOrg[a.organization_id];
+        const dep = depByReg[a.registration_id];
+        return {
+          ...a,
+          organization_name: org?.name || null,
+          organization_email: org?.main_email || null,
+          contact_name: org?.contact_name || null,
+          contact_phone: org?.main_phone || null,
+          stand_code: reg?.stand_code || null,
+          venue_name: reg ? venueById[reg.venue_id]?.name : null,
+          survey_submitted: !!survey,
+          survey_submitted_at: survey?.submitted_at || null,
+          deposit_status: dep?.status || null,
+          deposit_amount: dep?.amount_xpf || 20000,
+        };
+      }));
+    }
+
     // 📝 Récupère la réponse satisfaction d'un exposant (own or admin)
     if (route === 'exposant/satisfaction') {
       const ctx = getUserContext(request);
@@ -1696,6 +1741,18 @@ export async function GET(request, { params }) {
       const noInsurance = regs.filter(r => !r.is_insurance_uploaded && r.status !== 'prospect');
       if (noInsurance.length > 5) alerts.push({ severity: 'warning', icon: '🛡️', text: `${noInsurance.length} exposant(s) sans assurance déposée` });
 
+      // 💰 Caution restitutions à programmer (RDV en attente ou questionnaires soumis sans RDV)
+      const pendingAppointments = await db.collection('caution_appointments').countDocuments({ status: 'demande' });
+      if (pendingAppointments > 0) {
+        alerts.push({
+          severity: 'info',
+          icon: '🗓️',
+          text: `${pendingAppointments} RDV de restitution caution à confirmer`,
+          action_link: '/aracom?tab=bilans',
+          action_label: 'Voir les RDV',
+        });
+      }
+
       return json({
         days_to_event: daysToEvent,
         at_risk: atRisk,
@@ -2428,6 +2485,134 @@ export async function POST(request, { params }) {
       const ok = await bcrypt.compare(password, org.access_password_hash);
       if (!ok) return err('Mot de passe incorrect', 403);
       return json({ ok: true, method: 'own_password' });
+    }
+
+    // 🗓️ ADMIN — Confirmer/modifier/annuler un RDV caution + envoyer email à l'exposant
+    if (route === 'admin/caution-appointments/update') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const { id, status, confirmed_date, confirmed_time, admin_note } = body || {};
+      if (!id) return err('id requis', 400);
+      if (!['confirme', 'propose', 'restitue', 'annule', 'demande'].includes(status)) {
+        return err('status invalide', 400);
+      }
+      const appt = await db.collection('caution_appointments').findOne({ id });
+      if (!appt) return err('RDV introuvable', 404);
+
+      const updates = {
+        status,
+        updated_at: new Date(),
+        admin_note: admin_note || appt.admin_note || '',
+        confirmed_at: status === 'confirme' ? new Date() : (appt.confirmed_at || null),
+      };
+      if (confirmed_date) updates.confirmed_date = confirmed_date;
+      if (confirmed_time) updates.confirmed_time = confirmed_time;
+      if (status === 'restitue') updates.restituted_at = new Date();
+
+      await db.collection('caution_appointments').updateOne({ id }, { $set: updates });
+
+      // 📧 Notification email à l'exposant
+      const org = await db.collection('organizations').findOne({ id: appt.organization_id });
+      const finalDate = updates.confirmed_date || appt.requested_date;
+      const finalTime = updates.confirmed_time || appt.requested_time;
+      const dateStr = new Date(finalDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+      const subjects = {
+        confirme: `✅ RDV confirmé pour la restitution de votre caution`,
+        propose: `📅 Nouveau créneau proposé pour votre caution`,
+        restitue: `🎉 Caution restituée — confirmation`,
+        annule: `❌ RDV de restitution caution annulé`,
+      };
+      const bodies = {
+        confirme: `<p>Bonjour ${org?.contact_name || ''},</p>
+          <p>Votre RDV pour récupérer votre caution de <b>20 000 XPF</b> est confirmé pour le <b>${dateStr} à ${finalTime}</b>.</p>
+          <p>📍 Adresse : ARACOM Conseil — Paea, Polynésie française</p>
+          <p>Munissez-vous d'une pièce d'identité.</p>
+          ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
+          <p>À très bientôt,<br>L'équipe ARACOM</p>`,
+        propose: `<p>Bonjour ${org?.contact_name || ''},</p>
+          <p>Nous vous proposons un nouveau créneau pour récupérer votre caution :</p>
+          <p style="font-size:18px"><b>${dateStr} à ${finalTime}</b></p>
+          <p>📍 ARACOM Conseil — Paea</p>
+          ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
+          <p>Merci de nous confirmer votre venue par retour de mail.</p>
+          <p>L'équipe ARACOM</p>`,
+        restitue: `<p>Bonjour ${org?.contact_name || ''},</p>
+          <p>Nous confirmons la restitution de votre caution de <b>20 000 XPF</b> ce ${dateStr}.</p>
+          <p>Merci pour votre participation au Forum de la Rentrée 2026 et à très bientôt pour la prochaine édition !</p>
+          <p>L'équipe ARACOM</p>`,
+        annule: `<p>Bonjour ${org?.contact_name || ''},</p>
+          <p>Votre RDV de restitution caution du ${dateStr} a été annulé.</p>
+          ${admin_note ? `<p><i>Motif : ${admin_note}</i></p>` : ''}
+          <p>Contactez-nous pour reprogrammer.</p>
+          <p>L'équipe ARACOM</p>`,
+      };
+
+      if (org?.main_email && subjects[status]) {
+        try {
+          await sendMail({
+            to: org.main_email,
+            subject: subjects[status],
+            html: bodies[status],
+          });
+        } catch (e) { /* best effort */ }
+      }
+
+      const updated = await db.collection('caution_appointments').findOne({ id });
+      delete updated._id;
+      return json({ ok: true, appointment: updated });
+    }
+
+    // 🗓️ ADMIN — Créer un RDV caution pour un exposant (initiative admin)
+    if (route === 'admin/caution-appointments/create') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const { registration_id, organization_id, confirmed_date, confirmed_time, admin_note } = body || {};
+      if (!registration_id || !confirmed_date || !confirmed_time) {
+        return err('Champs requis : registration_id, confirmed_date, confirmed_time', 400);
+      }
+      const existing = await db.collection('caution_appointments').findOne({ registration_id });
+      const appt = {
+        id: existing?.id || uuid(),
+        registration_id,
+        organization_id: organization_id || existing?.organization_id || null,
+        requested_date: existing?.requested_date || confirmed_date,
+        requested_time: existing?.requested_time || confirmed_time,
+        confirmed_date,
+        confirmed_time,
+        status: 'confirme',
+        admin_note: admin_note || '',
+        notes: existing?.notes || '',
+        created_at: existing?.created_at || new Date(),
+        updated_at: new Date(),
+        confirmed_at: new Date(),
+      };
+      await db.collection('caution_appointments').updateOne(
+        { registration_id },
+        { $set: appt },
+        { upsert: true }
+      );
+      // Email proactif
+      const org = await db.collection('organizations').findOne({ id: appt.organization_id });
+      if (org?.main_email) {
+        const dateStr = new Date(confirmed_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+        try {
+          await sendMail({
+            to: org.main_email,
+            subject: `📅 RDV pour récupérer votre caution — Forum 2026`,
+            html: `<p>Bonjour ${org.contact_name || ''},</p>
+              <p>Nous vous donnons rendez-vous pour récupérer votre caution de <b>20 000 XPF</b> :</p>
+              <p style="font-size:18px"><b>${dateStr} à ${confirmed_time}</b></p>
+              <p>📍 ARACOM Conseil — Paea, Polynésie française</p>
+              <p>Munissez-vous d'une pièce d'identité.</p>
+              ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
+              <p>Merci de confirmer votre venue par retour de mail.</p>
+              <p>L'équipe ARACOM</p>`,
+          });
+        } catch (e) { /* best effort */ }
+      }
+      delete appt._id;
+      return json({ ok: true, appointment: appt });
     }
 
     // 🗓️ EXPOSANT — Création d'une demande de RDV pour restitution caution

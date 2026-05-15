@@ -2778,6 +2778,9 @@ function BilansView() {
   };
   return (
     <div className="space-y-4">
+      {/* 🗓️ RDV restitution caution — Section dédiée */}
+      <CautionAppointmentsAdminPanel />
+
       <Card>
         <CardHeader><CardTitle className="text-base">Générateur de bilans automatique</CardTitle></CardHeader>
         <CardContent className="grid md:grid-cols-2 gap-4">
@@ -6676,6 +6679,312 @@ function DisciplinesCard({ analytics }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+
+// =====================================================================
+// 🗓️ ADMIN — Panneau de gestion des RDV de restitution caution
+// =====================================================================
+function CautionAppointmentsAdminPanel() {
+  const [appts, setAppts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api('/api/admin/caution-appointments')
+      .then(d => { setAppts(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const update = async (id, status, extra = {}) => {
+    setBusy(true);
+    try {
+      await api('/api/admin/caution-appointments/update', {
+        method: 'POST',
+        body: JSON.stringify({ id, status, ...extra }),
+      });
+      toast.success(
+        status === 'confirme' ? 'RDV confirmé + email envoyé ✅' :
+        status === 'propose'  ? 'Nouveau créneau proposé + email envoyé 📧' :
+        status === 'restitue' ? 'Caution restituée enregistrée 🎉' :
+        status === 'annule'   ? 'RDV annulé + email envoyé ❌' :
+        'Mis à jour ✅'
+      );
+      setEditing(null);
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '—';
+  const statusBadge = (s) => {
+    const map = {
+      demande:  { label: '🕒 Demandé',   cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+      propose:  { label: '📅 Proposé',   cls: 'bg-blue-100 text-blue-800 border-blue-300' },
+      confirme: { label: '✅ Confirmé',  cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+      restitue: { label: '🎉 Restitué', cls: 'bg-violet-100 text-violet-800 border-violet-300' },
+      annule:   { label: '❌ Annulé',    cls: 'bg-slate-100 text-slate-600 border-slate-300' },
+    };
+    return map[s] || { label: s, cls: '' };
+  };
+
+  const counts = {
+    demande:  appts.filter(a => a.status === 'demande').length,
+    propose:  appts.filter(a => a.status === 'propose').length,
+    confirme: appts.filter(a => a.status === 'confirme').length,
+    restitue: appts.filter(a => a.status === 'restitue').length,
+    annule:   appts.filter(a => a.status === 'annule').length,
+  };
+
+  return (
+    <>
+      <Card className="border-amber-300 shadow-sm">
+        <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-t-lg pb-3">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-orange-600" /> RDV restitution caution
+              </CardTitle>
+              <p className="text-xs text-slate-600 mt-1">Confirmez, modifiez ou planifiez les RDV pour rendre la caution aux exposants. Email automatique envoyé à chaque action.</p>
+            </div>
+            <Button size="sm" onClick={() => setEditing({ id: 'new' })} className="bg-orange-600 hover:bg-orange-700 gap-1 h-8">
+              <Plus className="w-3.5 h-3.5" /> Nouveau RDV
+            </Button>
+          </div>
+          {/* KPIs rapides */}
+          <div className="grid grid-cols-5 gap-2 mt-3">
+            {Object.entries(counts).map(([k, n]) => (
+              <div key={k} className="text-center p-2 rounded-md bg-white border">
+                <div className="text-xs text-slate-500">{statusBadge(k).label}</div>
+                <div className="text-lg font-bold text-slate-800">{n}</div>
+              </div>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent className="p-3">
+          {loading ? (
+            <div className="text-sm text-slate-500 text-center py-8">Chargement…</div>
+          ) : appts.length === 0 ? (
+            <div className="text-sm text-slate-500 text-center py-8 italic">Aucun RDV pour le moment. Les RDV apparaîtront ici dès qu&apos;un exposant remplit son questionnaire de satisfaction.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b">
+                  <tr>
+                    <th className="text-left p-2">Exposant</th>
+                    <th className="text-left p-2">Site / Stand</th>
+                    <th className="text-left p-2">Caution</th>
+                    <th className="text-left p-2">Questionnaire</th>
+                    <th className="text-left p-2">Demande exposant</th>
+                    <th className="text-left p-2">RDV confirmé</th>
+                    <th className="text-left p-2">Statut</th>
+                    <th className="text-right p-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {appts.map(a => (
+                    <tr key={a.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2">
+                        <div className="font-semibold text-slate-800">{a.organization_name || '—'}</div>
+                        <div className="text-xs text-slate-500">{a.contact_name || ''}</div>
+                        <div className="text-xs text-slate-400">{a.organization_email || ''}</div>
+                      </td>
+                      <td className="p-2 text-xs">
+                        <div>{a.venue_name || '—'}</div>
+                        <div className="text-slate-500">Stand {a.stand_code || '—'}</div>
+                      </td>
+                      <td className="p-2 text-xs">
+                        <Badge variant="outline" className={a.deposit_status === 'recue' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600'}>
+                          {a.deposit_status === 'recue' ? '✓ Reçue' : a.deposit_status || '—'}
+                        </Badge>
+                        <div className="text-slate-400 mt-1">{a.deposit_amount?.toLocaleString('fr-FR')} XPF</div>
+                      </td>
+                      <td className="p-2 text-xs">
+                        {a.survey_submitted ? (
+                          <Badge className="bg-blue-100 text-blue-700 border-blue-200">✓ Rempli</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-slate-500">En attente</Badge>
+                        )}
+                      </td>
+                      <td className="p-2 text-xs">
+                        <div>{fmtDate(a.requested_date)}</div>
+                        <div className="text-slate-500">{a.requested_time}</div>
+                      </td>
+                      <td className="p-2 text-xs">
+                        {a.confirmed_date ? (
+                          <>
+                            <div className="font-semibold text-emerald-700">{fmtDate(a.confirmed_date)}</div>
+                            <div className="text-emerald-600">{a.confirmed_time}</div>
+                          </>
+                        ) : <span className="text-slate-400 italic">—</span>}
+                      </td>
+                      <td className="p-2">
+                        <Badge variant="outline" className={statusBadge(a.status).cls}>
+                          {statusBadge(a.status).label}
+                        </Badge>
+                      </td>
+                      <td className="p-2 text-right">
+                        <div className="flex gap-1 justify-end">
+                          {a.status === 'demande' && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                              onClick={() => update(a.id, 'confirme', { confirmed_date: a.requested_date, confirmed_time: a.requested_time })}>
+                              ✓ Confirmer
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" className="h-7 text-xs"
+                            onClick={() => setEditing(a)}>
+                            Modifier
+                          </Button>
+                          {a.status === 'confirme' && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
+                              onClick={() => update(a.id, 'restitue')}>
+                              🎉 Restitué
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Dialog d'édition */}
+      {editing && (
+        <CautionAppointmentEditDialog
+          appointment={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// Dialog édition / création d'un RDV
+function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
+  const isNew = appointment?.id === 'new';
+  const [registrations, setRegistrations] = useState([]);
+  const [selectedReg, setSelectedReg] = useState(isNew ? '' : appointment.registration_id);
+  const [date, setDate] = useState(appointment?.confirmed_date || appointment?.requested_date || '2026-08-17');
+  const [time, setTime] = useState(appointment?.confirmed_time || appointment?.requested_time || '10:00');
+  const [adminNote, setAdminNote] = useState(appointment?.admin_note || '');
+  const [status, setStatus] = useState(appointment?.status || 'confirme');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (isNew) api('/api/registrations').then(setRegistrations);
+  }, [isNew]);
+
+  const save = async () => {
+    if (!date || !time) { toast.error('Date et heure requises'); return; }
+    setBusy(true);
+    try {
+      if (isNew) {
+        if (!selectedReg) { toast.error('Choisir un exposant'); setBusy(false); return; }
+        const reg = registrations.find(r => r.id === selectedReg);
+        await api('/api/admin/caution-appointments/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            registration_id: selectedReg,
+            organization_id: reg?.organization_id,
+            confirmed_date: date,
+            confirmed_time: time,
+            admin_note: adminNote,
+          }),
+        });
+        toast.success('RDV créé + email envoyé ✅');
+      } else {
+        await api('/api/admin/caution-appointments/update', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: appointment.id,
+            status,
+            confirmed_date: date,
+            confirmed_time: time,
+            admin_note: adminNote,
+          }),
+        });
+        toast.success('RDV mis à jour + email envoyé ✅');
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isNew ? '➕ Nouveau RDV restitution caution' : `🗓️ Modifier le RDV — ${appointment.organization_name || ''}`}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {isNew && (
+            <div>
+              <Label className="text-xs font-semibold">Exposant</Label>
+              <Select value={selectedReg} onValueChange={setSelectedReg}>
+                <SelectTrigger><SelectValue placeholder="Choisir un exposant…" /></SelectTrigger>
+                <SelectContent className="max-h-80">
+                  {registrations.map(r => (
+                    <SelectItem key={r.id} value={r.id}>{r.organization?.name} — {r.venue?.name} ({r.stand_code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {!isNew && (
+            <div>
+              <Label className="text-xs font-semibold">Statut</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="confirme">✅ Confirmer</SelectItem>
+                  <SelectItem value="propose">📅 Proposer un autre créneau</SelectItem>
+                  <SelectItem value="restitue">🎉 Caution restituée</SelectItem>
+                  <SelectItem value="annule">❌ Annuler</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs font-semibold">Date</Label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Heure</Label>
+              <Input type="time" value={time} onChange={e => setTime(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs font-semibold">Note pour l&apos;exposant (incluse dans l&apos;email)</Label>
+            <Textarea rows={3} value={adminNote} onChange={e => setAdminNote(e.target.value)} placeholder="Informations complémentaires, parking, accès, etc." />
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-2.5 text-xs text-blue-800">
+            📧 <b>Email automatique</b> envoyé à l&apos;exposant avec les détails du RDV.
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Annuler</Button>
+          <Button onClick={save} disabled={busy} className="bg-orange-600 hover:bg-orange-700 gap-2">
+            {busy ? 'Envoi…' : '💾 Enregistrer & envoyer email'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
