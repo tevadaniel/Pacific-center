@@ -362,7 +362,12 @@ export default function ExposantPortal() {
             <TabsTrigger value="profil">👤 Mon profil</TabsTrigger>
             <TabsTrigger value="infos">📦 Infos pratiques</TabsTrigger>
             <TabsTrigger value="jourj">📅 Jour J</TabsTrigger>
-            <TabsTrigger value="bilan" disabled={!postEvent.unlocked} className={!postEvent.unlocked ? 'opacity-40 cursor-not-allowed' : ''} title={!postEvent.unlocked ? "Activé après l'événement par ARACOM" : ''}>
+            <TabsTrigger
+              value="bilan"
+              disabled={!postEvent.unlocked && user?.role !== 'aracom_admin'}
+              className={!postEvent.unlocked ? (user?.role === 'aracom_admin' ? 'border-2 border-dashed border-amber-400' : 'opacity-40 cursor-not-allowed') : ''}
+              title={!postEvent.unlocked ? (user?.role === 'aracom_admin' ? '⚠️ Verrouillé pour les exposants — accès admin uniquement' : "Activé après l'événement par ARACOM") : ''}
+            >
               ⭐ Satisfaction & Caution {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
             </TabsTrigger>
           </TabsList>
@@ -449,12 +454,20 @@ export default function ExposantPortal() {
 
           {/* ⭐ SATISFACTION & CAUTION — Questionnaire + RDV restitution caution (post-event) */}
           <TabsContent value="bilan" className="space-y-4">
-            {postEvent.unlocked ? (
-              <BilanSatisfactionView
-                registration={r}
-                organization={o}
-                deposit={d}
-              />
+            {(postEvent.unlocked || user?.role === 'aracom_admin') ? (
+              <>
+                {!postEvent.unlocked && user?.role === 'aracom_admin' && (
+                  <div className="rounded-md border-2 border-dashed border-amber-400 bg-amber-50 p-3 text-xs text-amber-900 flex items-center gap-2">
+                    <span className="text-lg">🔒</span>
+                    <span><b>Mode admin :</b> ce contenu est actuellement <b>verrouillé pour les exposants</b>. Vous pouvez consulter, modifier les réponses et gérer la restitution de caution. Pour l&apos;ouvrir aux exposants, allez dans <b>Cockpit ARACOM &gt; Bilans &gt; Activer post-événement</b>.</span>
+                  </div>
+                )}
+                <BilanSatisfactionView
+                  registration={r}
+                  organization={o}
+                  deposit={d}
+                />
+              </>
             ) : (
               <Card>
                 <CardContent className="p-12 text-center">
@@ -1678,6 +1691,10 @@ function LogistiqueBlock({ registration, onRefresh }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <Textarea rows={5} value={value} onChange={e => setValue(e.target.value)} placeholder="Ex: nous avons besoin d'une prise électrique pour un écran de démo, d'une table supplémentaire, d'un espace de change pour les démonstrations..." />
+          <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 flex items-start gap-2 text-xs text-amber-900">
+            <span className="text-base shrink-0">ℹ️</span>
+            <span><b>ARACOM reviendra vers vous</b> pour confirmer la faisabilité de votre demande après étude avec Pacific Centers. Vous serez recontacté(e) par email.</span>
+          </div>
           <Button onClick={save} disabled={saving} className="gap-2"><CheckCircle2 className="w-4 h-4" /> {saving ? 'Enregistrement…' : 'Enregistrer ma demande'}</Button>
         </CardContent>
       </Card>
