@@ -951,6 +951,10 @@ export async function GET(request, { params }) {
       if (userRole === 'pacific_centers_readonly') {
         visible = visible.filter(v => v.pacific_visible !== false);
       }
+      // 🆕 Filtre exposants : seuls les sites avec exposant_visible !== false (masque Mahina/Moorea par défaut)
+      if (userRole === 'exposant') {
+        visible = visible.filter(v => v.exposant_visible !== false);
+      }
       return json(visible.map(v => { delete v._id; return v; }));
     }
 
@@ -959,6 +963,26 @@ export async function GET(request, { params }) {
     if (route === 'official-documents') {
       const docs = await db.collection('official_documents').find({ active: { $ne: false } }).sort({ category: 1, sort_order: 1 }).toArray();
       return json(docs.map(d => { delete d._id; return d; }));
+    }
+
+    // 🆕 GET /api/admin/rib-config — RIB ARACOM (accessible à tous pour usage interne)
+    if (route === 'admin/rib-config') {
+      const cfg = await db.collection('app_settings').findOne({ key: 'rib_config' });
+      const defaults = { titulaire: 'ARACOM', banque: '', iban: '', bic: '', reference: 'Caution Forum 2026 + nom exposant' };
+      return json(cfg?.value || defaults);
+    }
+
+    // 🆕 GET /api/admin/document-templates — liste des 4 templates éditables
+    if (route === 'admin/document-templates') {
+      const userRole = request.headers.get('x-user-role');
+      if (userRole !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const keys = ['convention', 'guide', 'recu', 'attestation_remboursement'];
+      const out = {};
+      for (const k of keys) {
+        const cfg = await db.collection('app_settings').findOne({ key: `doc_template_${k}` });
+        out[k] = { texts: cfg?.texts || {}, logo_base64: cfg?.logo_base64 || null, updated_at: cfg?.updated_at || null };
+      }
+      return json(out);
     }
 
     // ============ DEADLINES par étape (Profil, Stand, Animation, Documents, Caution, Convention) ============
@@ -2706,6 +2730,82 @@ export async function POST(request, { params }) {
         payload,
         { upsert: true }
       );
+
+      // 🆕 AUTO-GÉNÉRATION : Attestation de remboursement de caution (sans signatures)
+      try {
+        const regId = body?.registration_id || payload.registration_id;
+        if (regId) {
+          const existingAttest = await db.collection('registration_documents').findOne({
+            registration_id: regId,
+            document_type: 'attestation_remboursement',
+            status: { $in: ['valide', 'en_attente'] }
+          });
+          if (!existingAttest) {
+            const reg = await db.collection('registrations').findOne({ id: regId });
+            const org = await db.collection('organizations').findOne({ id: orgId });
+            const venue = reg?.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+            const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
+            const tpl = await db.collection('app_settings').findOne({ key: 'doc_template_attestation_remboursement' });
+            const t = tpl?.texts || {};
+            const today = new Date().toLocaleDateString('fr-FR');
+            const num = `ATT-2026-${String(regId).slice(0, 6).toUpperCase()}`;
+            const modeLabel = dep?.deposit_mode === 'especes' ? 'Espèces' : (dep?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
+            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Attestation de remboursement ${org?.name || ''}</title>
+<style>body{font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:32px auto;color:#1f2937;padding:0 16px;line-height:1.55}
+h1{color:#059669;margin:0 0 4px;font-size:24px}
+.header{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #059669;padding-bottom:10px}
+.brand{background:#059669;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px}
+.box{border:2px solid #059669;padding:18px;border-radius:8px;margin:20px 0;background:#f0fdf4}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #d1fae5}
+.row:last-child{border-bottom:0}
+.label{color:#475569}
+.amount{font-size:28px;color:#059669;font-weight:800;text-align:center;margin:12px 0}
+.sig{display:flex;justify-content:space-between;margin-top:60px}
+.sig-block{width:45%;border-top:1px solid #cbd5e1;padding-top:8px;font-size:12px;color:#64748b;text-align:center}
+.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#059669;color:#fff;border:0;cursor:pointer;font-weight:600}
+@media print{.print-btn{display:none}}
+.notice{background:#fef3c7;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:6px;font-size:12px;color:#92400e;margin-top:18px}
+</style></head><body>
+<button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="header"><div><h1>${t.title || 'ATTESTATION DE REMBOURSEMENT DE CAUTION'}</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div class="brand">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émise le ${today}</div></div></div>
+<p style="margin-top:24px">${t.intro || `La société <b>ARACOM</b>, organisatrice du Forum de la Rentrée 2026, atteste par la présente avoir procédé au <b>remboursement intégral</b> de la caution versée par l'exposant ci-dessous, dans le cadre de sa participation à l'événement.`}</p>
+<div class="box">
+  <div class="row"><span class="label">N° d'attestation</span><b>${num}</b></div>
+  <div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div>
+  <div class="row"><span class="label">Contact</span><span>${org?.contact_name || '—'}</span></div>
+  <div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg?.stand_code || '—'}</span></div>
+  <div class="row"><span class="label">Mode de versement initial</span><b>${modeLabel}</b></div>
+  <div class="row"><span class="label">Date de remboursement</span><b>${today}</b></div>
+</div>
+<div class="amount">Montant remboursé : 20 000 XPF</div>
+<p>${t.conditions || `Le remboursement est effectué après constat du respect des conditions de présence et de tenue conforme du stand sur les deux jours du Forum (vendredi 14 et samedi 15 août 2026), suite à la complétion du questionnaire de satisfaction par l'exposant.`}</p>
+<div class="notice"><b>⚠️ Document à signer :</b> cette attestation est générée automatiquement. Elle sera finalisée et signée par les deux parties (ARACOM + exposant) lors du remboursement.</div>
+<div class="sig"><div class="sig-block">Pour ARACOM<br/><i>Date & signature</i></div><div class="sig-block">L'exposant ${org?.name || ''}<br/><i>Date & signature</i></div></div>
+<p style="font-size:11px;color:#94a3b8;margin-top:30px;text-align:center">Document officiel — Forum de la Rentrée 2026 · ${num}</p>
+</body></html>`;
+            await db.collection('registration_documents').insertOne({
+              id: uuid(),
+              registration_id: regId,
+              document_type: 'attestation_remboursement',
+              file_name: `Attestation_remboursement_${(org?.name || 'exp').replace(/\s+/g, '_')}_${num}.html`,
+              mime_type: 'text/html',
+              file_size: html.length,
+              file_data: Buffer.from(html, 'utf-8').toString('base64'),
+              status: 'valide',
+              is_signed: false,
+              attestation_number: num,
+              uploaded_by: 'aracom-auto',
+              uploaded_at: new Date(),
+              validated_at: new Date(),
+              created_at: new Date(),
+              updated_at: new Date(),
+            });
+          }
+        }
+      } catch (genErr) {
+        console.error('[satisfaction auto-attestation]', genErr?.message);
+      }
+
       return json({ ok: true, id: payload.id });
     }
 
@@ -4660,6 +4760,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         if (!reg) continue;
         await db.collection('registrations').updateOne({ id }, { $set: {
           status: 'confirme', is_pre_reserved: false, is_deposit_received: true,
+          is_guide_sent: true, // 🆕 guide auto-mis à dispo dès caution payée
           confirmed_at: new Date(), updated_at: new Date(),
         } });
         const dep = await db.collection('deposit_transactions').findOne({ registration_id: id });
@@ -4669,6 +4770,28 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
           await db.collection('deposit_transactions').insertOne({ id: uuid(), registration_id: id, amount_xpf: 20000, status: 'recue', received_at: new Date(), created_at: new Date(), updated_at: new Date() });
         }
         await db.collection('stand_assignments').updateMany({ registration_id: id, status: 'pre_reserve' }, { $set: { status: 'confirme', updated_at: new Date() } });
+        // 🆕 AUTO-génération du reçu de caution
+        try {
+          const existing = await db.collection('registration_documents').findOne({ registration_id: id, document_type: 'recu_caution' });
+          if (!existing) {
+            const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+            const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+            const dep2 = await db.collection('deposit_transactions').findOne({ registration_id: id });
+            const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
+            const paymentLabel = dep2?.deposit_mode === 'especes' ? 'Espèces' : (dep2?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
+            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937;padding:0 16px}h1{color:#1d4ed8;margin:0 0 4px}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#1d4ed8;color:#fff;border:0;cursor:pointer;font-weight:600}@media print{.print-btn{display:none}}</style></head><body><button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button><div style="display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #1d4ed8;padding-bottom:10px"><div><h1>REÇU DE CAUTION</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div style="background:#1d4ed8;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;letter-spacing:.05em">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émis le ${new Date().toLocaleDateString('fr-FR')}</div></div></div><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date d'émission</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode de paiement</span><b>${paymentLabel}</b></div></div><div style="text-align:center;padding:18px 0;background:#eff6ff;border-radius:8px"><div class="label">Montant reçu en garantie</div><div class="amount">20 000 XPF</div></div></body></html>`;
+            await db.collection('registration_documents').insertOne({
+              id: uuid(), registration_id: id, document_type: 'recu_caution',
+              file_name: `Recu_caution_${(org?.name || 'exp').replace(/\s+/g, '_')}_${receiptNumber}.html`,
+              mime_type: 'text/html', file_size: html.length,
+              file_data: Buffer.from(html, 'utf-8').toString('base64'),
+              status: 'valide', uploaded_by: 'aracom-auto',
+              uploaded_at: new Date(), validated_at: new Date(),
+              receipt_number: receiptNumber,
+              created_at: new Date(), updated_at: new Date(),
+            });
+          }
+        } catch (rcptErr) { console.error('[bulk-confirm auto-recu]', rcptErr?.message); }
         confirmed++;
       }
       return json({ ok: true, confirmed });
@@ -5038,6 +5161,15 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true, pacific_visible: Boolean(pacific_visible) });
     }
 
+    // 🆕 Toggle visibility côté Exposants (admin only) — Mahina/Moorea masqués par défaut
+    if (route.match(/^venues\/[^/]+\/set-exposant-visible$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const id = p[1];
+      const { exposant_visible } = body;
+      await db.collection('venues').updateOne({ id }, { $set: { exposant_visible: Boolean(exposant_visible), updated_at: new Date() } });
+      return json({ ok: true, exposant_visible: Boolean(exposant_visible) });
+    }
+
     // 🆕 Configuration du référent ARACOM sur place (admin only)
     if (route.match(/^venues\/[^/]+\/set-referent$/)) {
       if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
@@ -5050,6 +5182,77 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       };
       await db.collection('venues').updateOne({ id }, { $set: { referent_aracom: referent, updated_at: new Date() } });
       return json({ ok: true, referent });
+    }
+
+    // ============================================================
+    // 🆕 CONFIG ARACOM — RIB + Templates documents officiels (admin only)
+    // ============================================================
+    // POST /api/admin/rib-config — sauvegarde du RIB ARACOM (champs structurés)
+    if (route === 'admin/rib-config') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const rib = {
+        titulaire: (body?.titulaire || '').trim(),
+        banque: (body?.banque || '').trim(),
+        iban: (body?.iban || '').trim().replace(/\s+/g, ' ').toUpperCase(),
+        bic: (body?.bic || '').trim().toUpperCase(),
+        reference: (body?.reference || 'Caution Forum 2026 + nom exposant').trim(),
+        updated_at: new Date(),
+      };
+      await db.collection('app_settings').updateOne(
+        { key: 'rib_config' },
+        { $set: { key: 'rib_config', value: rib, updated_at: new Date() } },
+        { upsert: true }
+      );
+      return json({ ok: true, rib });
+    }
+
+    // POST /api/admin/document-templates — sauvegarde d'un template (textes + logo)
+    // body : { key: 'convention'|'guide'|'recu'|'attestation_remboursement', texts: {...}, logo_base64?: '...' }
+    if (route === 'admin/document-templates') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const { key: tplKey, texts, logo_base64 } = body || {};
+      const validKeys = ['convention', 'guide', 'recu', 'attestation_remboursement'];
+      if (!validKeys.includes(tplKey)) return err('Template inconnu', 400);
+      const upd = { updated_at: new Date() };
+      if (texts && typeof texts === 'object') upd.texts = texts;
+      if (typeof logo_base64 === 'string') upd.logo_base64 = logo_base64; // empty = reset
+      await db.collection('app_settings').updateOne(
+        { key: `doc_template_${tplKey}` },
+        { $set: { key: `doc_template_${tplKey}`, ...upd } },
+        { upsert: true }
+      );
+      return json({ ok: true });
+    }
+
+    // POST /api/admin/refund-attestation/:regId/upload — ARACOM upload version signée
+    if (route.match(/^admin\/refund-attestation\/[^/]+\/upload$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const regId = p[2];
+      const { file_name, mime_type, file_base64 } = body || {};
+      if (!file_base64) return err('file_base64 requis', 400);
+      // Désactive l'ancienne attestation auto si présente
+      await db.collection('registration_documents').updateMany(
+        { registration_id: regId, document_type: 'attestation_remboursement' },
+        { $set: { status: 'remplace', updated_at: new Date() } }
+      );
+      const fileBuf = Buffer.from(file_base64, 'base64');
+      await db.collection('registration_documents').insertOne({
+        id: uuid(),
+        registration_id: regId,
+        document_type: 'attestation_remboursement',
+        file_name: file_name || `Attestation_remboursement_signee.pdf`,
+        mime_type: mime_type || 'application/pdf',
+        file_size: fileBuf.length,
+        file_data: file_base64,
+        status: 'valide',
+        is_signed: true,
+        uploaded_by: 'aracom',
+        uploaded_at: new Date(),
+        validated_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      return json({ ok: true });
     }
 
     // One-time migration : set is_available_2026 + disable exposant/pacific passwords
@@ -5766,7 +5969,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         venue_id: reg.venue_id,
         stand_code: reg.stand_code,
         status: 'en_attente', // en_attente -> rdv_fixe -> verrouille | annulee
-        preferred_payment, // 'cheque' ou 'especes'
+        preferred_payment, // 'cheque' | 'especes' | 'virement'
         rdv_proposal,
         notes,
         rdv_date: null,
@@ -5789,7 +5992,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
           const exposantName = ctx.org.name;
           const venueName = ctx.venue?.name || '—';
           const stand = ctx.reg.stand_code;
-          const paymentLabel = preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
+          const paymentLabel = preferred_payment === 'especes' ? 'Espèces' : (preferred_payment === 'virement' ? 'Virement bancaire' : 'Chèque');
           // 1) Mail à l'exposant : confirmation de prise en compte
           if (ctx.org.main_email) {
             sendMailAuto({
@@ -5804,7 +6007,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
   ${rdv_proposal ? `<div><b>Vos disponibilités :</b> ${rdv_proposal}</div>` : ''}
 </div>
 <p>L'équipe ARACOM va vous recontacter sous peu pour <b>fixer un rendez-vous</b> de remise de la caution. Une fois la caution réceptionnée, votre stand et vos créneaux d'animation seront <b>verrouillés définitivement</b>.</p>
-<p>📌 <b>Modes acceptés :</b> chèque ou espèces uniquement.</p>
+<p>📌 <b>Modes acceptés :</b> chèque, espèces ou virement bancaire.</p>
 <p>À très vite,<br/>L'équipe ARACOM</p>`,
             }, db).catch(e => console.error('[mail exposant request-validation]', e?.message));
           }
@@ -5904,6 +6107,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         status: 'confirme',
         is_pre_reserved: false,
         is_deposit_received: true,
+        is_guide_sent: true, // 🆕 guide auto-mis à dispo dès caution réceptionnée
         is_locked: true,
         confirmed_at: new Date(),
         locked_at: new Date(),
@@ -6088,7 +6292,7 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
       const orgUpd = {};
-      ['name', 'discipline', 'contact_name', 'main_phone', 'description', 'animation_default'].forEach(k => {
+      ['name', 'discipline', 'discipline_other', 'contact_name', 'main_phone', 'description', 'animation_default'].forEach(k => {
         if (typeof body[k] === 'string') orgUpd[k] = body[k];
       });
       if (Object.keys(orgUpd).length) {
@@ -7685,7 +7889,7 @@ export async function PUT(request, { params }) {
 
     if (route.startsWith('animation-slots/')) {
       const id = p[1];
-      const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes'];
+      const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes','venue_id'];
       const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();
       await db.collection('animation_slots').updateOne({ id }, { $set: upd });
@@ -7727,6 +7931,13 @@ export async function DELETE(request, { params }) {
     }
     if (route.startsWith('field-media/')) {
       await db.collection('field_media').deleteOne({ id: p[1] });
+      return json({ ok: true });
+    }
+    // 🗑️ DELETE bilan / rapport (admin only)
+    if (route.startsWith('reports/')) {
+      const userRole = request.headers.get('x-user-role');
+      if (userRole !== 'aracom_admin') return err('Réservé aux admins', 403);
+      await db.collection('post_event_reports').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
     if (route.startsWith('tasks/')) {

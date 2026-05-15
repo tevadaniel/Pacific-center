@@ -131,7 +131,8 @@ export default function ExposantPortal() {
 
   const r = data.registration, o = data.organization, v = data.venue, d = data.deposit;
   const docs = data.documents || [];
-  const cautionReceiptDoc = docs.find(dd => dd.document_type === 'recu_caution');
+  const cautionReceiptDoc = docs.find(dd => dd.document_type === 'recu_caution' && dd.status !== 'remplace');
+  const refundAttestationDoc = docs.find(dd => dd.document_type === 'attestation_remboursement' && dd.status === 'valide');
   const slotsArr = data.slots || [];
   const animationsCount = slotsArr.length;
   const validationRequestId = r.validation_request_id;
@@ -324,10 +325,15 @@ export default function ExposantPortal() {
                   </div>
                   <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
                     {canRequest
-                      ? <>Tout est prêt ! Cliquez pour <b>verrouiller votre place</b>. ARACOM recevra une notification et vous contactera pour fixer un RDV de remise de la caution (<b>chèque ou espèces</b> uniquement, 20 000 XPF).</>
+                      ? <>Tout est prêt ! Cliquez pour <b>verrouiller votre place</b>. ARACOM recevra une notification et vous contactera pour fixer un RDV de remise de la caution (<b>chèque, espèces ou virement</b>, 20 000 XPF).</>
                       : <>Avant de pouvoir confirmer votre présence : choisissez un site & un stand <i>(onglet Sites & plan)</i>, puis <b>1 créneau d&apos;animation par jour</b> <i>(onglet Animations)</i>.</>
                     }
                   </p>
+                  {canRequest && (
+                    <div className="mt-2 text-[12px] rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-emerald-900">
+                      💡 <b>Bon à savoir :</b> Vous pouvez confirmer votre présence maintenant et compléter vos documents (convention signée, attestation d&apos;assurance…) <b>ultérieurement</b>. Aucun document obligatoire pour valider cette étape.
+                    </div>
+                  )}
                 </div>
                 <ConfirmPresenceButton registrationId={r.id} disabled={!canRequest} onDone={load} />
               </CardContent>
@@ -420,8 +426,16 @@ export default function ExposantPortal() {
                   ) : (
                     <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
                       <strong>Modes acceptés :</strong> chèque, virement ou espèces. <br />
-                      Le reçu de caution sera <b>fourni par ARACOM</b> dans cet espace dès réception du paiement.
+                      Le reçu de caution sera <b>fourni automatiquement par ARACOM</b> dans cet espace dès réception du paiement.
                     </div>
+                  )}
+                  {refundAttestationDoc && (
+                    <a href={`/api/documents/${refundAttestationDoc.id}/download`} target="_blank" rel="noreferrer">
+                      <Button size="sm" variant="outline" className="w-full gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                        <Download className="w-4 h-4" /> Attestation de remboursement de caution
+                        {refundAttestationDoc.is_signed && <Badge className="bg-emerald-600 text-white text-[10px] ml-1">Signée</Badge>}
+                      </Button>
+                    </a>
                   )}
                 </CardContent>
               </Card>
@@ -847,6 +861,11 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ preferred_payment: 'cheque', rdv_proposal: '', notes: '' });
+  const [rib, setRib] = useState(null);
+  useEffect(() => {
+    // Charge le RIB ARACOM pour affichage si virement sélectionné
+    api('/api/admin/rib-config').then(setRib).catch(() => {});
+  }, []);
   const submit = async () => {
     setBusy(true);
     try {
@@ -872,7 +891,7 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
       </Button>
       {open && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && setOpen(false)}>
-          <Card className="max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+          <Card className="max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><Lock className="w-5 h-5 text-violet-600" /> Confirmer ma présence</CardTitle>
               <p className="text-sm text-slate-600">Votre site, votre stand et vos créneaux d&apos;animation seront <b>verrouillés définitivement</b> par ARACOM dès que la caution sera réceptionnée.</p>
@@ -880,10 +899,11 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
             <CardContent className="space-y-4">
               <div>
                 <Label className="text-sm font-semibold">Mode de caution préféré (20 000 XPF)</Label>
-                <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="grid grid-cols-3 gap-2 mt-2">
                   {[
                     { v: 'cheque', label: '💳 Chèque', desc: "À l'ordre d'ARACOM" },
                     { v: 'especes', label: '💵 Espèces', desc: 'Remise en main propre' },
+                    { v: 'virement', label: '🏦 Virement', desc: 'Bancaire (RIB ci-dessous)' },
                   ].map(o => (
                     <button key={o.v} type="button" onClick={() => setForm({ ...form, preferred_payment: o.v })}
                       className={`border-2 rounded-md p-3 text-left transition ${form.preferred_payment === o.v ? 'border-violet-500 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
@@ -893,6 +913,24 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
                   ))}
                 </div>
               </div>
+              {form.preferred_payment === 'virement' && rib && (
+                <div className="rounded-md bg-blue-50 border-2 border-blue-200 p-3 text-xs space-y-1">
+                  <div className="font-bold text-blue-900 flex items-center gap-2">🏦 Coordonnées bancaires ARACOM</div>
+                  <div className="grid grid-cols-2 gap-2 mt-2 font-mono text-[11px]">
+                    <div><span className="text-slate-500">Titulaire :</span> <b className="text-blue-900">{rib.titulaire || '—'}</b></div>
+                    <div><span className="text-slate-500">Banque :</span> <b className="text-blue-900">{rib.banque || '—'}</b></div>
+                    <div className="col-span-2"><span className="text-slate-500">IBAN :</span> <b className="text-blue-900 select-all">{rib.iban || '—'}</b></div>
+                    <div><span className="text-slate-500">BIC :</span> <b className="text-blue-900 select-all">{rib.bic || '—'}</b></div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-blue-200"><span className="text-slate-500">Référence à indiquer :</span> <b className="text-blue-900">{rib.reference || '—'}</b></div>
+                  <div className="text-[10px] text-slate-500 italic">Le RIB officiel ARACOM vous sera envoyé en pièce jointe lors de la confirmation de votre demande.</div>
+                </div>
+              )}
+              {form.preferred_payment === 'virement' && !rib && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+                  ℹ️ Le RIB ARACOM vous sera communiqué par email après l&apos;envoi de votre demande.
+                </div>
+              )}
               <div>
                 <Label className="text-sm font-semibold">Vos disponibilités pour le RDV (facultatif)</Label>
                 <Input
@@ -911,7 +949,7 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
                 />
               </div>
               <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-                <b>📌 Modes acceptés :</b> chèque ou espèces uniquement (pas de virement pour la caution).
+                <b>📌 Modes acceptés :</b> chèque, espèces ou virement bancaire (20 000 XPF).
               </div>
             </CardContent>
             <div className="flex gap-2 justify-end p-4 border-t">
@@ -1009,6 +1047,7 @@ function ProfilBlock({ organization, registration, onRefresh }) {
   const [form, setForm] = useState({
     name: organization.name || '',
     discipline: organization.discipline || '',
+    discipline_other: organization.discipline_other || '',
     contact_name: organization.contact_name || '',
     main_phone: organization.main_phone || '',
     description: organization.description || '',
@@ -1024,6 +1063,7 @@ function ProfilBlock({ organization, registration, onRefresh }) {
         body: JSON.stringify({
           name: form.name,
           discipline: form.discipline,
+          discipline_other: form.discipline === 'Autre' ? form.discipline_other : '',
           contact_name: form.contact_name,
           main_phone: form.main_phone,
           description: form.description,
@@ -1051,6 +1091,14 @@ function ProfilBlock({ organization, registration, onRefresh }) {
               <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
               <SelectContent>{DISCIPLINES.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}<SelectItem value="Autre">Autre…</SelectItem></SelectContent>
             </Select>
+            {form.discipline === 'Autre' && (
+              <Input
+                className="mt-2"
+                placeholder="Précisez votre discipline…"
+                value={form.discipline_other}
+                onChange={e => setForm({ ...form, discipline_other: e.target.value })}
+              />
+            )}
           </div>
           <div><Label>Email principal <Lock className="w-3 h-3 inline ml-1 text-slate-400" /></Label><Input value={organization.main_email || ''} disabled /></div>
           <div><Label>Téléphone</Label><Input value={form.main_phone} onChange={e => setForm({ ...form, main_phone: e.target.value })} placeholder="87 XX XX XX" /></div>
@@ -1517,7 +1565,8 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
 // DOCUMENTS — sans "reçu de caution" (fourni par ARACOM)
 // =====================================================================
 function DocsBlockExposant({ registrationId, docs, onRefresh }) {
-  const cautionReceipt = docs.find(d => d.document_type === 'recu_caution');
+  const cautionReceipt = docs.find(d => d.document_type === 'recu_caution' && d.status !== 'remplace');
+  const refundAttestation = docs.find(d => d.document_type === 'attestation_remboursement' && d.status === 'valide');
   const [officialDocs, setOfficialDocs] = useState([]);
 
   useEffect(() => {
@@ -1569,14 +1618,14 @@ function DocsBlockExposant({ registrationId, docs, onRefresh }) {
         </Card>
       )}
 
-      {/* Reçu de caution — INFO ONLY */}
+      {/* 🆕 Reçu de caution — INFO ONLY */}
       <Card className={cautionReceipt ? 'border-emerald-200 bg-emerald-50/30' : 'border-amber-200 bg-amber-50/30'}>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Wallet className="w-4 h-4 text-blue-600" />
             Reçu de caution {cautionReceipt ? <Badge className="bg-emerald-600 text-white text-[10px]">Disponible</Badge> : <Badge variant="secondary" className="text-[10px]">En attente</Badge>}
           </CardTitle>
-          <p className="text-xs text-slate-500 mt-1">📌 Ce document est <b>généré et fourni par ARACOM</b> dès réception de votre caution.</p>
+          <p className="text-xs text-slate-500 mt-1">📌 Ce document est <b>généré automatiquement</b> par ARACOM dès réception de votre caution.</p>
         </CardHeader>
         <CardContent>
           {cautionReceipt ? (
@@ -1592,6 +1641,29 @@ function DocsBlockExposant({ registrationId, docs, onRefresh }) {
         </CardContent>
       </Card>
 
+      {/* 🆕 Attestation de remboursement de caution — généré post-questionnaire */}
+      {refundAttestation && (
+        <Card className="border-2 border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-emerald-900">
+              <FileCheck2 className="w-4 h-4 text-emerald-600" />
+              Attestation de remboursement de caution
+              {refundAttestation.is_signed
+                ? <Badge className="bg-emerald-600 text-white text-[10px]">Signée ARACOM</Badge>
+                : <Badge variant="secondary" className="bg-amber-100 text-amber-900 text-[10px]">En attente de signature</Badge>}
+            </CardTitle>
+            <p className="text-xs text-emerald-800 mt-1">
+              📌 Document généré <b>automatiquement</b> après votre questionnaire de satisfaction.
+              {!refundAttestation.is_signed && <> ARACOM déposera ici la version signée par les deux parties.</>}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <a href={`/api/documents/${refundAttestation.id}/download`} target="_blank" rel="noreferrer">
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 gap-2"><Download className="w-4 h-4" /> Télécharger l&apos;attestation</Button>
+            </a>
+          </CardContent>
+        </Card>
+      )}
       {/* Documents to upload by exposant */}
       <Card>
         <CardHeader>

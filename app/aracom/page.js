@@ -1472,7 +1472,7 @@ function NextActionCard({ action, registration, organization, venue, onCopyLink,
   );
 }
 
-function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onTogglePacific, onSaveReferent }) {
+function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvailability, onTogglePacific, onToggleExposantVisible, onSaveReferent }) {
   const [open, setOpen] = useState(false);
   const initial = venue.referent_aracom || {};
   const [name, setName] = useState(initial.name || '');
@@ -1509,6 +1509,16 @@ function VenueAdminCard({ venue, active, pacific, onToggleAvailability, onToggle
           checked={pacific}
           onCheckedChange={onTogglePacific}
           className="data-[state=checked]:bg-violet-500 scale-75"
+        />
+      </div>
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
+        <span className="text-slate-600 flex items-center gap-1" title="Visibilité du site dans le portail exposant (sélection lors de l'inscription)">
+          {exposantVisible ? '👁️' : '🙈'} Exposants
+        </span>
+        <Switch
+          checked={!!exposantVisible}
+          onCheckedChange={onToggleExposantVisible}
+          className="data-[state=checked]:bg-blue-500 scale-75"
         />
       </div>
       <div className="pt-1.5 mt-1.5 border-t border-emerald-100/50">
@@ -1616,6 +1626,15 @@ function SitesView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  const toggleExposantVisible = async (v) => {
+    const newVal = !(v.exposant_visible !== false);
+    try {
+      await api(`/api/venues/${v.id}/set-exposant-visible`, { method: 'POST', body: JSON.stringify({ exposant_visible: newVal }) });
+      toast.success(`Site ${v.name} ${newVal ? '👁️ visible Exposants' : '🙈 masqué pour Exposants'}`);
+      api('/api/venues').then(setVenues);
+    } catch (e) { toast.error(e.message); }
+  };
+
   const saveReferent = async (v, ref) => {
     try {
       await api(`/api/venues/${v.id}/set-referent`, { method: 'POST', body: JSON.stringify(ref) });
@@ -1640,14 +1659,17 @@ function SitesView() {
             {venues.map(v => {
               const active = v.is_available_2026 !== false;
               const pacific = v.pacific_visible !== false;
+              const expoVisible = v.exposant_visible !== false;
               return (
                 <VenueAdminCard
                   key={v.id}
                   venue={v}
                   active={active}
                   pacific={pacific}
+                  exposantVisible={expoVisible}
                   onToggleAvailability={() => toggleAvailability(v)}
                   onTogglePacific={() => togglePacificVisible(v)}
+                  onToggleExposantVisible={() => toggleExposantVisible(v)}
                   onSaveReferent={(ref) => saveReferent(v, ref)}
                 />
               );
@@ -2801,7 +2823,7 @@ function BilansView() {
       </Card>
       <Card><CardContent className="p-0">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Type</th><th>Portée</th><th>Statut</th><th>Généré le</th><th>Partage Pacific</th><th></th></tr></thead>
+          <thead className="bg-slate-50 border-b text-left text-xs uppercase text-slate-500"><tr><th className="py-2 px-4">Type</th><th>Portée</th><th>Statut</th><th>Généré le</th><th>Partage Pacific</th><th></th><th></th></tr></thead>
           <tbody className="divide-y">
             {reports.map(r => (
               <tr key={r.id}>
@@ -2826,7 +2848,25 @@ function BilansView() {
                     {r.shared_with_pacific ? <><Eye className="w-3 h-3" /> Partagé</> : <><Eye className="w-3 h-3" /> Partager</>}
                   </Button>
                 </td>
-                <td className="pr-4"><Button size="sm" variant="outline" onClick={() => openReport(r)}><FileText className="w-3 h-3 mr-1" /> Voir / PDF</Button></td>
+                <td className="pr-2"><Button size="sm" variant="outline" onClick={() => openReport(r)}><FileText className="w-3 h-3 mr-1" /> Voir / PDF</Button></td>
+                <td className="pr-4">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-300 text-red-700 hover:bg-red-50 gap-1"
+                    onClick={async () => {
+                      const portee = r.report_data_json?.site || r.report_data_json?.exposant || 'Global';
+                      if (!confirm(`Supprimer définitivement ce bilan ?\n\n• Type : ${r.report_type}\n• Portée : ${portee}\n• Généré le : ${new Date(r.generated_at).toLocaleString('fr-FR')}\n\nCette action est irréversible.`)) return;
+                      try {
+                        await api(`/api/reports/${r.id}`, { method: 'DELETE' });
+                        toast.success('🗑️ Bilan supprimé');
+                        load();
+                      } catch (e) { toast.error(e.message); }
+                    }}
+                  >
+                    <Trash2 className="w-3 h-3" /> Supprimer
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -3085,13 +3125,146 @@ function openReport(r) {
   w.document.close();
 }
 
+// 🆕 Configuration des statuts de relance + actions contextuelles
+const RELANCE_STATUS_CONFIG = [
+  {
+    key: 'caution_a_regler',
+    label: 'Caution à régler',
+    emoji: '💰',
+    color: 'red',
+    subject: '[Forum 2026] Rappel — Caution de 20 000 XPF à régler',
+    body: `<p>Bonjour,</p><p>Nous n'avons pas encore reçu votre <b>caution de 20 000 XPF</b> pour votre participation au Forum de la Rentrée 2026.</p><p>📌 <b>Modes acceptés :</b> chèque, espèces ou virement bancaire.</p><p>Sans ce versement, votre stand ne pourra pas être verrouillé. Merci de prendre rendez-vous au plus vite.</p><p>L'équipe ARACOM</p>`,
+    filter: (r) => r.deposit_status !== 'recue' && r.status !== 'annule' && r.status !== 'prospect',
+    actions: ['mail', 'export_dossier'],
+  },
+  {
+    key: 'rdv_a_prendre',
+    label: 'RDV caution à prendre',
+    emoji: '📅',
+    color: 'orange',
+    subject: '[Forum 2026] Prenez rendez-vous pour la remise de votre caution',
+    body: `<p>Bonjour,</p><p>Afin de finaliser votre inscription au Forum de la Rentrée 2026, vous devez <b>fixer un rendez-vous</b> avec ARACOM pour la remise de votre caution de 20 000 XPF.</p><p>Merci de nous indiquer vos disponibilités (matin, après-midi, en semaine ou samedi) en répondant à ce mail.</p><p>L'équipe ARACOM</p>`,
+    filter: (r) => !r.validation_request_id && r.deposit_status !== 'recue' && r.venue_id && r.stand_code && r.status !== 'confirme',
+    actions: ['mail'],
+  },
+  {
+    key: 'remboursement_attente',
+    label: 'Remboursement en attente',
+    emoji: '↩️',
+    color: 'emerald',
+    subject: '[Forum 2026] Remboursement de votre caution — Attestation',
+    body: `<p>Bonjour,</p><p>Suite à votre participation au Forum de la Rentrée 2026 et à la complétion de votre questionnaire de satisfaction, votre <b>caution de 20 000 XPF</b> sera prochainement remboursée.</p><p>Vous trouverez l'attestation de remboursement dans votre espace exposant. Nous reviendrons vers vous pour finaliser le remboursement.</p><p>L'équipe ARACOM</p>`,
+    filter: (r) => r.status === 'confirme' && r.deposit_status === 'recue' && r.has_satisfaction_response,
+    actions: ['mail', 'export_attestation'],
+  },
+  {
+    key: 'documents_manquants',
+    label: 'Documents manquants',
+    emoji: '📄',
+    color: 'amber',
+    subject: '[Forum 2026] Documents manquants à fournir',
+    body: `<p>Bonjour,</p><p>Pour finaliser votre inscription, il vous reste à déposer les documents suivants dans votre espace exposant :</p><ul><li>{{DOCS_MISSING}}</li></ul><p>Merci de vous connecter à votre <a href="{{PORTAL_URL}}">espace exposant</a> pour les déposer.</p><p>L'équipe ARACOM</p>`,
+    filter: (r) => !r.is_convention_signed || !r.is_insurance_uploaded,
+    actions: ['mail', 'export_dossier'],
+  },
+];
+
 function RelancesView() {
   const [rows, setRows] = useState([]);
   const [regs, setRegs] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ registration_id: '', task_type: 'appel', title: '', due_date: '', notes: '' });
+  // 🆕 Module Relances ciblées
+  const [selectedStatus, setSelectedStatus] = useState('caution_a_regler');
+  const [selectedRegs, setSelectedRegs] = useState(new Set());
+  const [mailSubject, setMailSubject] = useState('');
+  const [mailBody, setMailBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [satisfactionMap, setSatisfactionMap] = useState({});
+
   const load = () => api('/api/tasks').then(setRows);
-  useEffect(() => { load(); api('/api/registrations').then(setRegs); }, []);
+  useEffect(() => {
+    load();
+    api('/api/registrations').then(setRegs);
+    api('/api/admin/satisfaction-responses').then(r => {
+      const map = {};
+      (r || []).forEach(s => { if (s.organization_id) map[s.organization_id] = true; });
+      setSatisfactionMap(map);
+    }).catch(() => {});
+  }, []);
+
+  const enrichedRegs = useMemo(() => regs.map(r => ({
+    ...r,
+    deposit_status: r.deposit?.status || null,
+    has_satisfaction_response: !!satisfactionMap[r.organization?.id || r.organization_id],
+  })), [regs, satisfactionMap]);
+
+  // Initial subject/body when status changes
+  useEffect(() => {
+    const cfg = RELANCE_STATUS_CONFIG.find(c => c.key === selectedStatus);
+    if (cfg) {
+      setMailSubject(cfg.subject);
+      setMailBody(cfg.body);
+      setSelectedRegs(new Set()); // reset selection
+    }
+  }, [selectedStatus]);
+
+  const currentCfg = RELANCE_STATUS_CONFIG.find(c => c.key === selectedStatus);
+  const filteredRegs = enrichedRegs.filter(currentCfg?.filter || (() => true));
+
+  const toggleReg = (id) => {
+    const s = new Set(selectedRegs);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    setSelectedRegs(s);
+  };
+  const toggleAll = () => {
+    if (selectedRegs.size === filteredRegs.length) setSelectedRegs(new Set());
+    else setSelectedRegs(new Set(filteredRegs.map(r => r.id)));
+  };
+
+  const sendBulkMail = async () => {
+    if (selectedRegs.size === 0) { toast.error('Sélectionnez au moins un exposant'); return; }
+    if (!mailSubject.trim() || !mailBody.trim()) { toast.error('Sujet et corps requis'); return; }
+    if (!confirm(`Envoyer ce mail de relance à ${selectedRegs.size} exposant(s) ?`)) return;
+    setSending(true);
+    try {
+      const ids = Array.from(selectedRegs);
+      const res = await api('/api/mailing/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_ids: ids,
+          subject: mailSubject,
+          body_html: mailBody,
+          mail_type: `relance_${selectedStatus}`,
+        }),
+      });
+      toast.success(`📤 ${res.sent || ids.length} mail(s) envoyé(s)`);
+      setSelectedRegs(new Set());
+    } catch (e) { toast.error(e.message); }
+    setSending(false);
+  };
+
+  const exportSelection = async (type) => {
+    if (selectedRegs.size === 0) { toast.error('Sélectionnez au moins un exposant'); return; }
+    try {
+      const ids = Array.from(selectedRegs);
+      const resp = await fetch('/api/admin/export-documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin' },
+        body: JSON.stringify({ type, registration_ids: ids }),
+      });
+      if (!resp.ok) throw new Error('Export échoué');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Export_${type}_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('📦 ZIP téléchargé');
+    } catch (e) { toast.error(e.message); }
+  };
+
   const create = async () => {
     if (!form.registration_id || !form.title) return toast.error('Exposant et titre requis');
     await api('/api/tasks', { method: 'POST', body: JSON.stringify(form) });
@@ -3108,9 +3281,98 @@ function RelancesView() {
   };
   const open = rows.filter(t => t.status !== 'termine' && t.status !== 'annule');
   const done = rows.filter(t => t.status === 'termine');
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* 🎯 Section Relances ciblées par statut */}
+      <Card className="border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2 text-orange-900">
+            🎯 Relances ciblées par statut
+          </CardTitle>
+          <p className="text-xs text-orange-800 mt-1">Filtrez les exposants par <b>statut</b>, sélectionnez ceux à relancer, puis envoyez un mail pré-rempli ou exportez leur dossier.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* Filtre statut */}
+          <div className="flex flex-wrap gap-2">
+            {RELANCE_STATUS_CONFIG.map(cfg => {
+              const count = enrichedRegs.filter(cfg.filter).length;
+              const active = selectedStatus === cfg.key;
+              return (
+                <Button key={cfg.key} size="sm" variant={active ? 'default' : 'outline'}
+                  onClick={() => setSelectedStatus(cfg.key)}
+                  className={active ? `bg-${cfg.color}-600 hover:bg-${cfg.color}-700 gap-1` : 'gap-1'}>
+                  <span>{cfg.emoji}</span> {cfg.label} <Badge variant="secondary" className="ml-1 bg-white/30">{count}</Badge>
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Sujet + corps pré-remplis */}
+          <div className="grid md:grid-cols-2 gap-3 pt-2 border-t border-orange-200">
+            <div>
+              <Label className="text-xs uppercase">Objet du mail (pré-rempli)</Label>
+              <Input value={mailSubject} onChange={e => setMailSubject(e.target.value)} className="mt-1" />
+            </div>
+            <div className="flex items-end gap-2">
+              <Button onClick={sendBulkMail} disabled={sending || selectedRegs.size === 0} className="bg-orange-600 hover:bg-orange-700 gap-2 flex-1">
+                <Send className="w-4 h-4" /> {sending ? 'Envoi…' : `Envoyer (${selectedRegs.size})`}
+              </Button>
+              {currentCfg?.actions?.includes('export_dossier') && (
+                <Button onClick={() => exportSelection('all')} variant="outline" className="border-blue-300 text-blue-700 gap-1">
+                  <Download className="w-4 h-4" /> Dossier ZIP
+                </Button>
+              )}
+              {currentCfg?.actions?.includes('export_attestation') && (
+                <Button onClick={() => exportSelection('all')} variant="outline" className="border-emerald-300 text-emerald-700 gap-1">
+                  <Download className="w-4 h-4" /> Attestations
+                </Button>
+              )}
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs uppercase">Corps (HTML)</Label>
+              <Textarea rows={5} value={mailBody} onChange={e => setMailBody(e.target.value)} className="mt-1 font-mono text-xs" />
+            </div>
+          </div>
+
+          {/* Liste exposants avec checkboxes */}
+          <div className="pt-2 border-t border-orange-200">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-orange-900">
+                {filteredRegs.length} exposant(s) concerné(s)
+              </div>
+              <Button size="sm" variant="ghost" onClick={toggleAll} className="text-xs">
+                {selectedRegs.size === filteredRegs.length && filteredRegs.length > 0 ? '☑️ Tout désélectionner' : '⬜ Tout sélectionner'}
+              </Button>
+            </div>
+            <div className="max-h-72 overflow-y-auto bg-white rounded-md border border-orange-200">
+              {filteredRegs.length === 0 ? (
+                <div className="p-6 text-center text-slate-500 text-sm">Aucun exposant ne correspond à ce statut. 🎉</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-orange-100 text-xs uppercase text-orange-900 sticky top-0">
+                    <tr><th className="px-3 py-2 w-8"></th><th className="text-left">Exposant</th><th className="text-left">Email</th><th className="text-left">Site / Stand</th><th className="text-left">Statut</th></tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredRegs.map(r => (
+                      <tr key={r.id} className={selectedRegs.has(r.id) ? 'bg-orange-50' : ''}>
+                        <td className="px-3 py-2"><input type="checkbox" checked={selectedRegs.has(r.id)} onChange={() => toggleReg(r.id)} /></td>
+                        <td className="font-medium">{r.organization?.name || '—'}</td>
+                        <td className="text-xs text-slate-600">{r.organization?.main_email || '—'}</td>
+                        <td className="text-xs"><span className="font-mono">{r.stand_code || '—'}</span> · {r.venue?.name || '—'}</td>
+                        <td><Badge variant="secondary" className="text-[10px]">{r.status}</Badge></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section Tâches manuelles (conservée) */}
+      <div className="flex items-center justify-between pt-4 border-t">
         <div className="grid grid-cols-3 gap-3 flex-1">
           <KpiCard label="À faire" value={open.length} accent="orange" />
           <KpiCard label="Terminées" value={done.length} accent="emerald" />
@@ -5297,14 +5559,165 @@ const DOC_CATEGORIES = [
   { value: 'autre',      label: '📁 Autre',                          emoji: '📁' },
 ];
 
+// 🆕 Éditeur RIB ARACOM + Templates documents (textes + logo)
+function RibAndTemplatesEditor() {
+  const [rib, setRib] = useState({ titulaire: 'ARACOM', banque: '', iban: '', bic: '', reference: 'Caution Forum 2026 + nom exposant' });
+  const [templates, setTemplates] = useState({});
+  const [activeTpl, setActiveTpl] = useState('convention');
+  const [savingRib, setSavingRib] = useState(false);
+  const [savingTpl, setSavingTpl] = useState(false);
+
+  useEffect(() => {
+    api('/api/admin/rib-config').then(setRib).catch(() => {});
+    api('/api/admin/document-templates').then(setTemplates).catch(() => {});
+  }, []);
+
+  const saveRib = async () => {
+    setSavingRib(true);
+    try {
+      await api('/api/admin/rib-config', { method: 'POST', body: JSON.stringify(rib) });
+      toast.success('💾 RIB ARACOM enregistré');
+    } catch (e) { toast.error(e.message); }
+    setSavingRib(false);
+  };
+
+  const updateTplText = (field, value) => {
+    setTemplates(prev => ({
+      ...prev,
+      [activeTpl]: { ...(prev[activeTpl] || {}), texts: { ...((prev[activeTpl] || {}).texts || {}), [field]: value } }
+    }));
+  };
+
+  const saveTpl = async () => {
+    setSavingTpl(true);
+    try {
+      const t = templates[activeTpl] || {};
+      await api('/api/admin/document-templates', { method: 'POST', body: JSON.stringify({ key: activeTpl, texts: t.texts || {}, logo_base64: t.logo_base64 || null }) });
+      toast.success('💾 Template enregistré');
+    } catch (e) { toast.error(e.message); }
+    setSavingTpl(false);
+  };
+
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    if (file.size > 1024 * 1024) { toast.error('Logo trop volumineux (max 1 Mo)'); return; }
+    const buf = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+    setTemplates(prev => ({ ...prev, [activeTpl]: { ...(prev[activeTpl] || {}), logo_base64: `data:${file.type};base64,${buf}` } }));
+    toast.success('Logo chargé — n\'oubliez pas d\'enregistrer');
+  };
+
+  const TPL_LIST = [
+    { key: 'convention', label: '📜 Convention', fields: [
+      { k: 'header_title', label: 'Titre principal', placeholder: 'CONVENTION DE PARTICIPATION' },
+      { k: 'intro', label: 'Introduction', placeholder: 'Entre les soussignés…', textarea: true },
+      { k: 'clause_caution', label: 'Clause caution', placeholder: 'L\'exposant s\'engage à verser…', textarea: true },
+      { k: 'footer', label: 'Pied de page', placeholder: 'Fait à Papeete, le…' },
+    ] },
+    { key: 'guide', label: '📖 Guide exposant', fields: [
+      { k: 'header_title', label: 'Titre principal', placeholder: 'GUIDE DE L\'EXPOSANT' },
+      { k: 'welcome', label: 'Mot de bienvenue', placeholder: 'Chers exposants…', textarea: true },
+      { k: 'contact_info', label: 'Coordonnées contact', placeholder: 'En cas de question…', textarea: true },
+    ] },
+    { key: 'recu', label: '🧾 Reçu de caution', fields: [
+      { k: 'title', label: 'Titre', placeholder: 'REÇU DE CAUTION' },
+      { k: 'conditions', label: 'Conditions de restitution', placeholder: 'La caution sera restituée…', textarea: true },
+    ] },
+    { key: 'attestation_remboursement', label: '✅ Attestation remboursement', fields: [
+      { k: 'title', label: 'Titre', placeholder: 'ATTESTATION DE REMBOURSEMENT DE CAUTION' },
+      { k: 'intro', label: 'Introduction', placeholder: 'La société ARACOM atteste…', textarea: true },
+      { k: 'conditions', label: 'Conditions', placeholder: 'Le remboursement est effectué…', textarea: true },
+    ] },
+  ];
+  const currentTplDef = TPL_LIST.find(t => t.key === activeTpl);
+  const currentTplData = templates[activeTpl] || {};
+
+  return (
+    <div className="space-y-4">
+      {/* RIB ARACOM */}
+      <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2 text-indigo-900">
+            🏦 RIB ARACOM (utilisé en virement de caution + pièce jointe email)
+          </CardTitle>
+          <p className="text-xs text-indigo-700 mt-1">Ces informations apparaîtront dans le modal &quot;Confirmer ma présence&quot; quand l&apos;exposant sélectionne le mode <b>Virement bancaire</b>.</p>
+        </CardHeader>
+        <CardContent className="grid md:grid-cols-2 gap-3">
+          <div><Label>Titulaire du compte</Label><Input value={rib.titulaire || ''} onChange={e => setRib({ ...rib, titulaire: e.target.value })} placeholder="ARACOM" /></div>
+          <div><Label>Banque</Label><Input value={rib.banque || ''} onChange={e => setRib({ ...rib, banque: e.target.value })} placeholder="Ex : Banque de Polynésie" /></div>
+          <div className="md:col-span-2"><Label>IBAN</Label><Input value={rib.iban || ''} onChange={e => setRib({ ...rib, iban: e.target.value })} placeholder="FR76 1234 5678 9012 3456 7890 123" className="font-mono" /></div>
+          <div><Label>BIC / SWIFT</Label><Input value={rib.bic || ''} onChange={e => setRib({ ...rib, bic: e.target.value })} placeholder="BPPFPFPP" className="font-mono" /></div>
+          <div><Label>Référence à indiquer par l&apos;exposant</Label><Input value={rib.reference || ''} onChange={e => setRib({ ...rib, reference: e.target.value })} placeholder="Caution Forum 2026 + nom" /></div>
+          <div className="md:col-span-2">
+            <Button onClick={saveRib} disabled={savingRib} className="bg-indigo-600 hover:bg-indigo-700 gap-2">
+              {savingRib ? 'Enregistrement…' : <>💾 Enregistrer le RIB</>}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Templates documents éditables */}
+      <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2 text-emerald-900">
+            📝 Templates des documents officiels (textes + logo)
+          </CardTitle>
+          <p className="text-xs text-emerald-700 mt-1">Personnalisez les <b>textes</b> et le <b>logo</b> utilisés dans les 4 documents auto-générés. Les modifications s&apos;appliquent aux prochaines générations.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {TPL_LIST.map(t => (
+              <Button key={t.key} size="sm" variant={activeTpl === t.key ? 'default' : 'outline'}
+                onClick={() => setActiveTpl(t.key)}
+                className={activeTpl === t.key ? 'bg-emerald-600 hover:bg-emerald-700' : ''}>
+                {t.label}
+              </Button>
+            ))}
+          </div>
+          <div className="bg-white rounded-md p-4 border border-emerald-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-sm text-emerald-900">Édition : {currentTplDef.label}</div>
+              {currentTplData.updated_at && <span className="text-[11px] text-slate-500">Modifié le {new Date(currentTplData.updated_at).toLocaleString('fr-FR')}</span>}
+            </div>
+            <div>
+              <Label className="text-xs">Logo personnalisé (optionnel, PNG/JPG &lt; 1 Mo)</Label>
+              <div className="flex items-center gap-3 mt-1">
+                {currentTplData.logo_base64 && (
+                  <img src={currentTplData.logo_base64} alt="Logo" className="w-16 h-16 object-contain border rounded" />
+                )}
+                <Input type="file" accept="image/*" onChange={e => uploadLogo(e.target.files?.[0])} className="text-xs" />
+                {currentTplData.logo_base64 && (
+                  <Button size="sm" variant="ghost" onClick={() => setTemplates(prev => ({ ...prev, [activeTpl]: { ...(prev[activeTpl] || {}), logo_base64: '' } }))}>
+                    <XCircle className="w-3 h-3 mr-1" /> Retirer
+                  </Button>
+                )}
+              </div>
+            </div>
+            {currentTplDef.fields.map(f => (
+              <div key={f.k}>
+                <Label className="text-xs uppercase">{f.label}</Label>
+                {f.textarea ? (
+                  <Textarea rows={3} value={(currentTplData.texts || {})[f.k] || ''} onChange={e => updateTplText(f.k, e.target.value)} placeholder={f.placeholder} className="mt-1" />
+                ) : (
+                  <Input value={(currentTplData.texts || {})[f.k] || ''} onChange={e => updateTplText(f.k, e.target.value)} placeholder={f.placeholder} className="mt-1" />
+                )}
+              </div>
+            ))}
+            <Button onClick={saveTpl} disabled={savingTpl} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+              {savingTpl ? 'Enregistrement…' : <>💾 Enregistrer le template</>}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function OfficialDocumentsView() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'convention', file: null });
-  const [uploading, setUploading] = useState(false);
-
-  const reload = async () => {
+  const [uploading, setUploading] = useState(false);  const reload = async () => {
     setLoading(true);
     try { const d = await api('/api/official-documents'); setDocs(d); }
     catch (e) { toast.error(e.message); }
@@ -5352,6 +5765,9 @@ function OfficialDocumentsView() {
 
   return (
     <div className="space-y-4">
+      {/* 🆕 RIB ARACOM + Templates documents éditables */}
+      <RibAndTemplatesEditor />
+
       <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
         <CardContent className="p-5 flex items-start gap-4 flex-wrap">
           <div className="w-14 h-14 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
@@ -6275,6 +6691,7 @@ function AnimationsView() {
       {editingSlot && (
         <EditAnimationDialog
           slot={editingSlot}
+          venues={venues}
           onClose={() => setEditingSlot(null)}
           onSave={(patch) => saveSlot(editingSlot.id, patch)}
         />
@@ -6338,7 +6755,7 @@ function AnimSlotsTable({ slots, conflicts, statusBadge, onEdit, onDelete, onOpe
   );
 }
 
-function EditAnimationDialog({ slot, onClose, onSave }) {
+function EditAnimationDialog({ slot, venues = [], onClose, onSave }) {
   // Normalisation : on accepte les anciennes valeurs en lecture mais on remap vers les 2 valeurs canoniques
   const normalizeLocation = (v) => {
     if (v === 'sur_stand' || v === 'stand') return 'sur_stand';
@@ -6354,14 +6771,21 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
     day_label: slot.day_label || 'vendredi',
     status: slot.status || 'planifié',
     location_type: normalizeLocation(slot.location_type),
+    venue_id: slot.venue_id || '',
     description: slot.description || '',
   });
+  // 🆕 Détection si le créneau a été modifié (date/heure/site)
+  const hasScheduleChanged =
+    form.start_time !== (slot.start_time || '09:00') ||
+    form.end_time !== (slot.end_time || '10:00') ||
+    form.day_label !== (slot.day_label || 'vendredi') ||
+    form.venue_id !== (slot.venue_id || '');
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Modifier l'animation</DialogTitle>
+          <DialogTitle>Modifier l&apos;animation</DialogTitle>
           <DialogDescription>{slot.organization_name} · {slot.venue_name}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -6397,6 +6821,16 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
               </Select>
             </div>
           </div>
+          {/* 🆕 Sélecteur de site */}
+          <div>
+            <Label>Site</Label>
+            <Select value={form.venue_id} onValueChange={v => setForm({ ...form, venue_id: v })}>
+              <SelectTrigger><SelectValue placeholder="Choisir un site" /></SelectTrigger>
+              <SelectContent>
+                {venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label>Jour</Label>
@@ -6431,6 +6865,15 @@ function EditAnimationDialog({ slot, onClose, onSave }) {
             <Label>Description / notes</Label>
             <Textarea rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
           </div>
+          {/* 🆕 Alerte si créneau modifié */}
+          {hasScheduleChanged && (
+            <div className="rounded-md border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="font-bold flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> N&apos;oubliez pas !</div>
+              <p className="text-xs mt-1">
+                Vous modifiez le créneau (date, heure ou site). <b>Pensez à envoyer un mail à l&apos;exposant</b> pour lui confirmer le nouveau créneau via l&apos;onglet <i>Mailing</i> ou <i>Relances</i>.
+              </p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Annuler</Button>
@@ -6686,6 +7129,54 @@ function DisciplinesCard({ analytics }) {
 // =====================================================================
 // 🗓️ ADMIN — Panneau de gestion des RDV de restitution caution
 // =====================================================================
+// 🆕 Bouton ARACOM pour uploader la version signée de l'attestation de remboursement
+function UploadSignedAttestationButton({ registrationId, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async (file) => {
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) { toast.error('Fichier trop volumineux (max 6 Mo)'); return; }
+    setBusy(true);
+    try {
+      const buf = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+      await api(`/api/admin/refund-attestation/${registrationId}/upload`, {
+        method: 'POST',
+        body: JSON.stringify({ file_name: file.name, mime_type: file.type || 'application/pdf', file_base64: buf }),
+      });
+      toast.success('✅ Attestation signée déposée dans l\'espace de l\'exposant');
+      setOpen(false);
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+  return (
+    <>
+      <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => setOpen(true)} title="Uploader la version signée de l'attestation">
+        📎 Attestation signée
+      </Button>
+      {open && (
+        <Dialog open onOpenChange={() => !busy && setOpen(false)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Déposer l&apos;attestation signée</DialogTitle>
+              <DialogDescription>
+                Uploadez la version <b>finale signée</b> par les deux parties (ARACOM + exposant). Elle remplacera la version auto générée dans l&apos;espace de l&apos;exposant.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <Input type="file" accept="application/pdf,image/*" onChange={e => submit(e.target.files?.[0])} disabled={busy} />
+              <p className="text-xs text-slate-500 italic">Format conseillé : PDF · 6 Mo max</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Annuler</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 function CautionAppointmentsAdminPanel() {
   const [appts, setAppts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6831,7 +7322,7 @@ function CautionAppointmentsAdminPanel() {
                         </Badge>
                       </td>
                       <td className="p-2 text-right">
-                        <div className="flex gap-1 justify-end">
+                        <div className="flex gap-1 justify-end flex-wrap">
                           {a.status === 'demande' && (
                             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                               onClick={() => update(a.id, 'confirme', { confirmed_date: a.requested_date, confirmed_time: a.requested_time })}>
@@ -6847,6 +7338,9 @@ function CautionAppointmentsAdminPanel() {
                               onClick={() => update(a.id, 'restitue')}>
                               🎉 Restitué
                             </Button>
+                          )}
+                          {a.survey_submitted && a.registration_id && (
+                            <UploadSignedAttestationButton registrationId={a.registration_id} onDone={load} />
                           )}
                         </div>
                       </td>
