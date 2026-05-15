@@ -7081,6 +7081,68 @@ function DisciplinesCard({ analytics }) {
 // =====================================================================
 // 🗓️ ADMIN — Panneau de gestion des RDV de restitution caution
 // =====================================================================
+// 🆕 Bouton ARACOM : Enregistrement d'un virement reçu (référence + date)
+function RegisterVirementButton({ registrationId, defaultRef = '', defaultDate = '', alreadyValidated = false, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    virement_reference: defaultRef,
+    virement_date: defaultDate || new Date().toISOString().slice(0, 10),
+  });
+  const submit = async () => {
+    if (!form.virement_reference.trim() || !form.virement_date) {
+      return toast.error('Référence et date du virement requises');
+    }
+    setBusy(true);
+    try {
+      await api(`/api/admin/register-virement/${registrationId}`, {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      toast.success('✅ Virement enregistré — caution validée, stand verrouillé, reçu généré.');
+      setOpen(false);
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+  return (
+    <>
+      <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-cyan-300 text-cyan-700 hover:bg-cyan-50" onClick={() => setOpen(true)} title="Confirmer la réception du virement bancaire">
+        🏦 {alreadyValidated ? 'Virement OK' : 'Valider virement'}
+      </Button>
+      {open && (
+        <Dialog open onOpenChange={() => !busy && setOpen(false)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>🏦 Enregistrer le virement reçu</DialogTitle>
+              <DialogDescription>
+                Confirme la réception du virement de <b>20 000 XPF</b>. La caution sera marquée comme reçue, le stand verrouillé, et le reçu de caution sera généré automatiquement.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div>
+                <Label className="text-xs">Référence du virement *</Label>
+                <Input value={form.virement_reference} onChange={e => setForm({ ...form, virement_reference: e.target.value })} placeholder="Ex : VIR-20260815-001" className="font-mono text-xs" disabled={busy} />
+                {defaultRef && <p className="text-[10px] text-slate-500 mt-1">Référence déclarée par l&apos;exposant : <b className="font-mono">{defaultRef}</b></p>}
+              </div>
+              <div>
+                <Label className="text-xs">Date du virement *</Label>
+                <Input type="date" value={form.virement_date} onChange={e => setForm({ ...form, virement_date: e.target.value })} disabled={busy} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Annuler</Button>
+              <Button onClick={submit} disabled={busy} className="bg-cyan-600 hover:bg-cyan-700 gap-2">
+                {busy ? 'Enregistrement…' : '✅ Valider la réception'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 // 🆕 Bouton ARACOM : Génère + ouvre l'attestation imprimable (2 exemplaires)
 function GeneratePrintAttestationButton({ registrationId, onDone }) {
   const [busy, setBusy] = useState(false);
@@ -7296,23 +7358,34 @@ function CautionAppointmentsAdminPanel() {
                       </td>
                       <td className="p-2 text-right">
                         <div className="flex gap-1 justify-end flex-wrap">
-                          {a.status === 'demande' && (
+                          {a.status === 'demande' && a.preferred_payment !== 'virement' && (
                             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                               onClick={() => update(a.id, 'confirme', { confirmed_date: a.requested_date, confirmed_time: a.requested_time })}>
                               ✓ Confirmer
                             </Button>
                           )}
-                          <Button size="sm" variant="outline" className="h-7 text-xs"
-                            onClick={() => setEditing(a)}>
-                            Modifier
-                          </Button>
+                          {a.preferred_payment !== 'virement' && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs"
+                              onClick={() => setEditing(a)}>
+                              Modifier
+                            </Button>
+                          )}
+                          {/* 🆕 Bouton spécial VIREMENT : valider la réception (référence + date) */}
+                          {a.preferred_payment === 'virement' && a.registration_id && (
+                            <RegisterVirementButton
+                              registrationId={a.registration_id}
+                              defaultRef={a.virement_reference || ''}
+                              defaultDate={a.virement_date || ''}
+                              alreadyValidated={a.deposit_status === 'recue'}
+                              onDone={load}
+                            />
+                          )}
                           {a.status === 'confirme' && (
                             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
                               onClick={() => update(a.id, 'restitue')}>
                               🎉 Restitué
                             </Button>
                           )}
-                          {/* 🆕 Génération + impression attestation 2 exemplaires (toujours disponible) */}
                           {a.registration_id && (
                             <GeneratePrintAttestationButton registrationId={a.registration_id} onDone={load} />
                           )}

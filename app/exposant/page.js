@@ -1154,6 +1154,106 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
 // =====================================================================
 // VALIDATION STATUS CARD — affichée quand la demande est en cours
 // =====================================================================
+// 🆕 Carte spécifique pour le mode VIREMENT — l'exposant déclare la date + référence
+function VirementDeclarationCard({ vreq, onRefresh }) {
+  const [rib, setRib] = useState(null);
+  const [form, setForm] = useState({ virement_reference: '', virement_date: new Date().toISOString().slice(0, 10) });
+  const [busy, setBusy] = useState(false);
+  const [declared, setDeclared] = useState(false);
+
+  useEffect(() => {
+    api('/api/admin/rib-config').then(setRib).catch(() => {});
+    api(`/api/registrations/${vreq.registration_id}`).then(d => {
+      if (d?.deposit?.virement_declared_at || d?.deposit?.virement_reference) {
+        setDeclared(true);
+        setForm({
+          virement_reference: d.deposit.virement_reference || '',
+          virement_date: d.deposit.virement_date || new Date().toISOString().slice(0, 10),
+        });
+      }
+    }).catch(() => {});
+  }, [vreq.registration_id]);
+
+  const submit = async () => {
+    if (!form.virement_reference.trim()) return toast.error('Référence du virement requise');
+    if (!form.virement_date) return toast.error('Date du virement requise');
+    setBusy(true);
+    try {
+      await api(`/api/exposant/declare-virement/${vreq.registration_id}`, {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      toast.success('✅ Virement déclaré — ARACOM a été notifié(e). Vous recevrez votre reçu dès validation.');
+      setDeclared(true);
+      if (onRefresh) onRefresh();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <Card className="border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50">
+      <CardContent className="p-5 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="text-3xl">🏦</div>
+          <div>
+            <div className="font-bold text-blue-900 text-lg">Caution par virement bancaire</div>
+            <p className="text-sm text-blue-800 mt-0.5">
+              {declared
+                ? '✅ Vous avez déclaré votre virement. ARACOM en a été notifié(e) et validera dès réception sur le compte.'
+                : 'Effectuez le virement de 20 000 XPF avec les coordonnées ci-dessous, puis déclarez-le pour notifier ARACOM.'}
+            </p>
+          </div>
+        </div>
+
+        {rib && (
+          <div className="rounded-md bg-white border-2 border-blue-200 p-3 text-xs space-y-1">
+            <div className="font-bold text-blue-900 flex items-center gap-2">🏦 Coordonnées bancaires ARACOM</div>
+            <div className="grid grid-cols-2 gap-2 mt-2 font-mono text-[11px]">
+              <div><span className="text-slate-500">Titulaire :</span> <b className="text-blue-900">{rib.titulaire || '—'}</b></div>
+              <div><span className="text-slate-500">Banque :</span> <b className="text-blue-900">{rib.banque || '—'}</b></div>
+              <div className="col-span-2"><span className="text-slate-500">IBAN :</span> <b className="text-blue-900 select-all">{rib.iban || '—'}</b></div>
+              <div><span className="text-slate-500">BIC :</span> <b className="text-blue-900 select-all">{rib.bic || '—'}</b></div>
+            </div>
+            <div className="mt-2 pt-2 border-t border-blue-200"><span className="text-slate-500">Référence à indiquer :</span> <b className="text-blue-900">{rib.reference || '—'}</b></div>
+            <div className="mt-2 pt-2 border-t border-blue-200 text-[10px] text-slate-500 italic">
+              💡 Le montant à virer est de <b>20 000 XPF</b>. Indiquez bien la référence ci-dessus pour faciliter l&apos;identification.
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-md bg-white border-2 border-blue-300 p-3 space-y-2">
+          <div className="font-semibold text-sm text-blue-900">
+            {declared ? '📝 Détails de votre virement' : '📝 Déclarez votre virement'}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Référence / N° du virement *</Label>
+              <Input value={form.virement_reference} onChange={e => setForm({ ...form, virement_reference: e.target.value })} placeholder="Ex : VIR-20260815-001 ou n° opération bancaire" className="text-xs font-mono" disabled={busy} />
+            </div>
+            <div>
+              <Label className="text-xs">Date du virement *</Label>
+              <Input type="date" value={form.virement_date} onChange={e => setForm({ ...form, virement_date: e.target.value })} className="text-xs" disabled={busy} />
+            </div>
+          </div>
+          {!declared ? (
+            <Button onClick={submit} disabled={busy} className="w-full bg-blue-600 hover:bg-blue-700 gap-2">
+              {busy ? 'Envoi…' : '✅ Déclarer mon virement et notifier ARACOM'}
+            </Button>
+          ) : (
+            <Button onClick={submit} disabled={busy} variant="outline" className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 gap-2">
+              {busy ? 'Mise à jour…' : '🔄 Mettre à jour mes informations de virement'}
+            </Button>
+          )}
+        </div>
+
+        <div className="text-[11px] text-blue-700 italic bg-blue-100/50 rounded px-2 py-1.5">
+          ℹ️ Aucun rendez-vous physique n&apos;est nécessaire pour le virement. ARACOM vérifie la réception sur son compte bancaire, valide votre caution, et vous fournit automatiquement votre <b>reçu de caution</b> dans cet espace.
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ValidationStatusCard({ registrationId, validationRequestId, onRefresh }) {
   const [vreq, setVreq] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1189,7 +1289,13 @@ function ValidationStatusCard({ registrationId, validationRequestId, onRefresh }
     );
   }
   const status = vreq.status;
-  const paymentLabel = vreq.preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
+  const paymentLabel = vreq.preferred_payment === 'especes' ? 'Espèces' : (vreq.preferred_payment === 'virement' ? 'Virement bancaire' : 'Chèque');
+  const isVirement = vreq.preferred_payment === 'virement';
+
+  // 🆕 Cas spécial : VIREMENT — pas de RDV physique, juste une déclaration
+  if (isVirement && status === 'en_attente') {
+    return <VirementDeclarationCard vreq={vreq} onRefresh={() => location.reload()} />;
+  }
 
   if (status === 'en_attente') {
     return (
