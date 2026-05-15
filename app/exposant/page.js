@@ -2562,14 +2562,32 @@ function ExposantBriefing({ onAction }) {
 // =====================================================================
 function JourJBlock({ registration }) {
   const [sessions, setSessions] = useState([]);
+  const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastFetched, setLastFetched] = useState(null);
+
+  const reload = async () => {
+    if (!registration?.id) return;
+    setRefreshing(true);
+    try {
+      const d = await api(`/api/registrations/${registration.id}`);
+      setSessions(d.attendance_sessions || []);
+      setComments(d.comments || []);
+      setLastFetched(new Date());
+    } catch (_e) {
+      // best effort
+    }
+    setRefreshing(false);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    if (!registration?.id) return;
-    api(`/api/registrations/${registration.id}`).then(d => {
-      setSessions(d.attendance_sessions || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    reload();
+    // Auto-refresh toutes les 30s pour suivre les pointages en temps réel
+    const t = setInterval(reload, 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registration?.id]);
 
   const dayInfo = [
@@ -2579,20 +2597,48 @@ function JourJBlock({ registration }) {
 
   if (loading) return <div className="text-sm text-slate-500 p-4">Chargement…</div>;
 
-  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+  // Le backend retourne actual_arrival_time / actual_departure_time au format "HH:MM"
+  const fmtTime = (hhmm) => {
+    if (!hhmm) return null;
+    // Si on reçoit une ISO date par compatibilité, on extrait l'heure locale
+    if (typeof hhmm === 'string' && hhmm.includes('T')) {
+      return new Date(hhmm).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+    return hhmm; // déjà "HH:MM"
+  };
+
+  // Statut visuel pour chaque jour
+  const presenceBadge = (status) => {
+    const map = {
+      arrive:           { label: '✓ Présent',         cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+      parti:            { label: '✓ Présent (parti)', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+      depart_anticipe:  { label: '⚠ Départ anticipé', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+      absent:           { label: '✗ Absent',          cls: 'bg-red-100 text-red-700 border-red-200' },
+      attendu:          { label: '⏳ En attente',     cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+      annule:           { label: '— Annulé',          cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+    };
+    return map[status] || map.attendu;
+  };
 
   return (
     <div className="space-y-4">
-      {/* En-tête pédagogique */}
+      {/* En-tête pédagogique avec rafraîchissement */}
       <Card className="border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50">
         <CardContent className="p-5">
           <div className="flex items-start gap-3">
             <div className="text-3xl">📅</div>
             <div className="flex-1">
               <h3 className="font-bold text-orange-900">Votre présence sur site (Jour J)</h3>
-              <p className="text-sm text-orange-800 mt-1">L&apos;agent ARACOM sur le terrain pointe votre arrivée et votre départ via son application mobile. Voici un suivi en temps réel de votre journée — utile pour la restitution de votre caution.</p>
+              <p className="text-sm text-orange-800 mt-1">L&apos;agent ARACOM sur le terrain pointe votre arrivée et votre départ via son application mobile. Voici un suivi <b>en temps réel</b> de votre journée — utile pour la restitution de votre caution.</p>
             </div>
+            <Button size="sm" variant="outline" onClick={reload} disabled={refreshing} className="gap-1 h-8 text-xs bg-white">
+              <span className={`w-1.5 h-1.5 rounded-full ${refreshing ? 'bg-orange-400 animate-pulse' : 'bg-emerald-500'}`}></span>
+              {refreshing ? 'Sync…' : 'Actualiser'}
+            </Button>
           </div>
+          {lastFetched && (
+            <p className="text-[10px] text-orange-700/60 mt-2 ml-12">Dernière synchro : {lastFetched.toLocaleTimeString('fr-FR')}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -2600,41 +2646,76 @@ function JourJBlock({ registration }) {
       <div className="grid md:grid-cols-2 gap-4">
         {dayInfo.map(day => {
           const session = sessions.find(s => s.event_date === day.date);
-          const checkIn  = fmtTime(session?.check_in_at);
-          const checkOut = fmtTime(session?.check_out_at);
-          const present = !!session?.check_in_at;
+          const arrival   = fmtTime(session?.actual_arrival_time);
+          const departure = fmtTime(session?.actual_departure_time);
+          const expArrival   = session?.expected_arrival_time;
+          const expDeparture = session?.expected_departure_time;
+          const status = session?.presence_status || 'attendu';
+          const badge = presenceBadge(status);
+          const present = ['arrive', 'parti', 'depart_anticipe'].includes(status);
+          const isLate = arrival && expArrival && arrival > expArrival;
+          const isEarlyOut = departure && expDeparture && departure < expDeparture;
+
+          // Commentaires liés à cette journée (par l'agent ARACOM)
+          const dayComments = (comments || []).filter(c => c.attendance_session_id === session?.id);
+
           return (
-            <Card key={day.date} className={present ? 'border-emerald-300' : 'border-slate-200'}>
+            <Card key={day.date} className={present ? 'border-emerald-300' : (status === 'absent' ? 'border-red-300' : 'border-slate-200')}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center justify-between">
                   <span className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-orange-600" /> {day.label}
                   </span>
-                  {present ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Présent ✓</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-slate-500">En attente</Badge>
-                  )}
+                  <Badge variant="outline" className={badge.cls}>{badge.label}</Badge>
                 </CardTitle>
                 <p className="text-xs text-slate-500 mt-1">Horaires officiels : {day.hours}</p>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-md border bg-emerald-50/40 p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Check-in</div>
-                    <div className="text-2xl font-bold text-emerald-700 mt-1">{checkIn || '—'}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold flex items-center justify-between">
+                      <span>Arrivée</span>
+                      {isLate && <span className="text-amber-700 normal-case">⚠ retard</span>}
+                    </div>
+                    <div className="text-2xl font-bold text-emerald-700 mt-1">{arrival || '—'}</div>
+                    {expArrival && (
+                      <div className="text-[10px] text-slate-500">prévue {expArrival}</div>
+                    )}
                   </div>
                   <div className="rounded-md border bg-blue-50/40 p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">Check-out</div>
-                    <div className="text-2xl font-bold text-blue-700 mt-1">{checkOut || '—'}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold flex items-center justify-between">
+                      <span>Départ</span>
+                      {isEarlyOut && <span className="text-amber-700 normal-case">⚠ anticipé</span>}
+                    </div>
+                    <div className="text-2xl font-bold text-blue-700 mt-1">{departure || '—'}</div>
+                    {expDeparture && (
+                      <div className="text-[10px] text-slate-500">prévu {expDeparture}</div>
+                    )}
                   </div>
                 </div>
-                {session?.notes && (
-                  <div className="text-xs text-slate-600 bg-slate-50 rounded-md p-2 border">
-                    <b>Note de l&apos;agent :</b> {session.notes}
+
+                {/* État du stand au départ (si renseigné) */}
+                {session?.departure_stand_condition && (
+                  <div className={`text-xs rounded-md p-2 border ${session.departure_stand_condition === 'conforme' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                    <b>État du stand au départ :</b> {session.departure_stand_condition === 'conforme' ? '✓ Conforme' : '⚠ À signaler'}
                   </div>
                 )}
-                {!present && (
+
+                {/* Commentaires de l'agent ARACOM */}
+                {dayComments.length > 0 && (
+                  <div className="space-y-1.5">
+                    {dayComments.map(c => (
+                      <div key={c.id} className="text-xs text-slate-600 bg-slate-50 rounded-md p-2 border">
+                        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                          {c.comment_type?.replace(/_/g, ' ') || 'Note de l\'agent'}
+                        </div>
+                        <div className="mt-0.5">{c.comment_text}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!session && (
                   <p className="text-xs text-slate-500 italic">Aucun pointage enregistré pour cette journée. L&apos;agent ARACOM vous accueillera à votre arrivée sur site.</p>
                 )}
               </CardContent>
@@ -2647,8 +2728,9 @@ function JourJBlock({ registration }) {
       <Card className="border-slate-200 bg-slate-50/30">
         <CardContent className="p-4 text-xs text-slate-600 space-y-1.5">
           <div className="font-semibold text-slate-800">💡 Comment ça marche ?</div>
-          <p>• À votre arrivée sur site, présentez-vous à l&apos;agent ARACOM qui pointe votre <b>check-in</b>.</p>
-          <p>• À votre départ (17h ou plus tôt avec accord ARACOM), l&apos;agent pointe votre <b>check-out</b>.</p>
+          <p>• À votre arrivée sur site, présentez-vous à l&apos;agent ARACOM qui pointe votre <b>arrivée</b> via tablette/mobile.</p>
+          <p>• À votre départ (17h ou plus tôt avec accord ARACOM), l&apos;agent pointe votre <b>départ</b> et l&apos;état de votre stand.</p>
+          <p>• Cette page se rafraîchit automatiquement toutes les 30 secondes — vous voyez les pointages en temps réel.</p>
           <p>• Ces données conditionnent la <b>restitution de votre caution</b> (présence effective + horaires respectés).</p>
         </CardContent>
       </Card>
@@ -2716,6 +2798,8 @@ function BilanSatisfactionView({ registration, organization, deposit }) {
 function CautionAppointmentBlock({ registration, organization, deposit }) {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+  const [place, setPlace] = useState('aracom_paea');
+  const [placeCustom, setPlaceCustom] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -2743,8 +2827,21 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
   ];
   const suggestedTimes = ['09:00', '10:00', '11:00', '13:30', '14:30', '15:30', '16:30'];
 
+  // Lieux suggérés
+  const PLACE_OPTIONS = [
+    { key: 'aracom_paea', label: '🏢 ARACOM Conseil — Paea', hint: 'Siège ARACOM, sur RDV' },
+    { key: 'sur_site',    label: '🎪 Sur site / à mon stand le jour J', hint: 'Pendant l\'événement (sam 15 août)' },
+    { key: 'autre',       label: '📍 Autre lieu',           hint: 'À préciser ci-dessous' },
+  ];
+  const placeLabel = (k, custom) => {
+    if (k === 'sur_site') return 'Sur site / à votre stand le jour J';
+    if (k === 'autre') return custom || 'Lieu à préciser';
+    return 'ARACOM Conseil — Paea, Polynésie française';
+  };
+
   const submit = async () => {
     if (!date || !time) { toast.error('Choisissez une date et une heure'); return; }
+    if (place === 'autre' && !placeCustom.trim()) { toast.error('Précisez le lieu'); return; }
     setBusy(true);
     try {
       const res = await api('/api/exposant/caution-appointment', {
@@ -2754,6 +2851,8 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
           organization_id: organization.id,
           requested_date: date,
           requested_time: time,
+          requested_place: place,
+          requested_place_custom: placeCustom,
           notes,
         }),
       });
@@ -2768,21 +2867,44 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
   };
 
   if (submitted && existing) {
+    const isConfirmed = existing.status === 'confirme' || existing.status === 'restitue';
+    const confirmedDate = existing.confirmed_date || existing.requested_date;
+    const confirmedTime = existing.confirmed_time || existing.requested_time;
+    const confirmedPlace = existing.confirmed_place || existing.requested_place || 'aracom_paea';
+    const confirmedPlaceCustom = existing.confirmed_place_custom || existing.requested_place_custom || '';
+    const placeStr = placeLabel(confirmedPlace, confirmedPlaceCustom);
+
     return (
-      <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
+      <Card className={isConfirmed ? 'border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50' : 'border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50'}>
         <CardContent className="p-6">
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="w-8 h-8 text-emerald-600 shrink-0" />
+            <CheckCircle2 className={`w-8 h-8 shrink-0 ${isConfirmed ? 'text-emerald-600' : 'text-amber-600'}`} />
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-emerald-900">RDV de restitution enregistré ✓</h3>
-              <p className="text-sm text-emerald-800 mt-1">
-                Vous serez accueilli(e) le <b>{new Date(existing.requested_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {existing.requested_time}</b> dans les locaux d&apos;ARACOM à Paea.
+              <h3 className={`text-lg font-bold ${isConfirmed ? 'text-emerald-900' : 'text-amber-900'}`}>
+                {existing.status === 'restitue' ? '🎉 Caution restituée' : isConfirmed ? 'RDV confirmé ✓' : 'Demande de RDV envoyée ✓'}
+              </h3>
+              <p className={`text-sm mt-1 ${isConfirmed ? 'text-emerald-800' : 'text-amber-800'}`}>
+                Vous serez accueilli(e) le <b>{new Date(confirmedDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {confirmedTime}</b>.
               </p>
-              <div className="mt-3 text-xs text-emerald-700 bg-white/60 rounded-md p-3">
-                <p className="font-semibold mb-1">📍 Adresse : ARACOM Conseil — Paea, Polynésie française</p>
-                <p>Munissez-vous d&apos;une pièce d&apos;identité. La caution de <b>20 000 XPF</b> vous sera restituée sous la forme acceptée à l&apos;origine (espèces, chèque ou virement).</p>
+              <div className="mt-3 text-xs bg-white/70 rounded-md p-3 border border-white/80">
+                <p className="font-semibold mb-1">📍 Lieu : <span className="font-bold">{placeStr}</span></p>
+                <p className="text-slate-600 mt-1">Munissez-vous d&apos;une pièce d&apos;identité. La caution de <b>20 000 XPF</b> vous sera restituée sous la forme acceptée à l&apos;origine (espèces, chèque ou virement) et vous signerez sur place l&apos;<b>attestation de remboursement</b> en 2 exemplaires.</p>
               </div>
-              <p className="text-xs text-emerald-600 mt-2">Statut : <b>{existing.status || 'demandé'}</b>. Vous recevrez une confirmation par email dès qu&apos;ARACOM aura validé votre créneau.</p>
+              <p className={`text-xs mt-2 ${isConfirmed ? 'text-emerald-700' : 'text-amber-700'}`}>
+                Statut : <b>
+                  {existing.status === 'demande' ? 'En attente de validation ARACOM' :
+                   existing.status === 'propose' ? 'Nouveau créneau proposé par ARACOM' :
+                   existing.status === 'confirme' ? 'Confirmé' :
+                   existing.status === 'restitue' ? 'Caution restituée' :
+                   existing.status === 'annule' ? 'Annulé' : existing.status}
+                </b>.
+                {!isConfirmed && ' Vous recevrez une confirmation par email dès qu\'ARACOM aura validé votre créneau.'}
+              </p>
+              {existing.admin_note && (
+                <div className="mt-2 text-xs bg-blue-50 border border-blue-200 rounded-md p-2 text-blue-900">
+                  <b>Note ARACOM :</b> {existing.admin_note}
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -2796,7 +2918,7 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
         <CardTitle className="flex items-center gap-2 text-lg">
           <Wallet className="w-5 h-5" /> Récupérer ma caution (20 000 XPF)
         </CardTitle>
-        <p className="text-sm text-white/90 mt-1">Choisissez un créneau pour passer dans nos locaux à Paea récupérer votre caution.</p>
+        <p className="text-sm text-white/90 mt-1">Choisissez une <b>date</b>, une <b>heure</b> et un <b>lieu</b> pour récupérer votre caution.</p>
       </CardHeader>
       <CardContent className="p-5 space-y-4">
         <div className="grid md:grid-cols-2 gap-3">
@@ -2835,13 +2957,38 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
           </div>
         </div>
 
+        {/* 🆕 LIEU */}
+        <div>
+          <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Lieu de restitution</Label>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+            {PLACE_OPTIONS.map(o => (
+              <button
+                key={o.key}
+                onClick={() => setPlace(o.key)}
+                className={`text-left px-3 py-2 rounded-md border text-sm transition ${place === o.key ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200' : 'border-slate-200 hover:border-orange-300'}`}
+              >
+                <div className="font-semibold text-slate-800 text-xs">{o.label}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{o.hint}</div>
+              </button>
+            ))}
+          </div>
+          {place === 'autre' && (
+            <Input
+              value={placeCustom}
+              onChange={e => setPlaceCustom(e.target.value)}
+              placeholder="Précisez l'adresse / le lieu (ex : Carrefour Paea, parking église...)"
+              className="mt-2"
+            />
+          )}
+        </div>
+
         <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-          <b>Info :</b> ARACOM peut vous proposer un autre créneau si le vôtre n&apos;est pas disponible. Vous recevrez un email de confirmation.
+          <b>Info :</b> ARACOM peut vous proposer un autre créneau ou lieu si le vôtre n&apos;est pas disponible. Vous recevrez un email de confirmation. À votre arrivée, vous signerez l&apos;<b>attestation de remboursement</b> en 2 exemplaires.
         </div>
 
         <Button
           onClick={submit}
-          disabled={busy || !date || !time}
+          disabled={busy || !date || !time || (place === 'autre' && !placeCustom.trim())}
           className="w-full bg-orange-600 hover:bg-orange-700 gap-2"
         >
           {busy ? 'Envoi…' : '🗓️ Demander ce créneau'}

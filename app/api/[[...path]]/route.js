@@ -2702,7 +2702,7 @@ export async function POST(request, { params }) {
     if (route === 'admin/caution-appointments/update') {
       const ctx = getUserContext(request);
       if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
-      const { id, status, confirmed_date, confirmed_time, admin_note } = body || {};
+      const { id, status, confirmed_date, confirmed_time, confirmed_place, confirmed_place_custom, admin_note } = body || {};
       if (!id) return err('id requis', 400);
       if (!['confirme', 'propose', 'restitue', 'annule', 'demande'].includes(status)) {
         return err('status invalide', 400);
@@ -2718,6 +2718,8 @@ export async function POST(request, { params }) {
       };
       if (confirmed_date) updates.confirmed_date = confirmed_date;
       if (confirmed_time) updates.confirmed_time = confirmed_time;
+      if (confirmed_place) updates.confirmed_place = confirmed_place;
+      if (confirmed_place_custom !== undefined) updates.confirmed_place_custom = confirmed_place_custom;
       if (status === 'restitue') updates.restituted_at = new Date();
 
       await db.collection('caution_appointments').updateOne({ id }, { $set: updates });
@@ -2726,6 +2728,13 @@ export async function POST(request, { params }) {
       const org = await db.collection('organizations').findOne({ id: appt.organization_id });
       const finalDate = updates.confirmed_date || appt.requested_date;
       const finalTime = updates.confirmed_time || appt.requested_time;
+      const finalPlaceKey = updates.confirmed_place || appt.confirmed_place || appt.requested_place || 'aracom_paea';
+      const finalPlaceCustom = updates.confirmed_place_custom !== undefined ? updates.confirmed_place_custom : (appt.confirmed_place_custom || appt.requested_place_custom || '');
+      const placeLabel = (() => {
+        if (finalPlaceKey === 'sur_site') return 'Sur site / à votre stand le jour J';
+        if (finalPlaceKey === 'autre') return finalPlaceCustom || 'Lieu à préciser';
+        return 'ARACOM Conseil — Paea, Polynésie française';
+      })();
       const dateStr = new Date(finalDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
       const subjects = {
@@ -2737,19 +2746,20 @@ export async function POST(request, { params }) {
       const bodies = {
         confirme: `<p>Bonjour ${org?.contact_name || ''},</p>
           <p>Votre RDV pour récupérer votre caution de <b>20 000 XPF</b> est confirmé pour le <b>${dateStr} à ${finalTime}</b>.</p>
-          <p>📍 Adresse : ARACOM Conseil — Paea, Polynésie française</p>
-          <p>Munissez-vous d'une pièce d'identité.</p>
+          <p>📍 Lieu : <b>${placeLabel}</b></p>
+          <p>Munissez-vous d'une pièce d'identité. Nous vous remettrons l'<b>attestation de remboursement</b> à signer en 2 exemplaires (un pour ARACOM, un pour vous).</p>
           ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
           <p>À très bientôt,<br>L'équipe ARACOM</p>`,
         propose: `<p>Bonjour ${org?.contact_name || ''},</p>
           <p>Nous vous proposons un nouveau créneau pour récupérer votre caution :</p>
           <p style="font-size:18px"><b>${dateStr} à ${finalTime}</b></p>
-          <p>📍 ARACOM Conseil — Paea</p>
+          <p>📍 Lieu : <b>${placeLabel}</b></p>
           ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
           <p>Merci de nous confirmer votre venue par retour de mail.</p>
           <p>L'équipe ARACOM</p>`,
         restitue: `<p>Bonjour ${org?.contact_name || ''},</p>
-          <p>Nous confirmons la restitution de votre caution de <b>20 000 XPF</b> ce ${dateStr}.</p>
+          <p>Nous confirmons la restitution de votre caution de <b>20 000 XPF</b> ce ${dateStr}${placeLabel ? ` (${placeLabel})` : ''}.</p>
+          <p>L'attestation de remboursement signée vous a été remise.</p>
           <p>Merci pour votre participation au Forum de la Rentrée 2026 et à très bientôt pour la prochaine édition !</p>
           <p>L'équipe ARACOM</p>`,
         annule: `<p>Bonjour ${org?.contact_name || ''},</p>
@@ -2778,7 +2788,7 @@ export async function POST(request, { params }) {
     if (route === 'admin/caution-appointments/create') {
       const ctx = getUserContext(request);
       if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
-      const { registration_id, organization_id, confirmed_date, confirmed_time, admin_note } = body || {};
+      const { registration_id, organization_id, confirmed_date, confirmed_time, confirmed_place, confirmed_place_custom, admin_note } = body || {};
       if (!registration_id || !confirmed_date || !confirmed_time) {
         return err('Champs requis : registration_id, confirmed_date, confirmed_time', 400);
       }
@@ -2789,8 +2799,12 @@ export async function POST(request, { params }) {
         organization_id: organization_id || existing?.organization_id || null,
         requested_date: existing?.requested_date || confirmed_date,
         requested_time: existing?.requested_time || confirmed_time,
+        requested_place: existing?.requested_place || confirmed_place || 'aracom_paea',
+        requested_place_custom: existing?.requested_place_custom || '',
         confirmed_date,
         confirmed_time,
+        confirmed_place: confirmed_place || existing?.requested_place || 'aracom_paea',
+        confirmed_place_custom: confirmed_place_custom || existing?.requested_place_custom || '',
         status: 'confirme',
         admin_note: admin_note || '',
         notes: existing?.notes || '',
@@ -2805,6 +2819,11 @@ export async function POST(request, { params }) {
       );
       // Email proactif
       const org = await db.collection('organizations').findOne({ id: appt.organization_id });
+      const placeLabel = (() => {
+        if (appt.confirmed_place === 'sur_site') return 'Sur site / à votre stand le jour J';
+        if (appt.confirmed_place === 'autre') return appt.confirmed_place_custom || 'Lieu à préciser';
+        return 'ARACOM Conseil — Paea, Polynésie française';
+      })();
       if (org?.main_email) {
         const dateStr = new Date(confirmed_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
         try {
@@ -2814,7 +2833,7 @@ export async function POST(request, { params }) {
             html: `<p>Bonjour ${org.contact_name || ''},</p>
               <p>Nous vous donnons rendez-vous pour récupérer votre caution de <b>20 000 XPF</b> :</p>
               <p style="font-size:18px"><b>${dateStr} à ${confirmed_time}</b></p>
-              <p>📍 ARACOM Conseil — Paea, Polynésie française</p>
+              <p>📍 Lieu : <b>${placeLabel}</b></p>
               <p>Munissez-vous d'une pièce d'identité.</p>
               ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
               <p>Merci de confirmer votre venue par retour de mail.</p>
@@ -2828,7 +2847,7 @@ export async function POST(request, { params }) {
 
     // 🗓️ EXPOSANT — Création d'une demande de RDV pour restitution caution
     if (route === 'exposant/caution-appointment') {
-      const { registration_id, organization_id, requested_date, requested_time, notes } = body || {};
+      const { registration_id, organization_id, requested_date, requested_time, requested_place, requested_place_custom, notes } = body || {};
       if (!registration_id || !requested_date || !requested_time) {
         return err('Champs requis : registration_id, requested_date, requested_time', 400);
       }
@@ -2840,6 +2859,8 @@ export async function POST(request, { params }) {
         organization_id: organization_id || existing?.organization_id || null,
         requested_date,
         requested_time,
+        requested_place: requested_place || 'aracom_paea', // 'aracom_paea' | 'sur_site' | 'autre'
+        requested_place_custom: requested_place_custom || '',
         notes: notes || '',
         status: 'demande',
         created_at: existing?.created_at || new Date(),
@@ -2852,6 +2873,11 @@ export async function POST(request, { params }) {
       );
       delete appt._id;
       // Notification admin (mail interne — best effort)
+      const placeLabel = (() => {
+        if (appt.requested_place === 'sur_site') return 'Sur site / à mon stand (jour J)';
+        if (appt.requested_place === 'autre') return appt.requested_place_custom || 'À préciser';
+        return 'ARACOM Conseil — Paea';
+      })();
       try {
         const org = await db.collection('organizations').findOne({ id: appt.organization_id });
         await sendMail({
@@ -2859,6 +2885,7 @@ export async function POST(request, { params }) {
           subject: `🗓️ Demande de RDV caution — ${org?.name || 'Exposant'}`,
           html: `<p><b>${org?.name || 'Exposant'}</b> demande un RDV pour récupérer sa caution.</p>
                  <p>Créneau souhaité : <b>${new Date(requested_date).toLocaleDateString('fr-FR')} à ${requested_time}</b></p>
+                 <p>Lieu souhaité : <b>${placeLabel}</b></p>
                  ${notes ? `<p>Note : ${notes}</p>` : ''}
                  <p>Validez ou proposez un autre créneau depuis le cockpit ARACOM.</p>`,
         });

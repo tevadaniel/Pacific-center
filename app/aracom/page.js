@@ -7310,12 +7310,17 @@ function CautionAppointmentsAdminPanel() {
                     <th className="text-left p-2">Questionnaire</th>
                     <th className="text-left p-2">Demande exposant</th>
                     <th className="text-left p-2">RDV confirmé</th>
+                    <th className="text-left p-2">Lieu</th>
                     <th className="text-left p-2">Statut</th>
                     <th className="text-right p-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {appts.map(a => (
+                  {appts.map(a => {
+                    const placeKey = a.confirmed_place || a.requested_place || 'aracom_paea';
+                    const placeCustom = a.confirmed_place_custom || a.requested_place_custom || '';
+                    const placeShort = placeKey === 'sur_site' ? '🎪 Sur site' : placeKey === 'autre' ? `📍 ${placeCustom || 'Autre'}` : '🏢 ARACOM Paea';
+                    return (
                     <tr key={a.id} className="border-b hover:bg-slate-50">
                       <td className="p-2">
                         <div className="font-semibold text-slate-800">{a.organization_name || '—'}</div>
@@ -7351,6 +7356,11 @@ function CautionAppointmentsAdminPanel() {
                           </>
                         ) : <span className="text-slate-400 italic">—</span>}
                       </td>
+                      <td className="p-2 text-xs" title={placeCustom || placeShort}>
+                        <Badge variant="outline" className={placeKey === 'sur_site' ? 'bg-violet-50 text-violet-800 border-violet-200' : placeKey === 'autre' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-blue-50 text-blue-800 border-blue-200'}>
+                          {placeShort}
+                        </Badge>
+                      </td>
                       <td className="p-2">
                         <Badge variant="outline" className={statusBadge(a.status).cls}>
                           {statusBadge(a.status).label}
@@ -7360,7 +7370,7 @@ function CautionAppointmentsAdminPanel() {
                         <div className="flex gap-1 justify-end flex-wrap">
                           {a.status === 'demande' && a.preferred_payment !== 'virement' && (
                             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                              onClick={() => update(a.id, 'confirme', { confirmed_date: a.requested_date, confirmed_time: a.requested_time })}>
+                              onClick={() => update(a.id, 'confirme', { confirmed_date: a.requested_date, confirmed_time: a.requested_time, confirmed_place: a.requested_place || 'aracom_paea', confirmed_place_custom: a.requested_place_custom || '' })}>
                               ✓ Confirmer
                             </Button>
                           )}
@@ -7382,7 +7392,10 @@ function CautionAppointmentsAdminPanel() {
                           )}
                           {a.status === 'confirme' && (
                             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
-                              onClick={() => update(a.id, 'restitue')}>
+                              onClick={() => {
+                                if (!window.confirm('Confirmer que la caution a été restituée à l\'exposant et que l\'attestation a été signée en 2 exemplaires ?')) return;
+                                update(a.id, 'restitue');
+                              }}>
                               🎉 Restitué
                             </Button>
                           )}
@@ -7395,7 +7408,7 @@ function CautionAppointmentsAdminPanel() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
             </div>
@@ -7422,6 +7435,8 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
   const [selectedReg, setSelectedReg] = useState(isNew ? '' : appointment.registration_id);
   const [date, setDate] = useState(appointment?.confirmed_date || appointment?.requested_date || '2026-08-17');
   const [time, setTime] = useState(appointment?.confirmed_time || appointment?.requested_time || '10:00');
+  const [place, setPlace] = useState(appointment?.confirmed_place || appointment?.requested_place || 'aracom_paea');
+  const [placeCustom, setPlaceCustom] = useState(appointment?.confirmed_place_custom || appointment?.requested_place_custom || '');
   const [adminNote, setAdminNote] = useState(appointment?.admin_note || '');
   const [status, setStatus] = useState(appointment?.status || 'confirme');
   const [busy, setBusy] = useState(false);
@@ -7432,6 +7447,7 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
 
   const save = async () => {
     if (!date || !time) { toast.error('Date et heure requises'); return; }
+    if (place === 'autre' && !placeCustom.trim()) { toast.error('Précisez le lieu (autre)'); return; }
     setBusy(true);
     try {
       if (isNew) {
@@ -7444,6 +7460,8 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
             organization_id: reg?.organization_id,
             confirmed_date: date,
             confirmed_time: time,
+            confirmed_place: place,
+            confirmed_place_custom: placeCustom,
             admin_note: adminNote,
           }),
         });
@@ -7456,6 +7474,8 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
             status,
             confirmed_date: date,
             confirmed_time: time,
+            confirmed_place: place,
+            confirmed_place_custom: placeCustom,
             admin_note: adminNote,
           }),
         });
@@ -7468,6 +7488,12 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
       setBusy(false);
     }
   };
+
+  const PLACE_OPTIONS = [
+    { key: 'aracom_paea', label: '🏢 ARACOM Paea (siège)' },
+    { key: 'sur_site',    label: '🎪 Sur site (jour J)' },
+    { key: 'autre',       label: '📍 Autre lieu' },
+  ];
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -7514,11 +7540,26 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
             </div>
           </div>
           <div>
+            <Label className="text-xs font-semibold">Lieu confirmé</Label>
+            <Select value={place} onValueChange={setPlace}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PLACE_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {place === 'autre' && (
+              <Input className="mt-2" value={placeCustom} onChange={e => setPlaceCustom(e.target.value)} placeholder="Précisez l'adresse / le lieu" />
+            )}
+            {appointment?.requested_place && appointment?.requested_place !== place && !isNew && (
+              <p className="text-[10px] text-amber-700 mt-1">Demande initiale exposant : <b>{appointment.requested_place === 'sur_site' ? 'Sur site' : appointment.requested_place === 'autre' ? (appointment.requested_place_custom || 'Autre') : 'ARACOM Paea'}</b></p>
+            )}
+          </div>
+          <div>
             <Label className="text-xs font-semibold">Note pour l&apos;exposant (incluse dans l&apos;email)</Label>
             <Textarea rows={3} value={adminNote} onChange={e => setAdminNote(e.target.value)} placeholder="Informations complémentaires, parking, accès, etc." />
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-md p-2.5 text-xs text-blue-800">
-            📧 <b>Email automatique</b> envoyé à l&apos;exposant avec les détails du RDV.
+            📧 <b>Email automatique</b> envoyé à l&apos;exposant avec les détails du RDV (date, heure, <b>lieu</b>).
           </div>
         </div>
         <DialogFooter>
