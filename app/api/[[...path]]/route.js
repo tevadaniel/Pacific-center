@@ -623,9 +623,20 @@ function computeCompletion(reg, hasStand) {
   return Math.min(100, pct);
 }
 
-async function computeKpis(db) {
-  const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
-  const deposits = await db.collection('deposit_transactions').find({}).toArray();
+async function computeKpis(db, userRole = null) {
+  // 🆕 Filtrage par sites visibles selon rôle (Pacific/Exposant ne voient pas les sites masqués)
+  let allowedVenueIds = null;
+  if (userRole === 'pacific_centers_readonly' || userRole === 'exposant') {
+    const flag = userRole === 'pacific_centers_readonly' ? 'pacific_visible' : 'exposant_visible';
+    const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
+    allowedVenueIds = new Set(venues.filter(v => v.is_available_2026 !== false && v[flag] !== false).map(v => v.id));
+  }
+  const q = { edition_id: EDITION_ID };
+  if (allowedVenueIds) q.venue_id = { $in: [...allowedVenueIds] };
+  const regs = await db.collection('registrations').find(q).toArray();
+  const regIds = new Set(regs.map(r => r.id));
+  const depAll = await db.collection('deposit_transactions').find({}).toArray();
+  const deposits = allowedVenueIds ? depAll.filter(d => regIds.has(d.registration_id)) : depAll;
   const depById = {};
   deposits.forEach(d => { depById[d.registration_id] = d; });
   const total = regs.length;
@@ -1044,7 +1055,8 @@ export async function GET(request, { params }) {
     }
 
     if (route === 'dashboard/kpis') {
-      const kpis = await computeKpis(db);
+      const userRole = request.headers.get('x-user-role');
+      const kpis = await computeKpis(db, userRole);
       return json(kpis);
     }
     if (route === 'dashboard/by-site') {
