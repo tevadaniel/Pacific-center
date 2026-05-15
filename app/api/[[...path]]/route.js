@@ -65,6 +65,123 @@ async function tryAutoMailGuard() {
 }
 
 // ===== Tracking helpers =====
+
+// 🆕 Helper : génère le HTML d'une attestation de remboursement avec 2 exemplaires sur 2 pages A4
+function buildRefundAttestationHTML({ org, venue, reg, dep, num, today }) {
+  const modeLabel = dep?.deposit_mode === 'especes' ? 'Espèces' : (dep?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
+  // Construction d'UN exemplaire (réutilisé 2× avec un copy_label différent)
+  const singleCopy = (copyLabel, copyNumber) => `
+<div class="page">
+  <div class="copy-badge">EXEMPLAIRE ${copyNumber}/2 — ${copyLabel}</div>
+  <div class="header">
+    <div>
+      <h1>ATTESTATION DE REMBOURSEMENT DE CAUTION</h1>
+      <p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 &amp; 15 août 2026</p>
+    </div>
+    <div style="text-align:right">
+      <div class="brand">ARACOM</div>
+      <div style="font-size:11px;color:#64748b;margin-top:6px">Émise le ${today}</div>
+    </div>
+  </div>
+  <p style="margin-top:24px">La société <b>ARACOM</b>, organisatrice du Forum de la Rentrée 2026, atteste par la présente avoir procédé au <b>remboursement intégral</b> de la caution versée par l'exposant ci-dessous, dans le cadre de sa participation à l'événement.</p>
+  <div class="box">
+    <div class="row"><span class="label">N° d'attestation</span><b>${num}</b></div>
+    <div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div>
+    <div class="row"><span class="label">Contact</span><span>${org?.contact_name || '—'}</span></div>
+    <div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg?.stand_code || '—'}</span></div>
+    <div class="row"><span class="label">Mode de versement initial</span><b>${modeLabel}</b></div>
+    <div class="row"><span class="label">Date de remboursement</span><b>${today}</b></div>
+  </div>
+  <div class="amount">Montant remboursé : 20 000 XPF</div>
+  <p>Le remboursement est effectué après constat du respect des conditions de présence et de tenue conforme du stand sur les deux jours du Forum (vendredi 14 et samedi 15 août 2026), suite à la complétion du questionnaire de satisfaction par l'exposant.</p>
+  <div class="sig">
+    <div class="sig-block">
+      <div style="font-weight:600;color:#1e293b;margin-bottom:24px">Pour <b>ARACOM</b></div>
+      <div style="border-top:1px solid #cbd5e1;padding-top:6px;font-size:11px;color:#64748b">Date &amp; signature</div>
+    </div>
+    <div class="sig-block">
+      <div style="font-weight:600;color:#1e293b;margin-bottom:24px">L'exposant <b>${org?.name || ''}</b></div>
+      <div style="border-top:1px solid #cbd5e1;padding-top:6px;font-size:11px;color:#64748b">Date &amp; signature</div>
+    </div>
+  </div>
+  <p class="footer-note">Document officiel — Forum de la Rentrée 2026 · ${num} · Exemplaire ${copyNumber} sur 2</p>
+</div>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Attestation de remboursement ${org?.name || ''} (2 exemplaires)</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Helvetica, Arial, sans-serif; margin: 0; color: #1f2937; background: #f1f5f9; }
+.page {
+  width: 210mm;
+  min-height: 270mm;
+  padding: 18mm 18mm 14mm 18mm;
+  margin: 12px auto;
+  background: white;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  position: relative;
+  page-break-after: always;
+  line-height: 1.55;
+}
+.page:last-child { page-break-after: auto; }
+.copy-badge {
+  position: absolute; top: 8mm; right: 18mm;
+  background: #059669; color: white;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  padding: 4px 10px; border-radius: 4px;
+}
+h1 { color: #059669; margin: 0 0 4px; font-size: 22px; }
+.header { display: flex; justify-content: space-between; align-items: start; border-bottom: 3px solid #059669; padding-bottom: 10px; margin-top: 12mm; }
+.brand { background: #059669; color: #fff; font-weight: 700; padding: 6px 12px; border-radius: 6px; display: inline-block; letter-spacing: .05em; }
+.box { border: 2px solid #059669; padding: 18px; border-radius: 8px; margin: 20px 0; background: #f0fdf4; }
+.row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #d1fae5; }
+.row:last-child { border-bottom: 0; }
+.label { color: #475569; }
+.amount { font-size: 26px; color: #059669; font-weight: 800; text-align: center; margin: 14px 0; padding: 10px; background: #ecfdf5; border-radius: 8px; }
+.sig { display: flex; justify-content: space-between; margin-top: 30px; gap: 24px; }
+.sig-block { flex: 1; padding-top: 8px; }
+.footer-note { font-size: 10px; color: #94a3b8; margin-top: 24px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+.print-btn-bar {
+  position: fixed; top: 16px; right: 16px; z-index: 100;
+  display: flex; gap: 8px;
+}
+.print-btn {
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: #059669;
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+}
+.print-btn.secondary { background: #475569; box-shadow: 0 2px 8px rgba(71, 85, 105, 0.3); }
+.tip {
+  max-width: 210mm; margin: 12px auto 0; padding: 10px 16px;
+  background: #fef3c7; border-left: 4px solid #f59e0b; color: #92400e;
+  font-size: 12px; border-radius: 0 6px 6px 0;
+}
+@media print {
+  body { background: white; }
+  .print-btn-bar, .tip { display: none !important; }
+  .page { box-shadow: none; margin: 0; }
+  @page { size: A4; margin: 0; }
+}
+</style></head>
+<body>
+<div class="print-btn-bar">
+  <button class="print-btn" onclick="window.print()">🖨️ Imprimer les 2 exemplaires</button>
+  <button class="print-btn secondary" onclick="window.close()">Fermer</button>
+</div>
+<div class="tip">
+  💡 <b>Conseil d'impression</b> : cliquez sur "Imprimer les 2 exemplaires", choisissez votre imprimante,
+  et le document s'imprimera sur <b>2 feuilles A4 identiques</b>. Faites signer les deux par l'exposant (un exemplaire pour ARACOM, un pour l'exposant).
+</div>
+${singleCopy('ARACOM', 1)}
+${singleCopy('EXPOSANT', 2)}
+</body></html>`;
+}
+
 /**
  * Get the public base URL for emails / access links / etc.
  * 🛡️ Stratégie : priorité à l'origine de la requête entrante (preserves preview vs production)
@@ -2741,7 +2858,7 @@ export async function POST(request, { params }) {
         { upsert: true }
       );
 
-      // 🆕 AUTO-GÉNÉRATION : Attestation de remboursement de caution (sans signatures)
+      // 🆕 AUTO-GÉNÉRATION : Attestation de remboursement de caution (2 exemplaires imprimables, sans signatures)
       try {
         const regId = body?.registration_id || payload.registration_id;
         if (regId) {
@@ -2755,44 +2872,9 @@ export async function POST(request, { params }) {
             const org = await db.collection('organizations').findOne({ id: orgId });
             const venue = reg?.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
             const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
-            const tpl = await db.collection('app_settings').findOne({ key: 'doc_template_attestation_remboursement' });
-            const t = tpl?.texts || {};
             const today = new Date().toLocaleDateString('fr-FR');
             const num = `ATT-2026-${String(regId).slice(0, 6).toUpperCase()}`;
-            const modeLabel = dep?.deposit_mode === 'especes' ? 'Espèces' : (dep?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
-            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Attestation de remboursement ${org?.name || ''}</title>
-<style>body{font-family:Helvetica,Arial,sans-serif;max-width:720px;margin:32px auto;color:#1f2937;padding:0 16px;line-height:1.55}
-h1{color:#059669;margin:0 0 4px;font-size:24px}
-.header{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #059669;padding-bottom:10px}
-.brand{background:#059669;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px}
-.box{border:2px solid #059669;padding:18px;border-radius:8px;margin:20px 0;background:#f0fdf4}
-.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #d1fae5}
-.row:last-child{border-bottom:0}
-.label{color:#475569}
-.amount{font-size:28px;color:#059669;font-weight:800;text-align:center;margin:12px 0}
-.sig{display:flex;justify-content:space-between;margin-top:60px}
-.sig-block{width:45%;border-top:1px solid #cbd5e1;padding-top:8px;font-size:12px;color:#64748b;text-align:center}
-.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#059669;color:#fff;border:0;cursor:pointer;font-weight:600}
-@media print{.print-btn{display:none}}
-.notice{background:#fef3c7;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:6px;font-size:12px;color:#92400e;margin-top:18px}
-</style></head><body>
-<button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button>
-<div class="header"><div><h1>${t.title || 'ATTESTATION DE REMBOURSEMENT DE CAUTION'}</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div class="brand">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émise le ${today}</div></div></div>
-<p style="margin-top:24px">${t.intro || `La société <b>ARACOM</b>, organisatrice du Forum de la Rentrée 2026, atteste par la présente avoir procédé au <b>remboursement intégral</b> de la caution versée par l'exposant ci-dessous, dans le cadre de sa participation à l'événement.`}</p>
-<div class="box">
-  <div class="row"><span class="label">N° d'attestation</span><b>${num}</b></div>
-  <div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div>
-  <div class="row"><span class="label">Contact</span><span>${org?.contact_name || '—'}</span></div>
-  <div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg?.stand_code || '—'}</span></div>
-  <div class="row"><span class="label">Mode de versement initial</span><b>${modeLabel}</b></div>
-  <div class="row"><span class="label">Date de remboursement</span><b>${today}</b></div>
-</div>
-<div class="amount">Montant remboursé : 20 000 XPF</div>
-<p>${t.conditions || `Le remboursement est effectué après constat du respect des conditions de présence et de tenue conforme du stand sur les deux jours du Forum (vendredi 14 et samedi 15 août 2026), suite à la complétion du questionnaire de satisfaction par l'exposant.`}</p>
-<div class="notice"><b>⚠️ Document à signer :</b> cette attestation est générée automatiquement. Elle sera finalisée et signée par les deux parties (ARACOM + exposant) lors du remboursement.</div>
-<div class="sig"><div class="sig-block">Pour ARACOM<br/><i>Date & signature</i></div><div class="sig-block">L'exposant ${org?.name || ''}<br/><i>Date & signature</i></div></div>
-<p style="font-size:11px;color:#94a3b8;margin-top:30px;text-align:center">Document officiel — Forum de la Rentrée 2026 · ${num}</p>
-</body></html>`;
+            const html = buildRefundAttestationHTML({ org, venue, reg, dep, num, today });
             await db.collection('registration_documents').insertOne({
               id: uuid(),
               registration_id: regId,
@@ -5271,6 +5353,45 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         updated_at: new Date(),
       });
       return json({ ok: true });
+    }
+
+    // 🆕 POST /api/admin/refund-attestation/:regId/generate — ARACOM (re)génère l'attestation auto
+    //   (force la création même si le questionnaire n'a pas été rempli)
+    if (route.match(/^admin\/refund-attestation\/[^/]+\/generate$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const regId = p[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
+      const today = new Date().toLocaleDateString('fr-FR');
+      const num = `ATT-2026-${String(regId).slice(0, 6).toUpperCase()}`;
+      // Désactive les anciennes attestations auto non signées
+      await db.collection('registration_documents').updateMany(
+        { registration_id: regId, document_type: 'attestation_remboursement', is_signed: { $ne: true } },
+        { $set: { status: 'remplace', updated_at: new Date() } }
+      );
+      const html = buildRefundAttestationHTML({ org, venue, reg, dep, num, today });
+      const docId = uuid();
+      await db.collection('registration_documents').insertOne({
+        id: docId,
+        registration_id: regId,
+        document_type: 'attestation_remboursement',
+        file_name: `Attestation_remboursement_${(org?.name || 'exp').replace(/\s+/g, '_')}_${num}.html`,
+        mime_type: 'text/html',
+        file_size: html.length,
+        file_data: Buffer.from(html, 'utf-8').toString('base64'),
+        status: 'valide',
+        is_signed: false,
+        attestation_number: num,
+        uploaded_by: 'aracom-manual',
+        uploaded_at: new Date(),
+        validated_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      return json({ ok: true, document_id: docId, attestation_number: num });
     }
 
     // One-time migration : set is_available_2026 + disable exposant/pacific passwords

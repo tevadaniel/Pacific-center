@@ -5570,17 +5570,13 @@ const DOC_CATEGORIES = [
   { value: 'autre',      label: '📁 Autre',                          emoji: '📁' },
 ];
 
-// 🆕 Éditeur RIB ARACOM + Templates documents (textes + logo)
+// 🆕 Éditeur RIB ARACOM (champs structurés, utilisé pour le virement de caution)
 function RibAndTemplatesEditor() {
   const [rib, setRib] = useState({ titulaire: 'ARACOM', banque: '', iban: '', bic: '', reference: 'Caution Forum 2026 + nom exposant' });
-  const [templates, setTemplates] = useState({});
-  const [activeTpl, setActiveTpl] = useState('convention');
   const [savingRib, setSavingRib] = useState(false);
-  const [savingTpl, setSavingTpl] = useState(false);
 
   useEffect(() => {
     api('/api/admin/rib-config').then(setRib).catch(() => {});
-    api('/api/admin/document-templates').then(setTemplates).catch(() => {});
   }, []);
 
   const saveRib = async () => {
@@ -5592,134 +5588,27 @@ function RibAndTemplatesEditor() {
     setSavingRib(false);
   };
 
-  const updateTplText = (field, value) => {
-    setTemplates(prev => ({
-      ...prev,
-      [activeTpl]: { ...(prev[activeTpl] || {}), texts: { ...((prev[activeTpl] || {}).texts || {}), [field]: value } }
-    }));
-  };
-
-  const saveTpl = async () => {
-    setSavingTpl(true);
-    try {
-      const t = templates[activeTpl] || {};
-      await api('/api/admin/document-templates', { method: 'POST', body: JSON.stringify({ key: activeTpl, texts: t.texts || {}, logo_base64: t.logo_base64 || null }) });
-      toast.success('💾 Template enregistré');
-    } catch (e) { toast.error(e.message); }
-    setSavingTpl(false);
-  };
-
-  const uploadLogo = async (file) => {
-    if (!file) return;
-    if (file.size > 1024 * 1024) { toast.error('Logo trop volumineux (max 1 Mo)'); return; }
-    const buf = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
-    setTemplates(prev => ({ ...prev, [activeTpl]: { ...(prev[activeTpl] || {}), logo_base64: `data:${file.type};base64,${buf}` } }));
-    toast.success('Logo chargé — n\'oubliez pas d\'enregistrer');
-  };
-
-  const TPL_LIST = [
-    { key: 'convention', label: '📜 Convention', fields: [
-      { k: 'header_title', label: 'Titre principal', placeholder: 'CONVENTION DE PARTICIPATION' },
-      { k: 'intro', label: 'Introduction', placeholder: 'Entre les soussignés…', textarea: true },
-      { k: 'clause_caution', label: 'Clause caution', placeholder: 'L\'exposant s\'engage à verser…', textarea: true },
-      { k: 'footer', label: 'Pied de page', placeholder: 'Fait à Papeete, le…' },
-    ] },
-    { key: 'guide', label: '📖 Guide exposant', fields: [
-      { k: 'header_title', label: 'Titre principal', placeholder: 'GUIDE DE L\'EXPOSANT' },
-      { k: 'welcome', label: 'Mot de bienvenue', placeholder: 'Chers exposants…', textarea: true },
-      { k: 'contact_info', label: 'Coordonnées contact', placeholder: 'En cas de question…', textarea: true },
-    ] },
-    { key: 'recu', label: '🧾 Reçu de caution', fields: [
-      { k: 'title', label: 'Titre', placeholder: 'REÇU DE CAUTION' },
-      { k: 'conditions', label: 'Conditions de restitution', placeholder: 'La caution sera restituée…', textarea: true },
-    ] },
-    { key: 'attestation_remboursement', label: '✅ Attestation remboursement', fields: [
-      { k: 'title', label: 'Titre', placeholder: 'ATTESTATION DE REMBOURSEMENT DE CAUTION' },
-      { k: 'intro', label: 'Introduction', placeholder: 'La société ARACOM atteste…', textarea: true },
-      { k: 'conditions', label: 'Conditions', placeholder: 'Le remboursement est effectué…', textarea: true },
-    ] },
-  ];
-  const currentTplDef = TPL_LIST.find(t => t.key === activeTpl);
-  const currentTplData = templates[activeTpl] || {};
-
   return (
-    <div className="space-y-4">
-      {/* RIB ARACOM */}
-      <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2 text-indigo-900">
-            🏦 RIB ARACOM (utilisé en virement de caution + pièce jointe email)
-          </CardTitle>
-          <p className="text-xs text-indigo-700 mt-1">Ces informations apparaîtront dans le modal &quot;Confirmer ma présence&quot; quand l&apos;exposant sélectionne le mode <b>Virement bancaire</b>.</p>
-        </CardHeader>
-        <CardContent className="grid md:grid-cols-2 gap-3">
-          <div><Label>Titulaire du compte</Label><Input value={rib.titulaire || ''} onChange={e => setRib({ ...rib, titulaire: e.target.value })} placeholder="ARACOM" /></div>
-          <div><Label>Banque</Label><Input value={rib.banque || ''} onChange={e => setRib({ ...rib, banque: e.target.value })} placeholder="Ex : Banque de Polynésie" /></div>
-          <div className="md:col-span-2"><Label>IBAN</Label><Input value={rib.iban || ''} onChange={e => setRib({ ...rib, iban: e.target.value })} placeholder="FR76 1234 5678 9012 3456 7890 123" className="font-mono" /></div>
-          <div><Label>BIC / SWIFT</Label><Input value={rib.bic || ''} onChange={e => setRib({ ...rib, bic: e.target.value })} placeholder="BPPFPFPP" className="font-mono" /></div>
-          <div><Label>Référence à indiquer par l&apos;exposant</Label><Input value={rib.reference || ''} onChange={e => setRib({ ...rib, reference: e.target.value })} placeholder="Caution Forum 2026 + nom" /></div>
-          <div className="md:col-span-2">
-            <Button onClick={saveRib} disabled={savingRib} className="bg-indigo-600 hover:bg-indigo-700 gap-2">
-              {savingRib ? 'Enregistrement…' : <>💾 Enregistrer le RIB</>}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Templates documents éditables */}
-      <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2 text-emerald-900">
-            📝 Templates des documents officiels (textes + logo)
-          </CardTitle>
-          <p className="text-xs text-emerald-700 mt-1">Personnalisez les <b>textes</b> et le <b>logo</b> utilisés dans les 4 documents auto-générés. Les modifications s&apos;appliquent aux prochaines générations.</p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {TPL_LIST.map(t => (
-              <Button key={t.key} size="sm" variant={activeTpl === t.key ? 'default' : 'outline'}
-                onClick={() => setActiveTpl(t.key)}
-                className={activeTpl === t.key ? 'bg-emerald-600 hover:bg-emerald-700' : ''}>
-                {t.label}
-              </Button>
-            ))}
-          </div>
-          <div className="bg-white rounded-md p-4 border border-emerald-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-sm text-emerald-900">Édition : {currentTplDef.label}</div>
-              {currentTplData.updated_at && <span className="text-[11px] text-slate-500">Modifié le {new Date(currentTplData.updated_at).toLocaleString('fr-FR')}</span>}
-            </div>
-            <div>
-              <Label className="text-xs">Logo personnalisé (optionnel, PNG/JPG &lt; 1 Mo)</Label>
-              <div className="flex items-center gap-3 mt-1">
-                {currentTplData.logo_base64 && (
-                  <img src={currentTplData.logo_base64} alt="Logo" className="w-16 h-16 object-contain border rounded" />
-                )}
-                <Input type="file" accept="image/*" onChange={e => uploadLogo(e.target.files?.[0])} className="text-xs" />
-                {currentTplData.logo_base64 && (
-                  <Button size="sm" variant="ghost" onClick={() => setTemplates(prev => ({ ...prev, [activeTpl]: { ...(prev[activeTpl] || {}), logo_base64: '' } }))}>
-                    <XCircle className="w-3 h-3 mr-1" /> Retirer
-                  </Button>
-                )}
-              </div>
-            </div>
-            {currentTplDef.fields.map(f => (
-              <div key={f.k}>
-                <Label className="text-xs uppercase">{f.label}</Label>
-                {f.textarea ? (
-                  <Textarea rows={3} value={(currentTplData.texts || {})[f.k] || ''} onChange={e => updateTplText(f.k, e.target.value)} placeholder={f.placeholder} className="mt-1" />
-                ) : (
-                  <Input value={(currentTplData.texts || {})[f.k] || ''} onChange={e => updateTplText(f.k, e.target.value)} placeholder={f.placeholder} className="mt-1" />
-                )}
-              </div>
-            ))}
-            <Button onClick={saveTpl} disabled={savingTpl} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
-              {savingTpl ? 'Enregistrement…' : <>💾 Enregistrer le template</>}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2 text-indigo-900">
+          🏦 RIB ARACOM (utilisé en virement de caution + pièce jointe email)
+        </CardTitle>
+        <p className="text-xs text-indigo-700 mt-1">Ces informations apparaîtront dans le modal &quot;Confirmer ma présence&quot; quand l&apos;exposant sélectionne le mode <b>Virement bancaire</b>.</p>
+      </CardHeader>
+      <CardContent className="grid md:grid-cols-2 gap-3">
+        <div><Label>Titulaire du compte</Label><Input value={rib.titulaire || ''} onChange={e => setRib({ ...rib, titulaire: e.target.value })} placeholder="ARACOM" /></div>
+        <div><Label>Banque</Label><Input value={rib.banque || ''} onChange={e => setRib({ ...rib, banque: e.target.value })} placeholder="Ex : Banque de Polynésie" /></div>
+        <div className="md:col-span-2"><Label>IBAN</Label><Input value={rib.iban || ''} onChange={e => setRib({ ...rib, iban: e.target.value })} placeholder="FR76 1234 5678 9012 3456 7890 123" className="font-mono" /></div>
+        <div><Label>BIC / SWIFT</Label><Input value={rib.bic || ''} onChange={e => setRib({ ...rib, bic: e.target.value })} placeholder="BPPFPFPP" className="font-mono" /></div>
+        <div><Label>Référence à indiquer par l&apos;exposant</Label><Input value={rib.reference || ''} onChange={e => setRib({ ...rib, reference: e.target.value })} placeholder="Caution Forum 2026 + nom" /></div>
+        <div className="md:col-span-2">
+          <Button onClick={saveRib} disabled={savingRib} className="bg-indigo-600 hover:bg-indigo-700 gap-2">
+            {savingRib ? 'Enregistrement…' : <>💾 Enregistrer le RIB</>}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -7158,6 +7047,27 @@ function DisciplinesCard({ analytics }) {
 // =====================================================================
 // 🗓️ ADMIN — Panneau de gestion des RDV de restitution caution
 // =====================================================================
+// 🆕 Bouton ARACOM : Génère + ouvre l'attestation imprimable (2 exemplaires)
+function GeneratePrintAttestationButton({ registrationId, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const res = await api(`/api/admin/refund-attestation/${registrationId}/generate`, { method: 'POST', body: '{}' });
+      toast.success('✅ Attestation générée — ouverture pour impression');
+      // Ouvre la version imprimable dans un nouvel onglet
+      window.open(`/api/documents/${res.document_id}/download`, '_blank');
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+  return (
+    <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-blue-300 text-blue-700 hover:bg-blue-50" onClick={generate} disabled={busy} title="Génère et ouvre l'attestation prête à imprimer en 2 exemplaires">
+      🖨️ {busy ? '…' : 'Attestation x2'}
+    </Button>
+  );
+}
+
 // 🆕 Bouton ARACOM pour uploader la version signée de l'attestation de remboursement
 function UploadSignedAttestationButton({ registrationId, onDone }) {
   const [open, setOpen] = useState(false);
@@ -7367,6 +7277,10 @@ function CautionAppointmentsAdminPanel() {
                               onClick={() => update(a.id, 'restitue')}>
                               🎉 Restitué
                             </Button>
+                          )}
+                          {/* 🆕 Génération + impression attestation 2 exemplaires (toujours disponible) */}
+                          {a.registration_id && (
+                            <GeneratePrintAttestationButton registrationId={a.registration_id} onDone={load} />
                           )}
                           {a.survey_submitted && a.registration_id && (
                             <UploadSignedAttestationButton registrationId={a.registration_id} onDone={load} />
