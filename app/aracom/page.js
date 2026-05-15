@@ -6531,6 +6531,7 @@ function AdminOverridePanel({ data, onReload, onClose }) {
 // =====================================================================
 function DisciplinesCard({ analytics }) {
   const [selectedSite, setSelectedSite] = useState('all');
+  const [showMultiList, setShowMultiList] = useState(false);
 
   // Récupère les disciplines selon le filtre
   const data = useMemo(() => {
@@ -6539,15 +6540,24 @@ function DisciplinesCard({ analytics }) {
         list: analytics.disciplines || [],
         total: analytics.total_organizations || 0,
         multiSites: analytics.multi_site_orgs_count || 0,
+        multiOrgs: analytics.multi_site_orgs_list || [],
         label: 'Tous sites confondus',
       };
     }
     const site = analytics.disciplines_by_site?.[selectedSite];
-    if (!site) return { list: [], total: 0, multiSites: 0, label: '—' };
+    if (!site) return { list: [], total: 0, multiSites: 0, multiOrgs: [], label: '—' };
+    // Pour un site spécifique : agréger les orgs multi-sites de toutes les disciplines de ce site
+    const orgsMap = new Map();
+    (site.disciplines || []).forEach(d => {
+      (d.multi_site_orgs || []).forEach(o => {
+        if (!orgsMap.has(o.id)) orgsMap.set(o.id, { ...o, discipline: d.name });
+      });
+    });
     return {
       list: site.disciplines,
       total: site.total_orgs,
-      multiSites: site.disciplines.reduce((s, d) => s + (d.multi_site_count || 0), 0),
+      multiSites: orgsMap.size,
+      multiOrgs: Array.from(orgsMap.values()),
       label: site.venue_name,
     };
   }, [analytics, selectedSite]);
@@ -6559,14 +6569,20 @@ function DisciplinesCard({ analytics }) {
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (
-      <div className="bg-white border border-violet-200 rounded-md p-3 shadow-lg text-xs">
+      <div className="bg-white border border-violet-200 rounded-md p-3 shadow-lg text-xs max-w-xs">
         <div className="font-bold text-slate-800">{d.name}</div>
         <div className="mt-1">
           <b>{d.count}</b> exposant{d.count > 1 ? 's' : ''}
         </div>
         {d.multi_site_count > 0 && (
-          <div className="mt-1 text-orange-700 flex items-center gap-1">
-            🔄 <b>{d.multi_site_count}</b> sur plusieurs sites
+          <div className="mt-1 text-orange-700">
+            <div className="flex items-center gap-1 font-semibold">🔄 {d.multi_site_count} sur plusieurs sites :</div>
+            <ul className="mt-1 ml-3 list-disc text-orange-900 space-y-0.5">
+              {(d.multi_site_orgs || []).slice(0, 5).map(o => (
+                <li key={o.id}><b>{o.name}</b> <span className="text-orange-600 text-[10px]">({o.sites?.join(' · ') || '—'})</span></li>
+              ))}
+              {(d.multi_site_orgs?.length || 0) > 5 && <li className="italic text-orange-600">+ {d.multi_site_orgs.length - 5} autres…</li>}
+            </ul>
           </div>
         )}
       </div>
@@ -6593,11 +6609,36 @@ function DisciplinesCard({ analytics }) {
             </SelectContent>
           </Select>
         </div>
-        {/* Légende multi-sites */}
+        {/* Bandeau multi-sites — cliquable pour voir la liste */}
         {data.multiSites > 0 && (
-          <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md p-2 mt-2 flex items-center gap-2">
+          <button
+            onClick={() => setShowMultiList(s => !s)}
+            className="w-full text-left text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-md p-2 mt-2 flex items-center gap-2 transition"
+          >
             <span className="text-lg">🔄</span>
-            <span><b>{data.multiSites}</b> exposant{data.multiSites > 1 ? 's' : ''} {selectedSite === 'all' ? 'inscrit(s) sur plusieurs sites' : 'aussi présent(s) sur un autre site'}</span>
+            <span className="flex-1"><b>{data.multiSites}</b> exposant{data.multiSites > 1 ? 's' : ''} {selectedSite === 'all' ? 'inscrit(s) sur plusieurs sites' : 'aussi présent(s) sur un autre site'}</span>
+            <span className="text-orange-600 underline-offset-2 underline">{showMultiList ? 'Masquer' : 'Voir la liste'}</span>
+          </button>
+        )}
+        {/* Liste des associations multi-sites */}
+        {showMultiList && data.multiOrgs.length > 0 && (
+          <div className="bg-orange-50/40 border border-orange-200 rounded-md p-3 mt-2 max-h-56 overflow-y-auto">
+            <div className="text-[10px] uppercase tracking-wider text-orange-700 font-semibold mb-2">Associations sur plusieurs sites</div>
+            <div className="space-y-1.5">
+              {data.multiOrgs.map(o => (
+                <div key={o.id} className="flex items-center justify-between gap-2 text-xs p-1.5 rounded hover:bg-white transition">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-800 truncate">{o.name}</div>
+                    {o.discipline && <div className="text-[10px] text-slate-500">{o.discipline}</div>}
+                  </div>
+                  <div className="flex flex-wrap gap-1 justify-end max-w-[55%]">
+                    {(o.sites || []).map(s => (
+                      <Badge key={s} variant="outline" className="text-[10px] bg-white border-orange-300 text-orange-700">📍 {s}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </CardHeader>
@@ -6622,7 +6663,7 @@ function DisciplinesCard({ analytics }) {
                   <span className="text-slate-700 truncate flex-1">{d.name}</span>
                   <div className="flex items-center gap-2">
                     {d.multi_site_count > 0 && (
-                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] gap-1" title={`${d.multi_site_count} exposant(s) sur plusieurs sites`}>
+                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] gap-1" title={(d.multi_site_orgs || []).map(o => `${o.name} (${o.sites?.join(', ') || ''})`).join('\n')}>
                         🔄 {d.multi_site_count}
                       </Badge>
                     )}

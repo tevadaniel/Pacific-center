@@ -1474,15 +1474,24 @@ export async function GET(request, { params }) {
       const buildDiscList = (orgList) => {
         const counts = {};
         const multiInDisc = {};
+        const multiOrgsInDisc = {}; // discipline → liste { id, name, sites: [names] }
         orgList.forEach(o => {
           const d = o.discipline || 'Autre';
           counts[d] = (counts[d] || 0) + 1;
           if (multiSiteOrgIds.has(o.id)) {
             multiInDisc[d] = (multiInDisc[d] || 0) + 1;
+            if (!multiOrgsInDisc[d]) multiOrgsInDisc[d] = [];
+            const sites = Array.from(orgSitesMap[o.id] || []).map(vid => venueById[vid]?.name || vid);
+            multiOrgsInDisc[d].push({ id: o.id, name: o.name, sites });
           }
         });
         return Object.entries(counts)
-          .map(([name, count]) => ({ name, count, multi_site_count: multiInDisc[name] || 0 }))
+          .map(([name, count]) => ({
+            name,
+            count,
+            multi_site_count: multiInDisc[name] || 0,
+            multi_site_orgs: multiOrgsInDisc[name] || [],
+          }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 15);
       };
@@ -1515,8 +1524,18 @@ export async function GET(request, { params }) {
         count: orgsByVenue[vid].size,
       })).sort((a, b) => b.count - a.count);
 
-      // Stats globales multi-sites
+      // Stats globales multi-sites : liste complète avec nom et sites
       const multi_site_orgs_count = multiSiteOrgIds.size;
+      const multi_site_orgs_list = orgs
+        .filter(o => multiSiteOrgIds.has(o.id))
+        .map(o => ({
+          id: o.id,
+          name: o.name,
+          discipline: o.discipline || 'Autre',
+          sites: Array.from(orgSitesMap[o.id] || []).map(vid => venueById[vid]?.name || vid),
+          sites_count: (orgSitesMap[o.id] || new Set()).size,
+        }))
+        .sort((a, b) => b.sites_count - a.sites_count);
 
       // 3. Completion distribution (histogram)
       const buckets = { '0–25%': 0, '26–50%': 0, '51–75%': 0, '76–99%': 0, '100%': 0 };
@@ -1577,6 +1596,7 @@ export async function GET(request, { params }) {
         disciplines_by_site,
         sites_list,
         multi_site_orgs_count,
+        multi_site_orgs_list,
         completion,
         cautions_status: cautionsStatus,
         mailing_funnel: mailingFunnel,
