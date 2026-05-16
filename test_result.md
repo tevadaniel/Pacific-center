@@ -1550,6 +1550,39 @@ agent_communication:
     file: "components/aracom/*.jsx + app/aracom/page.js"
     stuck_count: 0
     priority: "low"
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 26 — Refactoring P2 Phase 3 + Phase 4 (start)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Refactor Phase 3 — Extract 7 more views from aracom/page.js"
+    implemented: true
+    working: "NA"
+    file: "components/aracom/*.jsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "REFACTORING PHASE 3 — Extraction de 7 vues supplémentaires : (1) access-tokens-view.jsx (335 lignes) — gestion des liens magiques (exposants + Pacific Centers + inscriptions) + CreateAccessTokenModal. (2) backup-view.jsx (312 lignes) — sauvegarde Drive + reset édition + restauration plans. (3) import-excel-view.jsx (133 lignes) — import xlsx d'exposants. (4) deadlines-view.jsx (176 lignes) — configuration deadlines par étape. (5) validations-view.jsx (295 lignes) — workflow RDV+lock + ValidationRequestCard + SetRdvModal + LockValidationModal. (6) mailing-view.jsx (831 lignes) — module mailing complet + ToggleMailModeButton. (7) anomalies-view.jsx (64 lignes) — anomalies + prospection-view.jsx (187 lignes) + official-documents-view.jsx (217 lignes) déjà extraits en Phase 2/3. RESULTAT cumulé Phase 1+2+3 : aracom/page.js 7894 → 4611 lignes (-3283 lignes, -42%). 14 composants modulaires totalisant 3609 lignes dans /app/components/aracom/. Aucune régression — vues testées en preview : login, dashboard, corbeille, cautions, prospection, anomalies, documents-officiels, access-tokens, backup, deadlines, import, validations, mailing. Lint clean partout."
+
+  - task: "Refactor Phase 4 — Extract admin delete/archive/reset endpoints to handler module"
+    implemented: true
+    working: true
+    file: "lib/api/helpers.js + lib/api/handlers/admin-delete-reset.js + app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "REFACTORING PHASE 4 (proof of concept) — Extraction des 10 endpoints admin de suppression/archive/reset (session 23) hors du fichier monolithique route.js vers un module dédié. NOUVEAUX FICHIERS : (1) /app/lib/api/helpers.js (48 lignes) — helpers partagés (json, err, getUserContext, logActivity, NO_CACHE_HEADERS). (2) /app/lib/api/handlers/admin-delete-reset.js (290 lignes) — fonction handleAdminDeleteResetPost({db, request, route, p, body}) qui gère les 10 routes : archive, restore, delete, reset-caution, reset-virement, reset-convention, reset-attendance, reset-caution-appointment, reset-satisfaction, cancel-virement. Retourne Response si la route matche, null sinon. PATTERN : Le main route.js a un dispatcher qui appelle handleAdminDeleteResetPost() en premier dans POST() avant les autres if/else. Si la fonction retourne non-null, on retourne sa Response ; sinon on continue le matching normal. RÉSULTAT : route.js réduit de 8825 → 8552 lignes (-273 lignes). Pattern réutilisable pour extraire d'autres groupes d'endpoints (caution-appointments, attendance, exposant, wizard, etc.). TESTS BACKEND : 26/26 tests passés (100%) — smoke + permissions + functional archive/restore + filter regression. AUCUNE RÉGRESSION."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 26 — Refactoring P2 Phases 3 et 4 (POC) terminées. FRONTEND : aracom/page.js 7894 → 4611 lignes (-42%), 14 composants modulaires dans /app/components/aracom/. BACKEND : extraction du module admin-delete-reset (10 endpoints, 273 lignes extraites) avec pattern dispatcher réutilisable. Tests backend 26/26 ✅ — aucune régression. Pattern documenté : créer /app/lib/api/handlers/<module>.js qui exporte une fonction async (ctx) => Response|null, et l'appeler en début de POST/GET dans route.js. Pour finaliser Phase 4 complètement, d'autres modules à extraire : caution-appointments, attendance, refund-attestation, wizard, exposant, etc. — chacun étant un travail de ~30-60 minutes."
+
     needs_retesting: false
     status_history:
       - working: "NA"
