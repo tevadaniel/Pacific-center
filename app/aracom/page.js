@@ -51,6 +51,7 @@ const TABS = [
   { key: 'deadlines', label: '⏰ Deadlines', href: '/aracom?tab=deadlines' },
   { key: 'animations', label: '🎭 Animations', href: '/aracom?tab=animations' },
   { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
+  { key: 'corbeille', label: '🗑 Corbeille', href: '/aracom?tab=corbeille' },
   { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
 
@@ -67,7 +68,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: '👥',
-    items: ['exposants', 'cautions', 'relances', 'prospection'],
+    items: ['exposants', 'cautions', 'relances', 'prospection', 'corbeille'],
   },
   {
     key: 'communication',
@@ -205,6 +206,7 @@ export default function AracomPage() {
       {activeTab === 'backup' && <BackupView />}
       {activeTab === 'animations' && <AnimationsView />}
       {activeTab === 'import' && <ImportExcelView />}
+      {activeTab === 'corbeille' && <CorbeilleView />}
       <ChatbotFloating role="aracom_admin" />
     </Shell>
     </ExposantPanelProvider>
@@ -6841,8 +6843,14 @@ function EditAnimationDialog({ slot, venues = [], onClose, onSave }) {
 // ─────────────────────────────────────────────────────────
 function AdminOverridePanel({ data, onReload, onClose }) {
   const [busy, setBusy] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   if (!data?.registration) return null;
   const reg = data.registration;
+  const org = data.organization;
+  const dep = data.deposit;
+  const sessions = data.attendance_sessions || [];
+  const hasArchive = !!org?.archived_at;
 
   const callAdmin = async (label, path, body, confirmMsg) => {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
@@ -6861,61 +6869,246 @@ function AdminOverridePanel({ data, onReload, onClose }) {
     finally { setBusy(null); }
   };
 
-  const releaseStand = () => callAdmin('Stand libéré', `/admin/registrations/${reg.id}/reset`, { reset: 'stand' }, `Libérer le stand ${reg.stand_code} de ${data.organization?.name} ?`);
-  const clearAnimation = () => callAdmin('Animations supprimées', `/admin/registrations/${reg.id}/reset`, { reset: 'animations' }, `Supprimer toutes les animations de ${data.organization?.name} ?`);
+  // Actions sur le parcours d'inscription
+  const releaseStand = () => callAdmin('Stand libéré', `/admin/registrations/${reg.id}/reset`, { reset: 'stand' }, `Libérer le stand ${reg.stand_code} de ${org?.name} ?`);
+  const clearAnimation = () => callAdmin('Animations supprimées', `/admin/registrations/${reg.id}/reset`, { reset: 'animations' }, `Supprimer toutes les animations de ${org?.name} ?`);
   const clearDays = () => callAdmin('Jours réinitialisés', `/admin/registrations/${reg.id}/reset`, { reset: 'days' }, `Réinitialiser les jours de présence ?`);
-  const cancelReg = () => callAdmin('Inscription annulée', `/admin/registrations/${reg.id}/reset`, { reset: 'cancel' }, `⚠ Annuler complètement l'inscription de ${data.organization?.name} ? (statut "annulé", stand libéré, animations supprimées)`);
-  const deleteReg = async () => {
-    if (!window.confirm(`🗑️ SUPPRIMER DÉFINITIVEMENT ${data.organization?.name} et toutes ses données ? Action irréversible.`)) return;
-    if (!window.confirm(`Confirmation finale : tapez OK pour valider la suppression définitive.`)) return;
-    setBusy('delete');
+  const cancelReg = () => callAdmin('Inscription annulée', `/admin/registrations/${reg.id}/reset`, { reset: 'cancel' }, `⚠ Annuler complètement l'inscription de ${org?.name} ? (statut "annulé", stand libéré, animations supprimées)`);
+
+  // 🆕 Reset granulaires
+  const resetCaution    = () => callAdmin('Caution réinitialisée',       `/admin/registrations/${reg.id}/reset-caution`,             null, `Réinitialiser la caution de ${org?.name} ?\n\nLe paiement repasse en "en attente", le reçu est invalidé, et la registration est déverrouillée.`);
+  const resetVirement   = () => callAdmin('Déclaration virement annulée', `/admin/registrations/${reg.id}/reset-virement`,            null, `Annuler la déclaration de virement de ${org?.name} ?\n\nLa référence et la date du virement seront effacées.`);
+  const resetConvention = () => callAdmin('Convention invalidée',        `/admin/registrations/${reg.id}/reset-convention`,          null, `Invalider la convention signée de ${org?.name} ?\n\nL'exposant devra re-signer la convention.`);
+  const resetAppt       = () => callAdmin('RDV caution supprimé',        `/admin/registrations/${reg.id}/reset-caution-appointment`, null, `Supprimer le RDV de restitution caution ?\n\nL'exposant pourra en demander un nouveau.`);
+  const resetSurvey     = () => callAdmin('Questionnaire réinitialisé',   `/admin/registrations/${reg.id}/reset-satisfaction`,        null, `Supprimer la réponse au questionnaire de satisfaction de ${org?.name} ?\n\nL'exposant pourra le re-remplir et l'attestation auto sera régénérée.`);
+  const resetAttendanceAll = () => callAdmin('Pointages Jour J supprimés', `/admin/registrations/${reg.id}/reset-attendance`, { scope: 'all' }, `⚠ Supprimer TOUS les pointages Jour J (arrivée + départ) de ${org?.name} ?\n\nLes anomalies de retard/départ anticipé seront aussi supprimées.`);
+  const resetAttendanceDay = (event_date, scope) => callAdmin(`Pointage ${event_date} ${scope === 'arrival' ? '(arrivée)' : scope === 'departure' ? '(départ)' : '(tout)'} supprimé`, `/admin/registrations/${reg.id}/reset-attendance`, { event_date, scope }, `Supprimer le pointage ${scope === 'arrival' ? "d'arrivée" : scope === 'departure' ? 'de départ' : 'complet'} du ${event_date} ?`);
+
+  // 🆕 Archive / Restore organisation
+  const archiveOrg = async () => {
+    const reason = window.prompt(`Archiver "${org?.name}" ? (l'exposant disparaît des vues actives, les inscriptions sont annulées, mais les données restent en base et peuvent être restaurées).\n\nMotif (optionnel) :`, '');
+    if (reason === null) return;
+    setBusy('archive');
     try {
-      const r = await fetch(`/api/admin/registrations/${reg.id}/delete-full`, { method: 'POST', headers: { 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' } });
+      const r = await fetch(`/api/admin/organizations/${org.id}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+        body: JSON.stringify({ reason }),
+      });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'Erreur suppression');
-      toast.success('Exposant supprimé définitivement');
+      if (!r.ok) throw new Error(j.error || 'Erreur archivage');
+      toast.success(`📦 ${org.name} archivé`);
       onClose();
     } catch (e) { toast.error(e.message); }
     finally { setBusy(null); }
   };
+  const restoreOrg = () => callAdmin('Organisation restaurée', `/admin/organizations/${org?.id}/restore`, null, `Restaurer ${org?.name} depuis la corbeille ?`);
+
+  // 🆕 Suppression définitive avec saisie nom
+  const deleteOrgDefinitive = () => setShowDeleteDialog(true);
 
   return (
+    <>
     <div className="rounded-md border-2 border-red-200 bg-red-50/40 p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="font-bold text-red-900 text-sm">🛠️ Actions admin (override)</div>
-        <div className="text-[10px] text-red-600">— Modifier ou annuler toute action de l&apos;exposant, à n&apos;importe quelle étape</div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <div className="font-bold text-red-900 text-sm">🛠️ Zone admin — Override & Reset</div>
+          {hasArchive && <Badge className="bg-amber-100 text-amber-900 border-amber-300">📦 Archivé</Badge>}
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)} className="h-7 text-xs">
+          {expanded ? '▲ Masquer' : '▼ Toutes les actions'}
+        </Button>
       </div>
+
+      {/* Actions essentielles (toujours visibles) */}
       <div className="flex flex-wrap gap-2">
         {reg.stand_code && (
-          <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
+          <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs">
             {busy === 'Stand libéré' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            Libérer stand {reg.stand_code}
+            🪧 Libérer stand {reg.stand_code}
           </Button>
         )}
         {data.slots?.length > 0 && (
-          <Button size="sm" variant="outline" onClick={clearAnimation} disabled={busy === 'Animations supprimées'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
+          <Button size="sm" variant="outline" onClick={clearAnimation} disabled={busy === 'Animations supprimées'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs">
             {busy === 'Animations supprimées' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            Supprimer animations ({data.slots.length})
-          </Button>
-        )}
-        {(reg.attending_days?.length > 0) && (
-          <Button size="sm" variant="outline" onClick={clearDays} disabled={busy === 'Jours réinitialisés'} className="bg-white border-red-300 text-red-700 hover:bg-red-50">
-            {busy === 'Jours réinitialisés' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            Réinitialiser jours
+            🎭 Suppr. animations ({data.slots.length})
           </Button>
         )}
         {reg.status !== 'annule' && (
-          <Button size="sm" variant="outline" onClick={cancelReg} disabled={busy === 'Inscription annulée'} className="bg-red-600 text-white hover:bg-red-700 border-red-700">
+          <Button size="sm" variant="outline" onClick={cancelReg} disabled={busy === 'Inscription annulée'} className="bg-red-600 text-white hover:bg-red-700 border-red-700 h-8 text-xs">
             {busy === 'Inscription annulée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
             ⛔ Annuler inscription
           </Button>
         )}
-        <Button size="sm" variant="outline" onClick={deleteReg} disabled={busy === 'delete'} className="bg-zinc-900 text-white hover:bg-black border-black">
-          {busy === 'delete' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
-          Supprimer définitivement
-        </Button>
       </div>
+
+      {/* Actions avancées (déroulées sur demande) */}
+      {expanded && (
+        <div className="mt-3 space-y-3 pt-3 border-t border-red-200">
+          {/* 🆕 Reset granulaires */}
+          <div>
+            <div className="font-semibold text-xs text-red-900 mb-1.5">↩️ Annuler une action de l&apos;exposant</div>
+            <div className="flex flex-wrap gap-1.5">
+              {dep && dep.status !== 'en_attente' && (
+                <Button size="sm" variant="outline" onClick={resetCaution} disabled={busy} className="bg-white border-amber-300 text-amber-800 hover:bg-amber-50 h-7 text-[11px]">
+                  🪙 Réinit. caution
+                </Button>
+              )}
+              {dep?.virement_reference && (
+                <Button size="sm" variant="outline" onClick={resetVirement} disabled={busy} className="bg-white border-cyan-300 text-cyan-800 hover:bg-cyan-50 h-7 text-[11px]">
+                  🏦 Annuler virement déclaré
+                </Button>
+              )}
+              {(reg.convention_signed_at || (data.documents || []).some(d => d.document_type === 'convention' && d.is_signed)) && (
+                <Button size="sm" variant="outline" onClick={resetConvention} disabled={busy} className="bg-white border-indigo-300 text-indigo-800 hover:bg-indigo-50 h-7 text-[11px]">
+                  📝 Invalider convention
+                </Button>
+              )}
+              {(reg.attending_days?.length > 0) && (
+                <Button size="sm" variant="outline" onClick={clearDays} disabled={busy === 'Jours réinitialisés'} className="bg-white border-violet-300 text-violet-800 hover:bg-violet-50 h-7 text-[11px]">
+                  📅 Réinit. jours présence
+                </Button>
+              )}
+              {sessions.length > 0 && (
+                <Button size="sm" variant="outline" onClick={resetAttendanceAll} disabled={busy} className="bg-white border-orange-300 text-orange-800 hover:bg-orange-50 h-7 text-[11px]">
+                  🕒 Suppr. pointages Jour J
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={resetAppt} disabled={busy} className="bg-white border-pink-300 text-pink-800 hover:bg-pink-50 h-7 text-[11px]">
+                🗓️ Suppr. RDV caution
+              </Button>
+              <Button size="sm" variant="outline" onClick={resetSurvey} disabled={busy} className="bg-white border-emerald-300 text-emerald-800 hover:bg-emerald-50 h-7 text-[11px]">
+                ⭐ Réinit. questionnaire
+              </Button>
+            </div>
+          </div>
+
+          {/* Pointages Jour J par jour */}
+          {sessions.length > 0 && (
+            <div>
+              <div className="font-semibold text-xs text-red-900 mb-1.5">🕒 Pointages Jour J ciblés</div>
+              <div className="space-y-1">
+                {sessions.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-600 w-28">{s.event_date}</span>
+                    <span className="text-emerald-700">↑ {s.actual_arrival_time || '—'}</span>
+                    <span className="text-blue-700">↓ {s.actual_departure_time || '—'}</span>
+                    <div className="flex gap-1 ml-auto">
+                      {s.actual_arrival_time && (
+                        <Button size="sm" variant="ghost" onClick={() => resetAttendanceDay(s.event_date, 'arrival')} disabled={busy} className="h-6 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50">Annuler arrivée</Button>
+                      )}
+                      {s.actual_departure_time && (
+                        <Button size="sm" variant="ghost" onClick={() => resetAttendanceDay(s.event_date, 'departure')} disabled={busy} className="h-6 px-2 text-[10px] text-blue-700 hover:bg-blue-50">Annuler départ</Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 🆕 Archive / Suppression définitive */}
+          <div className="pt-2 border-t border-red-200">
+            <div className="font-semibold text-xs text-red-900 mb-1.5">🗑️ Suppression / Archivage</div>
+            <div className="flex flex-wrap gap-1.5">
+              {!hasArchive ? (
+                <Button size="sm" variant="outline" onClick={archiveOrg} disabled={busy === 'archive'} className="bg-white border-amber-400 text-amber-900 hover:bg-amber-50 h-7 text-[11px]">
+                  {busy === 'archive' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  📦 Archiver (corbeille)
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={restoreOrg} disabled={busy === 'Organisation restaurée'} className="bg-emerald-50 border-emerald-400 text-emerald-900 hover:bg-emerald-100 h-7 text-[11px]">
+                  {busy === 'Organisation restaurée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  ♻️ Restaurer depuis corbeille
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={deleteOrgDefinitive} disabled={busy === 'delete-org'} className="bg-zinc-900 text-white hover:bg-black border-black h-7 text-[11px]">
+                {busy === 'delete-org' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                💥 Suppression définitive (org)
+              </Button>
+            </div>
+            <p className="text-[10px] text-red-700 mt-1.5 italic">📦 Archive = soft delete (réversible) · 💥 Suppression définitive = irréversible, supprime l&apos;organisation + toutes ses inscriptions + données associées.</p>
+          </div>
+        </div>
+      )}
     </div>
+
+    {/* Dialog de suppression définitive avec confirmation par nom */}
+    {showDeleteDialog && (
+      <DeleteOrgDialog
+        org={org}
+        onClose={() => setShowDeleteDialog(false)}
+        onDeleted={() => { setShowDeleteDialog(false); onClose(); }}
+      />
+    )}
+    </>
+  );
+}
+
+// 🆕 Dialog de confirmation pour suppression définitive d'une organisation
+function DeleteOrgDialog({ org, onClose, onDeleted }) {
+  const [confirmName, setConfirmName] = useState('');
+  const [forceUnsafe, setForceUnsafe] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const isValid = confirmName.trim() === (org?.name || '').trim();
+
+  const submit = async () => {
+    if (!isValid) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/admin/organizations/${org.id}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+        body: JSON.stringify({ confirm_name: confirmName, force_unsafe: forceUnsafe }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Erreur suppression');
+      const total = Object.values(j.cascaded || {}).reduce((a, b) => a + b, 0);
+      toast.success(`💥 ${org.name} supprimé définitivement (${total} enregistrements liés supprimés)`);
+      onDeleted();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !busy && !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-red-900">💥 Suppression définitive — Action irréversible</DialogTitle>
+          <DialogDescription className="text-red-700">
+            Vous êtes sur le point de supprimer <b>définitivement</b> l&apos;organisation <b>&quot;{org?.name}&quot;</b> ainsi que <b>toutes ses inscriptions, paiements, documents, pointages, RDV et historique</b>.
+            <br /><br />
+            <b>Cette action ne peut pas être annulée.</b> Si vous souhaitez la rendre réversible, utilisez plutôt l&apos;archivage.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label className="text-xs font-semibold">Pour confirmer, saisissez exactement le nom de l&apos;exposant :</Label>
+            <Input
+              value={confirmName}
+              onChange={e => setConfirmName(e.target.value)}
+              placeholder={org?.name || ''}
+              className="mt-1 font-mono"
+              disabled={busy}
+            />
+            <p className="text-[10px] text-slate-500 mt-1">
+              Attendu : <b className="font-mono">{org?.name}</b>
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-red-800 cursor-pointer">
+            <input type="checkbox" checked={forceUnsafe} onChange={e => setForceUnsafe(e.target.checked)} disabled={busy} />
+            Forcer la suppression même si l&apos;exposant est protégé (RULES.md)
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Annuler</Button>
+          <Button onClick={submit} disabled={!isValid || busy} className="bg-red-600 hover:bg-red-700 gap-2 disabled:opacity-50">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            {busy ? 'Suppression…' : 'Supprimer définitivement'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -7570,6 +7763,132 @@ function CautionAppointmentEditDialog({ appointment, onClose, onSaved }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+// =====================================================================
+// 🗑 CORBEILLE — Liste des organisations archivées, restauration & suppression définitive
+// =====================================================================
+function CorbeilleView() {
+  const [orgs, setOrgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState(null);
+  const [toDelete, setToDelete] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api('/api/organizations?only_archived=true');
+      setOrgs(data || []);
+    } catch (e) { toast.error(e.message); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const restore = async (org) => {
+    if (!window.confirm(`Restaurer "${org.name}" ? L'organisation redeviendra active. Note : les inscriptions restent en statut "annulé" et devront être réactivées manuellement.`)) return;
+    setBusy(org.id);
+    try {
+      const r = await fetch(`/api/admin/organizations/${org.id}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Erreur restauration');
+      toast.success(`♻️ ${org.name} restauré`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const filtered = orgs.filter(o => !search || (o.name || '').toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-amber-300">
+        <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Trash2 className="w-5 h-5 text-amber-700" /> Corbeille — Exposants archivés
+              </CardTitle>
+              <p className="text-xs text-slate-600 mt-1">
+                Les exposants archivés conservent toutes leurs données (registrations, cautions, documents). Ils peuvent être <b>restaurés à tout moment</b>, ou <b>supprimés définitivement</b>.
+              </p>
+            </div>
+            <Badge variant="outline" className="bg-amber-100 text-amber-900 border-amber-300 text-sm">{orgs.length} archivé(s)</Badge>
+          </div>
+          <div className="mt-3">
+            <Input
+              placeholder="🔍 Rechercher un exposant archivé…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="bg-white"
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="p-3">
+          {loading ? (
+            <div className="text-center py-8 text-slate-500">Chargement…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 italic">
+              {orgs.length === 0 ? '🌱 Corbeille vide — aucun exposant n\'a été archivé.' : 'Aucun résultat pour cette recherche.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b">
+                  <tr>
+                    <th className="text-left p-2">Exposant</th>
+                    <th className="text-left p-2">Discipline</th>
+                    <th className="text-left p-2">Archivé le</th>
+                    <th className="text-left p-2">Motif</th>
+                    <th className="text-right p-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(o => (
+                    <tr key={o.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2">
+                        <div className="font-semibold text-slate-800">{o.name}</div>
+                        <div className="text-xs text-slate-500">{o.contact_name || ''} {o.main_email && `· ${o.main_email}`}</div>
+                      </td>
+                      <td className="p-2 text-xs text-slate-700">{o.discipline || '—'}</td>
+                      <td className="p-2 text-xs text-slate-700">
+                        {o.archived_at ? new Date(o.archived_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </td>
+                      <td className="p-2 text-xs text-slate-600 italic max-w-xs truncate" title={o.archive_reason || ''}>
+                        {o.archive_reason || <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="p-2 text-right">
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="outline" onClick={() => restore(o)} disabled={busy === o.id} className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                            {busy === o.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '♻️'} Restaurer
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setToDelete(o)} className="h-7 text-xs gap-1 bg-zinc-900 text-white hover:bg-black border-black">
+                            <Trash2 className="w-3 h-3" /> Supprimer définitivement
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {toDelete && (
+        <DeleteOrgDialog
+          org={toDelete}
+          onClose={() => setToDelete(null)}
+          onDeleted={() => { setToDelete(null); load(); }}
+        />
+      )}
+    </div>
   );
 }
 
