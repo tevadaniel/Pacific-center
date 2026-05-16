@@ -1487,3 +1487,24 @@ agent_communication:
 agent_communication:
   - agent: "testing"
     message: "✅ BACKEND TESTING COMPLETE - Admin delete/archive/reset endpoints tested exhaustively. 33/35 tests passed (94.3% success rate). All core functionality working: GET filtering (include_archived/only_archived), archive/restore with activity logs, protected org deletion (403), all 8 reset granular endpoints (caution, virement, convention, attendance, caution-appointment, satisfaction, cancel-virement), and strict permission enforcement (403 for non-admin). Two minor limitations: (1) DELETE on non-existent org returns 404 instead of 400 (acceptable behavior), (2) Cannot test temp org creation due to missing wizard endpoint (but protection mechanism verified via protected org test). Feature is production-ready. All endpoints require x-user-role:aracom_admin header and create audit log entries. Cascade delete works correctly with counts returned. Main agent should summarize and finish."
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 24 — Refactoring P2 : Extraction de composants Aracom
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Refactor — Extract AdminOverridePanel, DeleteOrgDialog, CorbeilleView, CautionAppointmentsAdminPanel"
+    implemented: true
+    working: "NA"
+    file: "components/aracom/*.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "REFACTORING PHASE 1 — Extraction de 4 composants depuis le fichier monolithique /app/app/aracom/page.js (7894 lignes) vers /app/components/aracom/ : (1) admin-override-panel.jsx (229 lignes) — panneau d'actions admin avec tous les boutons de reset granulaire + archive/restore + suppression. (2) delete-org-dialog.jsx (84 lignes) — dialog de confirmation par saisie du nom. (3) corbeille-view.jsx (144 lignes) — vue de la corbeille des exposants archivés. (4) caution-appointments-panel.jsx (509 lignes) — panneau admin des RDV restitution caution incluant RegisterVirementButton, GeneratePrintAttestationButton, UploadSignedAttestationButton, CautionAppointmentEditDialog. RESULTAT : aracom/page.js réduit de 7894 → 7005 lignes (-890 lignes, -11%). Aucune régression fonctionnelle attendue (les composants ont été copiés tels quels, seuls les imports ont changé). Toutes les pages testées en preview : login, dashboard, corbeille, cautions. Lint clean. PHASE 2 envisagée plus tard pour extraire d'autres views (RelancesView, AnomaliesView, ValidationsView, etc.)."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 24 — Refactoring P2 Phase 1 terminée. Réduction du fichier monolithique aracom/page.js de 7894 → 7005 lignes (-890 lignes, -11%) par extraction de 4 composants vers /app/components/aracom/. Pas de tests requis : seul un déplacement de code (move) sans modification logique. Les pages corbeille et cautions ont été vérifiées visuellement et fonctionnent. Lint clean."
+
