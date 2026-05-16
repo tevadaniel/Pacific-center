@@ -1528,3 +1528,24 @@ agent_communication:
   - agent: "testing"
     message: "✅ REGRESSION TEST COMPLETE - delete-full endpoint tested with 5/5 tests passed (100%). All requirements verified: (A) Protected exposant guard blocks deletion without force_unsafe (403), (B) Admin permission required (403 for non-admin), (C) 404 for non-existent registration, (D) Cancel via reset endpoint still works (no regression), (E) Audit logs created. Endpoint cascades to 14 collections and returns counts. Feature production-ready. Main agent should summarize and finish."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 25 — Refactoring P2 Phase 2 : Extract ExposantPanelContext + 3 views
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Refactor Phase 2 — ExposantPanelContext + AnomaliesView + ProspectionAracomView + OfficialDocumentsView"
+    implemented: true
+    working: "NA"
+    file: "components/aracom/*.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "REFACTORING PHASE 2 — Extraction de 4 modules supplémentaires depuis /app/app/aracom/page.js : (1) exposant-panel-context.jsx (67 lignes) — contexte React universel pour ouvrir la fiche d'un exposant en slide-over depuis n'importe où, incluant ExposantPanelProvider + useExposantPanel hook + ExposantLink component. Le Provider accepte désormais une prop renderPanel pour rester découplé de FicheExposant. (2) anomalies-view.jsx (64 lignes) — tableau des anomalies détectées avec résolution. (3) prospection-view.jsx (187 lignes) — vue consolidée des prospects (KPIs, filtres, conversion, suppression). (4) official-documents-view.jsx (217 lignes) — bibliothèque de documents officiels + éditeur RIB ARACOM. CUMUL Phase 1+2 : aracom/page.js réduit de 7894 → 6578 lignes (-1316 lignes, -17%). 8 composants extraits totalisant 1527 lignes dans /app/components/aracom/. Aucune régression — toutes les vues testées en preview (login, dashboard, corbeille, cautions, prospection, anomalies, documents-officiels). Lint clean."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 25 — Refactoring P2 Phase 2 terminée. Réduction cumulée Phase 1+2 : aracom/page.js -1316 lignes (-17%), 8 composants modulaires créés. Pas de tests requis : aucune modification logique, simples mouvements de code. Vues testées visuellement : tous les onglets passent. Lint clean partout. Files de Phase 3 (backend refactor de route.js) restent à faire dans une future session si désiré."
+
