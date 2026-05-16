@@ -57,7 +57,25 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
   const releaseStand = () => callAdmin('Stand libéré', `/admin/registrations/${reg.id}/reset`, { reset: 'stand' }, `Libérer le stand ${reg.stand_code} de ${org?.name} ?`);
   const clearAnimation = () => callAdmin('Animations supprimées', `/admin/registrations/${reg.id}/reset`, { reset: 'animations' }, `Supprimer toutes les animations de ${org?.name} ?`);
   const clearDays = () => callAdmin('Jours réinitialisés', `/admin/registrations/${reg.id}/reset`, { reset: 'days' }, `Réinitialiser les jours de présence ?`);
-  const cancelReg = () => callAdmin('Inscription annulée', `/admin/registrations/${reg.id}/reset`, { reset: 'cancel' }, `⚠ Annuler complètement l'inscription de ${org?.name} ? (statut "annulé", stand libéré, animations supprimées)`);
+  const cancelReg = () => callAdmin('Inscription annulée', `/admin/registrations/${reg.id}/reset`, { reset: 'cancel' }, `⚠ Annuler complètement l'inscription de ${org?.name} ?\n\n• Statut → "annulé"\n• Stand libéré\n• Animations supprimées\n• L'organisation reste en base (le bouton "Annuler" disparaîtra ensuite, mais vous pourrez réactiver l'inscription)`);
+
+  // 🆕 SUPPRIMER DÉFINITIVEMENT l'inscription (delete-full)
+  const deleteReg = async () => {
+    if (!window.confirm(`💥 SUPPRESSION DÉFINITIVE de l'inscription de ${org?.name} ?\n\n⚠ Cette action est irréversible :\n• L'inscription, le stand, les animations, la caution, le reçu, le RDV restitution, les pointages, les anomalies, les documents et les jetons de modification seront SUPPRIMÉS.\n• Si c'est la seule inscription de l'organisation, l'organisation est aussi supprimée.\n\nPréférez l'archivage si vous voulez pouvoir restaurer.`)) return;
+    if (!window.confirm(`Confirmation finale : tapez OK pour valider la suppression définitive de l'inscription de "${org?.name}".`)) return;
+    setBusy('delete-reg');
+    try {
+      const r = await fetch(`/api/admin/registrations/${reg.id}/delete-full`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Erreur suppression inscription');
+      toast.success(`💥 Inscription supprimée définitivement${j.org_also_deleted ? ' (et organisation aussi)' : ''}`);
+      onClose();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
 
   // Reset granulaires
   const resetCaution    = () => callAdmin('Caution réinitialisée',       `/admin/registrations/${reg.id}/reset-caution`,             null, `Réinitialiser la caution de ${org?.name} ?\n\nLe paiement repasse en "en attente", le reçu est invalidé, et la registration est déverrouillée.`);
@@ -124,6 +142,14 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
             ⛔ Annuler inscription
           </Button>
         )}
+        {reg.status === 'annule' && (
+          <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 h-8 px-3 flex items-center">⛔ Inscription annulée</Badge>
+        )}
+        {/* 🆕 Suppression définitive de l'inscription (delete-full) — disponible quel que soit le statut */}
+        <Button size="sm" variant="outline" onClick={deleteReg} disabled={busy === 'delete-reg'} className="bg-zinc-900 text-white hover:bg-black border-black h-8 text-xs gap-1">
+          {busy === 'delete-reg' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+          💥 Supprimer inscription
+        </Button>
       </div>
 
       {/* Actions avancées (déroulées sur demande) */}

@@ -3162,25 +3162,33 @@ export async function POST(request, { params }) {
       const regId = p[2];
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
-      // Garde-fou : refuse de supprimer un exposant protégé (RULES.md)
+      const { force_unsafe } = body || {};
+      // Garde-fou : refuse de supprimer un exposant protégé (RULES.md) sauf si force_unsafe
       const PROTECTED = ['I Mua Papeete', 'Dream Lab', 'ACE Arue', 'Budokan Judo Pirae', 'Lotus Bleu'];
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      if (org && PROTECTED.includes(org.name)) {
-        return err(`Refus de suppression — "${org.name}" est un exposant protégé. Utilisez "Annuler inscription" à la place.`, 403);
+      if (org && PROTECTED.includes(org.name) && !force_unsafe) {
+        return err(`"${org.name}" est un exposant protégé. Utilisez l'archivage, ou passez force_unsafe=true pour passer outre.`, 403);
       }
-      await db.collection('stand_assignments').deleteMany({ registration_id: regId });
-      await db.collection('animation_slots').deleteMany({ registration_id: regId });
-      await db.collection('validation_requests').deleteMany({ registration_id: regId });
-      await db.collection('modification_tokens').deleteMany({ registration_id: regId });
-      await db.collection('registration_documents').deleteMany({ registration_id: regId });
+      // Cascade complète (toutes les collections liées)
+      const collectionsToClean = [
+        'stand_assignments', 'animation_slots', 'validation_requests', 'modification_tokens',
+        'registration_documents', 'deposit_transactions', 'caution_appointments',
+        'attendance_sessions', 'attendance_events', 'registration_anomalies',
+        'field_comments', 'field_media', 'tasks_or_followups', 'email_messages',
+      ];
+      const counts = {};
+      for (const c of collectionsToClean) {
+        const r = await db.collection(c).deleteMany({ registration_id: regId });
+        counts[c] = r.deletedCount;
+      }
       await db.collection('registrations').deleteOne({ id: regId });
       // Si l'org n'a plus aucune reg, on supprime aussi l'org
       const otherRegs = await db.collection('registrations').countDocuments({ organization_id: reg.organization_id });
       if (otherRegs === 0 && reg.organization_id) {
         await db.collection('organizations').deleteOne({ id: reg.organization_id });
       }
-      await logActivity(db, ctx3.userId, 'registration', regId, 'delete_full', { org_name: org?.name }, { org_also_deleted: otherRegs === 0 });
-      return json({ ok: true, action: 'fully_deleted', org_also_deleted: otherRegs === 0 });
+      await logActivity(db, ctx3.userId, 'registration', regId, 'delete_full', { org_name: org?.name, force_unsafe: !!force_unsafe }, { org_also_deleted: otherRegs === 0, cascaded: counts });
+      return json({ ok: true, action: 'fully_deleted', org_also_deleted: otherRegs === 0, cascaded: counts });
     }
 
     // ===================================================================
