@@ -57,50 +57,51 @@ import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 
-// 🎨 SESSION 28w — Menus harmonisés avec icônes Lucide cohérentes
-//    Chaque tab a son icône (icon: lucide component name). Plus d'emojis aléatoires.
-//    Items "admin" séparés visuellement par adminTool: true (dans le dropdown, un divider apparaît avant).
+// 🎨 SESSION 29 — Menus intelligents : 6 groupes accordéon cohérents, Exposants en tête
+//    • Renaming : libellés explicites (ex: "Liste exposants" → "Liste & fiches")
+//    • Icônes Lucide harmonisées pour chaque item (cohérence visuelle)
+//    • Items "admin" séparés visuellement (adminTool:true → divider + section "Outils admin" dans le dropdown)
 const TABS = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', href: '/aracom' },
-  // Pilotage
-  { key: 'anomalies', label: 'Anomalies', icon: 'AlertCircle', href: '/aracom?tab=anomalies' },
-  { key: 'validations', label: 'Validations', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
-  { key: 'bilans', label: 'Bilans', icon: 'BarChart3', href: '/aracom?tab=bilans' },
-  // Exposants
-  { key: 'exposants', label: 'Liste exposants', icon: 'Users', href: '/aracom?tab=exposants' },
-  { key: 'cautions', label: 'Cautions', icon: 'Wallet', href: '/aracom?tab=cautions' },
-  { key: 'relances', label: 'Relances', icon: 'Bell', href: '/aracom?tab=relances' },
+  { key: 'dashboard', label: 'Tableau de bord', icon: 'LayoutDashboard', href: '/aracom' },
+  // — Exposants (cœur métier) —
+  { key: 'exposants', label: 'Liste & fiches', icon: 'Users', href: '/aracom?tab=exposants' },
+  { key: 'cautions', label: 'Cautions & restitutions', icon: 'Wallet', href: '/aracom?tab=cautions' },
+  { key: 'relances', label: 'Relances IA', icon: 'Bell', href: '/aracom?tab=relances' },
+  { key: 'validations', label: 'Validations dossiers', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
   { key: 'prospection', label: 'Prospection', icon: 'Target', href: '/aracom?tab=prospection' },
+  { key: 'orgs-sans-dossier', label: 'Comptes orphelins', icon: 'AlertTriangle', href: '/aracom?tab=orgs-sans-dossier', adminTool: true },
   { key: 'corbeille', label: 'Corbeille', icon: 'Trash2', href: '/aracom?tab=corbeille', adminTool: true },
-  { key: 'orgs-sans-dossier', label: 'Comptes & dossiers', icon: 'AlertTriangle', href: '/aracom?tab=orgs-sans-dossier', adminTool: true },
-  // Communication
-  { key: 'mailing', label: 'Mailing', icon: 'Mail', href: '/aracom?tab=mailing' },
-  { key: 'documents-officiels', label: 'Docs officiels', icon: 'FileText', href: '/aracom?tab=documents-officiels' },
-  { key: 'access', label: "Liens d'accès", icon: 'Link2', href: '/aracom?tab=access' },
-  // Configuration
+  // — Terrain —
   { key: 'sites', label: 'Sites & stands', icon: 'MapPin', href: '/aracom?tab=sites' },
-  { key: 'animations', label: 'Animations', icon: 'Sparkles', href: '/aracom?tab=animations' },
-  { key: 'deadlines', label: 'Deadlines', icon: 'Clock', href: '/aracom?tab=deadlines' },
-  { key: 'backup', label: 'Sauvegarde', icon: 'Database', href: '/aracom?tab=backup', adminTool: true },
+  { key: 'animations', label: 'Animations & créneaux', icon: 'Sparkles', href: '/aracom?tab=animations' },
+  { key: 'anomalies', label: 'Anomalies terrain', icon: 'AlertCircle', href: '/aracom?tab=anomalies' },
+  // — Communication —
+  { key: 'mailing', label: 'Mailing & campagnes', icon: 'Mail', href: '/aracom?tab=mailing' },
+  { key: 'documents-officiels', label: 'Documents officiels', icon: 'FileText', href: '/aracom?tab=documents-officiels' },
+  { key: 'access', label: 'Liens magic-link', icon: 'Link2', href: '/aracom?tab=access' },
+  // — Pilotage —
+  { key: 'bilans', label: 'Bilans & stats', icon: 'BarChart3', href: '/aracom?tab=bilans' },
+  { key: 'deadlines', label: 'Échéances', icon: 'Clock', href: '/aracom?tab=deadlines' },
+  { key: 'satisfaction', label: 'Satisfaction & feedback', icon: 'Star', href: '/aracom?tab=satisfaction' },
+  // — Système (outils admin) —
   { key: 'import', label: 'Import Excel', icon: 'Upload', href: '/aracom?tab=import', adminTool: true },
-  // Post-événement
-  { key: 'satisfaction', label: 'Satisfaction', icon: 'Star', href: '/aracom?tab=satisfaction' },
+  { key: 'backup', label: 'Sauvegarde DB', icon: 'Database', href: '/aracom?tab=backup', adminTool: true },
 ];
 
-// 🎯 Regroupement intelligent : 6 catégories, chaque catégorie son icône principale
+// 🎯 Regroupement intelligent en 6 catégories (Exposants en 1er groupe — cœur métier)
 const TAB_GROUPS = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', single: true },
-  {
-    key: 'pilotage',
-    label: 'Pilotage',
-    icon: 'Compass',
-    items: ['anomalies', 'validations', 'bilans'],
-  },
+  { key: 'dashboard', label: 'Tableau de bord', icon: 'LayoutDashboard', single: true },
   {
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'cautions', 'relances', 'prospection', 'corbeille', 'orgs-sans-dossier'],
+    items: ['exposants', 'cautions', 'relances', 'validations', 'prospection', 'orgs-sans-dossier', 'corbeille'],
+  },
+  {
+    key: 'terrain',
+    label: 'Terrain',
+    icon: 'MapPin',
+    items: ['sites', 'animations', 'anomalies'],
   },
   {
     key: 'communication',
@@ -109,12 +110,17 @@ const TAB_GROUPS = [
     items: ['mailing', 'documents-officiels', 'access'],
   },
   {
-    key: 'configuration',
-    label: 'Configuration',
-    icon: 'Settings',
-    items: ['sites', 'animations', 'deadlines', 'backup', 'import'],
+    key: 'pilotage',
+    label: 'Pilotage',
+    icon: 'Compass',
+    items: ['bilans', 'deadlines', 'satisfaction'],
   },
-  { key: 'satisfaction', label: 'Post-événement', icon: 'Star', single: true, redirectTo: 'satisfaction' },
+  {
+    key: 'systeme',
+    label: 'Système',
+    icon: 'Settings',
+    items: ['import', 'backup'],
+  },
 ];
 
 // ============================================================
