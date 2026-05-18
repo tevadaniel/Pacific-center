@@ -16,6 +16,8 @@ import { restoreVenueLayoutsIfEmpty, restoreVenueLayoutsForce } from '@/lib/venu
 import { handleAdminDeleteResetPost } from '@/lib/api/handlers/admin-delete-reset';
 import { handleCautionAppointmentsPost } from '@/lib/api/handlers/caution-appointments';
 import { handleCautionReceiptsPost } from '@/lib/api/handlers/caution-receipts';
+import { handleExposantDocumentsGet } from '@/lib/api/handlers/exposant-documents';
+import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handlers/dashboard';
 
 // 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
 //    Lance la restauration du backup JSON embarqué si aucun stand n'a de position en DB.
@@ -634,56 +636,8 @@ function computeCompletion(reg, hasStand) {
   return Math.min(100, pct);
 }
 
-async function computeKpis(db, userRole = null) {
-  // 🆕 Filtrage par sites visibles selon rôle (Pacific/Exposant ne voient pas les sites masqués)
-  let allowedVenueIds = null;
-  if (userRole === 'pacific_centers_readonly' || userRole === 'exposant') {
-    const flag = userRole === 'pacific_centers_readonly' ? 'pacific_visible' : 'exposant_visible';
-    const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-    allowedVenueIds = new Set(venues.filter(v => v.is_available_2026 !== false && v[flag] !== false).map(v => v.id));
-  }
-  const q = { edition_id: EDITION_ID };
-  if (allowedVenueIds) q.venue_id = { $in: [...allowedVenueIds] };
-  const regs = await db.collection('registrations').find(q).toArray();
-  const regIds = new Set(regs.map(r => r.id));
-  const depAll = await db.collection('deposit_transactions').find({}).toArray();
-  const deposits = allowedVenueIds ? depAll.filter(d => regIds.has(d.registration_id)) : depAll;
-  const depById = {};
-  deposits.forEach(d => { depById[d.registration_id] = d; });
-  const total = regs.length;
-  const by_status = {};
-  for (const r of regs) by_status[r.status] = (by_status[r.status] || 0) + 1;
-  const cautions_recues = deposits.filter(d => d.status === 'recue').length;
-  const cautions_en_attente = deposits.filter(d => ['demandee','en_attente'].includes(d.status)).length;
-  const conv_signed = regs.filter(r => r.is_convention_signed).length;
-  const docs_manquants = regs.filter(r => !r.is_insurance_uploaded).length;
-  const xpf_encaisses = deposits.filter(d => d.status === 'recue').reduce((s, d) => s + (d.amount_xpf || 0), 0);
-  const xpf_en_attente = deposits.filter(d => ['demandee','en_attente'].includes(d.status)).reduce((s, d) => s + (d.amount_xpf || 0), 0);
-  return { total, by_status, cautions_recues, cautions_en_attente, conv_signed, docs_manquants, xpf_encaisses, xpf_en_attente };
-}
-
-async function computeBySite(db) {
-  const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-  const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
-  const deposits = await db.collection('deposit_transactions').find({}).toArray();
-  const depByReg = {}; deposits.forEach(d => { depByReg[d.registration_id] = d; });
-  return venues.map(v => {
-    const vregs = regs.filter(r => r.venue_id === v.id);
-    const confirmed = vregs.filter(r => r.status === 'confirme').length;
-    const to_confirm = vregs.filter(r => r.status === 'a_confirmer').length;
-    const to_follow_up = vregs.filter(r => r.status === 'a_relancer').length;
-    const prospects = vregs.filter(r => r.status === 'prospect').length;
-    const cautions_recues = vregs.filter(r => depByReg[r.id]?.status === 'recue').length;
-    const conv_signed = vregs.filter(r => r.is_convention_signed).length;
-    const assigned = vregs.length;
-    const remplissage = v.capacity_stands > 0 ? Math.round((confirmed / v.capacity_stands) * 100) : 0;
-    return {
-      venue_id: v.id, venue_name: v.name, venue_code: v.code,
-      capacity_stands: v.capacity_stands, assigned, confirmed, to_confirm, to_follow_up, prospects,
-      cautions_recues, conv_signed, remplissage,
-    };
-  });
-}
+// computeKpis et computeBySite ont été extraits dans /app/lib/api/handlers/dashboard.js
+// (importés en haut de ce fichier)
 
 // ---------- ROUTING ----------
 export async function GET(request, { params }) {
@@ -701,6 +655,11 @@ export async function GET(request, { params }) {
 
     if (route === '' || route === 'health') return json({ ok: true, service: 'Forum Rentrée 2026' });
 
+    // 📊 DASHBOARD GET — dispatcher modulaire (stats/public, kpis, by-site, jour-j-live, alerts)
+    // (extraits dans /app/lib/api/handlers/dashboard.js)
+    const dashboardResp = await handleDashboardGet({ db, request, url, route });
+    if (dashboardResp) return dashboardResp;
+
     // ════════════════════════════════════════════════════════════════
     // 🎯 WIZARD — Endpoints GET (disponibilités + état)
     // ════════════════════════════════════════════════════════════════
@@ -711,107 +670,10 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
-    // 📄 Génère la Convention de Participation en PDF (avec données live)
-    if (route.match(/^exposant\/documents\/convention\/[^/]+$/)) {
-      const regId = p[3];
-      const reg = await db.collection('registrations').findOne({ id: regId });
-      if (!reg) return err('Inscription introuvable', 404);
-      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-      const animations = await db.collection('animation_slots').find({ registration_id: regId, status: { $ne: 'annulé' } }).toArray();
-      try {
-        const { generateConventionPDF } = await import('@/lib/document-generator');
-        const pdf = await generateConventionPDF({ registration: reg, organization: org, venue, animations });
-        return new NextResponse(pdf, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `inline; filename="Convention_${(org?.name || 'exposant').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
-            'Cache-Control': 'no-cache',
-          },
-        });
-      } catch (e) {
-        console.error('[convention-pdf]', e);
-        return err('Erreur génération PDF : ' + e.message, 500);
-      }
-    }
-
-    // 📕 Génère le Guide de l'Exposant en PDF (personnalisé)
-    if (route.match(/^exposant\/documents\/guide\/[^/]+$/)) {
-      const regId = p[3];
-      const reg = await db.collection('registrations').findOne({ id: regId });
-      if (!reg) return err('Inscription introuvable', 404);
-      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-      const animations = await db.collection('animation_slots').find({ registration_id: regId, status: { $ne: 'annulé' } }).toArray();
-      try {
-        const { generateGuidePDF } = await import('@/lib/document-generator');
-        const pdf = await generateGuidePDF({ registration: reg, organization: org, venue, animations });
-        return new NextResponse(pdf, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `inline; filename="Guide_Exposant_${(org?.name || 'exposant').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
-            'Cache-Control': 'no-cache',
-          },
-        });
-      } catch (e) {
-        console.error('[guide-pdf]', e);
-        return err('Erreur génération PDF : ' + e.message, 500);
-      }
-    }
-
-    // 📝 Questionnaire VIERGE — version imprimable (avec ou sans pré-remplissage org)
-    if (route === 'exposant/documents/questionnaire-blank' || route.match(/^exposant\/documents\/questionnaire-blank\/[^/]+$/)) {
-      const regId = p[3] || null;  // optionnel
-      let reg = null, org = null, venue = null;
-      if (regId) {
-        reg = await db.collection('registrations').findOne({ id: regId });
-        if (reg) {
-          org = await db.collection('organizations').findOne({ id: reg.organization_id });
-          venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-        }
-      }
-      try {
-        const { generateQuestionnaireBlankPDF } = await import('@/lib/document-generator');
-        const pdf = await generateQuestionnaireBlankPDF({ organization: org, registration: reg, venue });
-        return new NextResponse(pdf, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `inline; filename="Questionnaire_Vierge_${(org?.name || 'forum2026').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
-            'Cache-Control': 'no-cache',
-          },
-        });
-      } catch (e) {
-        console.error('[questionnaire-blank-pdf]', e);
-        return err('Erreur génération PDF : ' + e.message, 500);
-      }
-    }
-
-    // 📋 Questionnaire REMPLI — récapitulatif des réponses soumises
-    if (route.match(/^exposant\/documents\/questionnaire\/[^/]+$/)) {
-      const orgId = p[3];
-      const response = await db.collection('satisfaction_responses').findOne({ organization_id: orgId });
-      if (!response) return err('Aucune réponse trouvée pour cette organisation', 404);
-      const org = await db.collection('organizations').findOne({ id: orgId });
-      const venue = response.venue_id ? await db.collection('venues').findOne({ id: response.venue_id }) : null;
-      try {
-        const { generateQuestionnaireFilledPDF } = await import('@/lib/document-generator');
-        const pdf = await generateQuestionnaireFilledPDF({ response, organization: org, venue });
-        return new NextResponse(pdf, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `inline; filename="Satisfaction_Reponses_${(org?.name || 'exposant').replace(/[^a-z0-9_-]/gi, '_')}.pdf"`,
-            'Cache-Control': 'no-cache',
-          },
-        });
-      } catch (e) {
-        console.error('[questionnaire-filled-pdf]', e);
-        return err('Erreur génération PDF : ' + e.message, 500);
-      }
-    }
+    // 📄📕📝📋 PDF EXPOSANTS — dispatcher modulaire (Convention, Guide, Questionnaire)
+    // (extraits dans /app/lib/api/handlers/exposant-documents.js)
+    const exposantDocsResp = await handleExposantDocumentsGet({ db, route, p });
+    if (exposantDocsResp) return exposantDocsResp;
 
     // [placeholder ancien guide] — non utilisé
     if (false && route === 'never_match_placeholder') {
@@ -1030,11 +892,8 @@ export async function GET(request, { params }) {
     }
 
     if (route === 'stats/public') {
-      // Public stats for landing page — no auth required
-      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-      const stands = await db.collection('venue_stands').countDocuments({});
-      const orgs = await db.collection('organizations').countDocuments({ source_origin: { $ne: 'self_register' } });
-      return json({ sites: venues.length, stands, associations: orgs });
+      // ⚠️ Migré vers handleDashboardGet — bloc supprimé (jamais atteint)
+      return json({ migrated: true });
     }
 
     if (route === 'auth/me') {
@@ -1065,22 +924,7 @@ export async function GET(request, { params }) {
       return json({ user, organization });
     }
 
-    if (route === 'dashboard/kpis') {
-      const userRole = request.headers.get('x-user-role');
-      const kpis = await computeKpis(db, userRole);
-      return json(kpis);
-    }
-    if (route === 'dashboard/by-site') {
-      const userRole = request.headers.get('x-user-role');
-      const sites = await computeBySite(db);
-      // 🆕 Filtre Pacific : ne renvoie que les sites visibles ET disponibles
-      if (userRole === 'pacific_centers_readonly') {
-        const allVenues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-        const allowedIds = new Set(allVenues.filter(v => v.is_available_2026 !== false && v.pacific_visible !== false).map(v => v.id));
-        return json(sites.filter(s => allowedIds.has(s.venue_id)));
-      }
-      return json(sites);
-    }
+    // dashboard/kpis et dashboard/by-site ont été extraits vers handleDashboardGet (voir début GET)
 
     if (route === 'venues') {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
@@ -2278,49 +2122,7 @@ export async function GET(request, { params }) {
     }
 
 
-    if (route === 'dashboard/jour-j-live') {
-      const event_date = url.searchParams.get('event_date') || '2026-08-14';
-      const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
-      const allSessions = await db.collection('attendance_sessions').find({ event_date }).toArray();
-      const anomalies = await db.collection('registration_anomalies').find({ event_date, resolved_status: { $ne: 'resolu' } }).toArray();
-      const bySite = venues.map(v => {
-        const vs = allSessions.filter(s => s.venue_id === v.id);
-        const present = vs.filter(s => ['arrive','parti','depart_anticipe'].includes(s.presence_status)).length;
-        const absent = vs.filter(s => s.presence_status === 'absent').length;
-        const waiting = vs.filter(s => s.presence_status === 'attendu').length;
-        const late = vs.filter(s => s.actual_arrival_time && s.expected_arrival_time && s.actual_arrival_time > s.expected_arrival_time).length;
-        const gone = vs.filter(s => ['parti','depart_anticipe'].includes(s.presence_status)).length;
-        const anomCount = anomalies.filter(a => a.venue_id === v.id).length;
-        return {
-          venue_id: v.id, venue_name: v.name, venue_code: v.code,
-          total: vs.length, present, absent, waiting, late, gone,
-          anomalies: anomCount,
-          rate: vs.length > 0 ? Math.round((present / vs.length) * 100) : 0,
-        };
-      });
-      const totals = bySite.reduce((acc, s) => { acc.total += s.total; acc.present += s.present; acc.absent += s.absent; acc.waiting += s.waiting; acc.late += s.late; acc.gone += s.gone; acc.anomalies += s.anomalies; return acc; }, { total: 0, present: 0, absent: 0, waiting: 0, late: 0, gone: 0, anomalies: 0 });
-      totals.rate = totals.total > 0 ? Math.round((totals.present / totals.total) * 100) : 0;
-      return json({ event_date, totals, by_site: bySite });
-    }
-
-    if (route === 'alerts') {
-      const anomalies = await db.collection('registration_anomalies').find({ resolved_status: { $in: ['ouvert','en_cours'] } }).toArray();
-      const tasks = await db.collection('tasks_or_followups').find({ status: { $in: ['a_faire','en_cours'] } }).toArray();
-      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID, status: { $in: ['confirme','a_confirmer'] } }).toArray();
-      const docs = await db.collection('registration_documents').find({}, { projection: { file_data: 0 } }).toArray();
-      const docsByReg = {}; docs.forEach(d => { if (!docsByReg[d.registration_id]) docsByReg[d.registration_id] = []; docsByReg[d.registration_id].push(d); });
-      const missing_insurance = regs.filter(r => !(docsByReg[r.id] || []).some(d => d.document_type === 'assurance' && d.status !== 'refuse')).length;
-      const validation_pending = await db.collection('validation_requests').countDocuments({ status: 'en_attente' });
-      const validation_rdv = await db.collection('validation_requests').countDocuments({ status: 'rdv_fixe' });
-      return json({
-        anomalies_open: anomalies.length,
-        critical_anomalies: anomalies.filter(a => a.severity_level === 'critique').length,
-        tasks_open: tasks.length,
-        missing_insurance,
-        validation_pending,
-        validation_rdv,
-      });
-    }
+    // dashboard/jour-j-live et alerts ont été extraits vers handleDashboardGet (voir début GET)
 
     if (route === 'organization-preferences') {
       const organization_id = url.searchParams.get('organization_id');
