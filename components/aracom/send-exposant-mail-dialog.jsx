@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { Mail, Loader2, X, Send, Sparkles } from 'lucide-react';
 import { api } from '@/lib/auth-client';
@@ -91,6 +92,10 @@ export default function SendExposantMailDialog({ registration, organization, ven
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
   const [sending, setSending] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // 🔌 Mount detection pour Portal (SSR safety)
+  useEffect(() => { setMounted(true); }, []);
 
   const applyTemplate = (key) => {
     setTemplateKey(key);
@@ -139,8 +144,8 @@ export default function SendExposantMailDialog({ registration, organization, ven
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+  return (!mounted || typeof document === 'undefined') ? null : createPortal(
+    <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
         className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -236,6 +241,7 @@ export default function SendExposantMailDialog({ registration, organization, ven
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

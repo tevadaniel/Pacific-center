@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { Pencil, Loader2, X, Save, MapPin, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/auth-client';
@@ -37,6 +38,10 @@ export default function EditExposantChoicesDialog({ registration, organization, 
   const [loadingStands, setLoadingStands] = useState(false);
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // 🔌 Mount detection pour Portal (SSR safety)
+  useEffect(() => { setMounted(true); }, []);
 
   // 🔄 Charger les venues une fois à l'ouverture
   useEffect(() => {
@@ -110,8 +115,8 @@ export default function EditExposantChoicesDialog({ registration, organization, 
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+  return (!mounted || typeof document === 'undefined') ? null : createPortal(
+    <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
         className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -289,6 +294,7 @@ export default function EditExposantChoicesDialog({ registration, organization, 
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
