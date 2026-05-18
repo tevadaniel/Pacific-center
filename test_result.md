@@ -2168,3 +2168,36 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28k — Flow multi-sites séquentiel + capacité 'Complet' auto. Demande utilisateur : (1) Bloquer l'ajout d'un nouveau site tant que le site courant n'est pas complet — IMPLÉMENTÉ : bouton désactivé + message explicite des champs manquants. (2) Status 'Complet' visible quand venue plein — IMPLÉMENTÉ : dropdown calcule occupation réelle via /api/venues/:id/stands et désactive les items pleins. Testé E2E preview avec Ecole Judo de Polynésie (2 sites complets) : bouton 'Ajouter' actif, dropdown montre Punaauia/Taravao avec '🚫 COMPLET' désactivé. Lint clean."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28l — Soumission PAR-SITE (validation_request individuel)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — my-sites enrichi avec validation_request + can_submit par site"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (exposant/my-sites)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "BACKEND — Le endpoint /api/exposant/my-sites retourne désormais pour chaque site : (1) validation_request: {id, status, requested_at, rdv_date} ou null si pas de soumission active. (2) can_submit: bool calculé à partir de site_complet ET pas de validation en cours ET pas locked. Testé 3/3 : org-3 avec 2 sites (Faaa soumis: val_req non-null, can_submit=false ; Arue complet non soumis: val_req=null, can_submit=true)."
+
+  - task: "NEW — Bouton 'Soumettre ce site' par-site dans MultiSitesPanel"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js (MultiSitesPanel)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "UI — Bouton violet 'Soumettre ce site' ajouté dans chaque carte de site quand can_submit=true. Confirmation native explicite. Appelle POST /api/registrations/:id/request-validation avec preferred_payment='cheque' par défaut. Affiche Loader2 en cours de soumission. Badges statut par-site : 'Actif' (bleu), 'Verrouillé' (vert), 'Complet' (vert clair), '⏳ Soumis · en attente' (orange), '📅 RDV fixé' (bleu). Le bouton 'Retirer' disparaît automatiquement pour sites soumis (validation en cours). Testé E2E preview : site Faaa soumis → badge orange 'Soumis · en attente' ; site Arue complet → bouton 'Soumettre ce site' actif."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28l — Soumission PAR-SITE complète. Backend : my-sites retourne validation_request + can_submit pour chaque registration. Frontend : bouton 'Soumettre ce site' par carte + badges statut dynamiques. Backend 3/3, lint clean, testé E2E preview. L'exposant peut désormais soumettre chaque site indépendamment, voir le statut de chaque soumission, et continuer à modifier les autres sites tant qu'ils ne sont pas soumis. Prêt Save to Github."
+
