@@ -1680,6 +1680,41 @@ export async function GET(request, { params }) {
       });
     }
 
+    // ---- 🎯 Menu Badges (compteurs intelligents pour le sidebar) ----
+    // Renvoie tous les counters en une seule requête. Cache 30s côté client.
+    if (route === 'menu-badges') {
+      try {
+        const [regs, anomalies, validationReqs, deposits, orgs, satisfactionReqs] = await Promise.all([
+          db.collection('registrations').find({ edition_id: EDITION_ID }, { projection: { status: 1, organization_id: 1 } }).toArray(),
+          db.collection('registration_anomalies').countDocuments({ resolved_status: { $ne: 'resolu' } }),
+          db.collection('validation_requests').countDocuments({ status: { $in: ['pending', 'awaiting', null] } }),
+          db.collection('deposit_transactions').find({ edition_id: EDITION_ID, type: 'caution_received' }, { projection: { organization_id: 1 } }).toArray(),
+          db.collection('organizations').find({}, { projection: { id: 1 } }).toArray(),
+          db.collection('satisfaction_surveys').countDocuments({ status: { $in: ['pending', 'sent'] } }).catch(() => 0),
+        ]);
+        const aRelancer = regs.filter(r => r.status === 'a_relancer').length;
+        const aConfirmer = regs.filter(r => r.status === 'a_confirmer').length;
+        const cautionOrgIds = new Set(deposits.map(d => d.organization_id));
+        const cautionMissing = regs.filter(r => r.status !== 'prospect' && !cautionOrgIds.has(r.organization_id)).length;
+        const regOrgIds = new Set(regs.map(r => r.organization_id));
+        const orphanOrgs = orgs.filter(o => !regOrgIds.has(o.id)).length;
+        return json({
+          validations: validationReqs,
+          relances: aRelancer,
+          a_confirmer: aConfirmer,
+          cautions: cautionMissing,
+          orphans: orphanOrgs,
+          anomalies: anomalies,
+          satisfaction: satisfactionReqs,
+        });
+      } catch (e) {
+        console.error('[menu-badges] error', e?.message);
+        return json({ validations: 0, relances: 0, a_confirmer: 0, cautions: 0, orphans: 0, anomalies: 0, satisfaction: 0 });
+      }
+    }
+
+
+
     // ---- Dashboard Analytics (graphs : historic, disciplines, completion, cautions, mailing) ----
     if (route === 'dashboard/analytics') {
       const [orgs, regs, deposits, emails, campaigns] = await Promise.all([

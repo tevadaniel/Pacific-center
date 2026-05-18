@@ -131,6 +131,8 @@ const TAB_GROUPS = [
 export default function AracomPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null });
+  // 🎯 Badges intelligents : compteurs affichés sur chaque item du menu
+  const [menuBadges, setMenuBadges] = useState({});
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setActiveTab(params.get('tab') || 'dashboard');
@@ -140,6 +142,13 @@ export default function AracomPage() {
   }, []);
   useEffect(() => {
     api('/api/mailing/status').then(setMailStatus).catch(() => {});
+  }, []);
+  useEffect(() => {
+    const loadBadges = () => api('/api/menu-badges').then(setMenuBadges).catch(() => {});
+    loadBadges();
+    // Auto-refresh toutes les 60s pour garder les compteurs à jour
+    const t = setInterval(loadBadges, 60_000);
+    return () => clearInterval(t);
   }, []);
   const setTab = (k, extraParams) => {
     setActiveTab(k);
@@ -154,7 +163,21 @@ export default function AracomPage() {
     window.history.pushState({}, '', url);
   };
 
-  const tabs = TABS.map(t => ({ ...t, href: '#', onClick: () => setTab(t.key) }));
+  // Mapping tab.key → champ menu-badges (compteur affiché dans le menu)
+  const BADGE_MAP = {
+    'validations': 'validations',
+    'relances': 'relances',
+    'exposants': 'a_confirmer',
+    'cautions': 'cautions',
+    'orgs-sans-dossier': 'orphans',
+    'anomalies': 'anomalies',
+    'satisfaction': 'satisfaction',
+  };
+  const enrichedTabs = TABS.map(t => ({
+    ...t,
+    onClick: () => setTab(t.key),
+    badge: BADGE_MAP[t.key] ? (menuBadges[BADGE_MAP[t.key]] || 0) : 0,
+  }));
 
   return (
     <ExposantPanelProvider renderPanel={(id, close) => <FicheExposantV2 id={id} onClose={close} />}>
@@ -163,7 +186,7 @@ export default function AracomPage() {
       subtitle={<AracomBriefing />}
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
-      tabs={TABS.map(t => ({ ...t, onClick: () => setTab(t.key) }))}
+      tabs={enrichedTabs}
       tabGroups={TAB_GROUPS}
       onTabClick={setTab}
       right={

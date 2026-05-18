@@ -163,6 +163,12 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
     return group.items?.includes(activeTab);
   };
 
+  // 🎯 Somme des badges des items d'un groupe (pour afficher un pastille sur le bouton parent)
+  const groupBadgeTotal = (group) => {
+    if (!group.items) return 0;
+    return group.items.reduce((acc, k) => acc + (tabsByKey[k]?.badge || 0), 0);
+  };
+
   // Trouve le label du tab actif au sein d'un groupe (pour afficher le sous-titre)
   const activeChildLabel = (group) => {
     if (!group.items) return null;
@@ -190,6 +196,7 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
           }
 
           const subLabel = activeChildLabel(group);
+          const badgeTotal = groupBadgeTotal(group);
           return (
             <button
               key={group.key}
@@ -202,6 +209,11 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
               {Icon ? <Icon className="w-4 h-4" /> : <span className="text-base">{group.icon}</span>}
               <span>{group.label}</span>
               {subLabel && <span className="text-xs text-blue-500 font-normal hidden sm:inline">· {subLabel}</span>}
+              {badgeTotal > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                  {badgeTotal > 99 ? '99+' : badgeTotal}
+                </span>
+              )}
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openMenu === group.key ? 'rotate-180' : ''}`} />
             </button>
           );
@@ -221,6 +233,7 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
             const renderItem = (t) => {
               const itemActive = activeTab === t.key;
               const ItemIcon = getIcon(t.icon);
+              const itemBadge = t.badge || 0;
               return (
                 <button
                   key={t.key}
@@ -230,7 +243,12 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
                 >
                   {ItemIcon ? <ItemIcon className={`w-4 h-4 shrink-0 ${itemActive ? 'text-blue-600' : 'text-slate-400'}`} /> : <span className="w-4 h-4 inline-block" />}
                   <span className="flex-1">{t.label}</span>
-                  {itemActive && <span className="text-blue-500 text-xs">●</span>}
+                  {itemBadge > 0 && (
+                    <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold leading-none ${itemActive ? 'bg-blue-600 text-white' : 'bg-red-500 text-white'}`}>
+                      {itemBadge > 99 ? '99+' : itemBadge}
+                    </span>
+                  )}
+                  {itemActive && itemBadge === 0 && <span className="text-blue-500 text-xs">●</span>}
                 </button>
               );
             };
