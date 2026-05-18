@@ -1370,6 +1370,26 @@ export async function GET(request, { params }) {
       return json(orgs.map(o => { delete o._id; return o; }));
     }
 
+    // 🆕 SESSION 28g — GET /api/admin/users-without-org
+    // Liste les comptes utilisateurs sans organisation liée (ne peuvent pas accéder au portail exposant)
+    if (route === 'admin/users-without-org') {
+      const userRole = request.headers.get('x-user-role');
+      if (userRole !== 'aracom_admin') return err('Accès admin requis', 403);
+      const users = await db.collection('users').find({
+        $or: [{ organization_id: null }, { organization_id: { $exists: false } }],
+      }).toArray();
+      // Exclut les admins et les comptes système
+      const filtered = users.filter(u =>
+        u.role_code !== 'aracom_admin' &&
+        u.role_code !== 'pacific_centers_readonly' &&
+        u.is_active !== false
+      );
+      return json(filtered.map(u => {
+        delete u._id; delete u.password;
+        return u;
+      }));
+    }
+
     // 🚨 Alertes multi-sites (concentration / doublons / surbooké chronologique)
     if (route === 'admin/multi-site-alerts') {
       const ctx = getUserContext(request);

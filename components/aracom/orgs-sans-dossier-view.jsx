@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Loader2, AlertCircle, Plus, Search } from 'lucide-react';
+import { Loader2, AlertCircle, Plus, Search, UserPlus, Link2 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,29 +11,24 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 /**
- * 🆕 SESSION 28d — Vue admin "Organisations sans dossier 2026"
+ * 🆕 SESSION 28d-g — Vue admin "Comptes & organisations à initialiser"
  *
- * Liste les organisations en base qui n'ont AUCUNE registration active pour l'édition 2026.
- * L'admin peut initialiser un dossier en un clic, optionnellement avec un site présélectionné.
- *
- * Utilité : quand on inscrit manuellement une organisation en base (via import ou direct DB),
- * il faut aussi créer la registration qui lie l'org au Forum 2026, sinon le portail exposant
- * affiche "Votre dossier n'a pas encore été initialisé".
- *
- * Endpoints utilisés :
- *  - GET /api/organizations
- *  - GET /api/exposants (avec registration_id pour filtrer)
- *  - GET /api/venues
- *  - POST /api/admin/organizations/:id/initialize-registration
+ * Gère 2 cas de figure complémentaires :
+ * 1. **Users sans organisation liée** : comptes qui se connectent mais voient "Aucune organisation liée"
+ *    → Bouton "Lier à une organisation"
+ * 2. **Organisations sans dossier 2026** : orgs en base sans registration active pour l'édition
+ *    → Bouton "Initialiser dossier" (individuel ou en lot)
  */
 export default function OrgsSansDossierView() {
   const [orgs, setOrgs] = useState([]);
   const [exposants, setExposants] = useState([]);
   const [venues, setVenues] = useState([]);
+  const [usersWithoutOrg, setUsersWithoutOrg] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(null);
   const [venueByOrg, setVenueByOrg] = useState({}); // org_id -> venue_id sélectionné
+  const [orgByUser, setOrgByUser] = useState({});  // user_id -> org_id sélectionné
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0, ok: 0, ko: 0 });
   const [bulkDefaultVenue, setBulkDefaultVenue] = useState(''); // site par défaut pour le bulk
@@ -41,14 +36,16 @@ export default function OrgsSansDossierView() {
   const load = async () => {
     setLoading(true);
     try {
-      const [allOrgs, allRegs, allVenues] = await Promise.all([
+      const [allOrgs, allRegs, allVenues, usersNoOrg] = await Promise.all([
         api('/api/organizations'),
         api('/api/registrations'),
         api('/api/venues'),
+        api('/api/admin/users-without-org').catch(() => []),
       ]);
       setOrgs(allOrgs || []);
       setExposants(allRegs || []);
       setVenues(allVenues || []);
+      setUsersWithoutOrg(usersNoOrg || []);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
@@ -68,6 +65,31 @@ export default function OrgsSansDossierView() {
     (o.name || '').toLowerCase().includes(search.toLowerCase()) ||
     (o.main_email || '').toLowerCase().includes(search.toLowerCase())
   );
+
+  // 🆕 SESSION 28g — Lier un user existant à une organisation
+  const linkUser = async (user) => {
+    const orgId = orgByUser[user.id];
+    if (!orgId) {
+      toast.error("Sélectionnez d'abord une organisation à lier dans le menu déroulant");
+      return;
+    }
+    const org = orgs.find(o => o.id === orgId);
+    const msg = `Lier le compte "${user.full_name || user.email}" à l'organisation « ${org?.name || orgId} » ?\n\nL'utilisateur pourra ensuite voir cette organisation dans son portail exposant.`;
+    if (!window.confirm(msg)) return;
+    setBusy('user-' + user.id);
+    try {
+      await api(`/api/admin/users/${user.id}/link-organization`, {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: orgId }),
+      });
+      toast.success(`🔗 Compte lié à ${org?.name || orgId}`);
+      load();
+    } catch (e) {
+      toast.error(`❌ ${e.message}`);
+      console.error('[linkUser]', e);
+    }
+    finally { setBusy(null); }
+  };
 
   const initialize = async (org) => {
     const venue_id = venueByOrg[org.id] || null;
@@ -142,6 +164,94 @@ export default function OrgsSansDossierView() {
 
   return (
     <div className="space-y-4">
+      {/* 🆕 SECTION 1 : USERS SANS ORGANISATION */}
+      {usersWithoutOrg.length > 0 && (
+        <>
+          <Card className="border-rose-300 bg-rose-50">
+            <CardContent className="p-4 flex items-start gap-3">
+              <UserPlus className="w-5 h-5 text-rose-700 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-rose-900">
+                <p className="font-semibold mb-1">Comptes utilisateurs sans organisation</p>
+                <p className="text-rose-800">
+                  Ces comptes existent et peuvent se connecter, mais voient <i>« Aucune organisation n&apos;est liée à votre compte »</i> car ils ne sont liés à aucune organisation.
+                </p>
+                <p className="text-rose-800 mt-1.5">
+                  💡 <b>Liez le compte à une organisation existante</b> pour que l&apos;utilisateur voie son dossier exposant.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-rose-600" />
+                Comptes à lier ({usersWithoutOrg.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {usersWithoutOrg.map(user => {
+                  const matchByEmail = (user.email
+                    ? orgs.find(o => (o.main_email || '').toLowerCase() === user.email.toLowerCase())
+                    : null);
+                  // Pré-sélectionne automatiquement l'org si email match
+                  if (matchByEmail && !orgByUser[user.id]) {
+                    // Note: setState in render — utilise setTimeout pour éviter warning
+                    setTimeout(() => setOrgByUser(prev => prev[user.id] ? prev : { ...prev, [user.id]: matchByEmail.id }), 0);
+                  }
+                  return (
+                    <div key={user.id} className="border border-slate-200 rounded-md p-3 bg-white hover:bg-slate-50 transition flex flex-col sm:flex-row sm:items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-slate-900">{user.full_name || user.email || <i className="text-slate-400">— Sans nom —</i>}</span>
+                          <Badge variant="outline" className="text-[10px]">{user.role_code || 'exposant'}</Badge>
+                          {matchByEmail && <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">✨ Match email auto</Badge>}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-3">
+                          {user.email && <span>📧 {user.email}</span>}
+                          <span className="font-mono text-slate-400">id: {user.id?.slice(0, 16)}…</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 sm:flex-shrink-0">
+                        <Select
+                          value={orgByUser[user.id] || ''}
+                          onValueChange={(v) => setOrgByUser({ ...orgByUser, [user.id]: v })}
+                        >
+                          <SelectTrigger className="w-56 h-8 text-xs">
+                            <SelectValue placeholder="Organisation à lier…" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {orgs.map(o => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.name} {o.discipline ? `· ${o.discipline}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          onClick={() => linkUser(user)}
+                          disabled={busy === 'user-' + user.id || !orgByUser[user.id]}
+                          className="bg-rose-600 hover:bg-rose-700 gap-1.5"
+                        >
+                          {busy === 'user-' + user.id
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Link2 className="w-3.5 h-3.5" />
+                          }
+                          Lier
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* 🆕 SECTION 2 : ORGANISATIONS SANS DOSSIER */}
       <Card className="border-amber-300 bg-amber-50">
         <CardContent className="p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />

@@ -71,7 +71,7 @@ const TABS = [
   { key: 'animations', label: '🎭 Animations', href: '/aracom?tab=animations' },
   { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
   { key: 'corbeille', label: '🗑 Corbeille', href: '/aracom?tab=corbeille' },
-  { key: 'orgs-sans-dossier', label: '⚠ Orgs sans dossier', href: '/aracom?tab=orgs-sans-dossier' },
+  { key: 'orgs-sans-dossier', label: '⚠ Comptes & Dossiers', href: '/aracom?tab=orgs-sans-dossier' },
   { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
 

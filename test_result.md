@@ -604,11 +604,23 @@ frontend:
         agent: "testing"
         comment: "✅ TESTÉ EXHAUSTIVEMENT - 12/12 TESTS PASSÉS (100%). Regression test complet après extraction des handlers vers /app/lib/api/handlers/. AUCUNE RÉGRESSION détectée. TEST 1 (stats/public no auth): GET /api/stats/public → 200 avec {sites:6, stands:67, associations:66}, structure correcte avec nombres non-négatifs ✅. TEST 2 (dashboard/kpis admin): GET /api/dashboard/kpis → 200 avec tous les champs requis (total:67, by_status, cautions_recues:1, cautions_en_attente, conv_signed:0, docs_manquants, xpf_encaisses, xpf_en_attente) ✅. TEST 3 (dashboard/by-site admin): GET /api/dashboard/by-site → 200 avec array de 6 sites, chaque site contient venue_id, venue_name, venue_code, capacity_stands, assigned, confirmed, to_confirm, to_follow_up, prospects, cautions_recues, conv_signed, remplissage (ex: Faaa 16/16 stands, 0% remplissage) ✅. TEST 4 (dashboard/by-site pacific): GET /api/dashboard/by-site avec x-user-role:pacific_centers_readonly → 200 avec 4 sites visibles (filtrage pacific_visible correct) ✅. TEST 5 (jour-j-live): GET /api/dashboard/jour-j-live?event_date=2026-08-14 → 200 avec {event_date, totals:{total:55, present:1, absent:0, waiting:54, late:1, gone:1, anomalies:2, rate:2}, by_site:6 sites} ✅. TEST 6 (alerts): GET /api/alerts → 200 avec tous les champs numériques (anomalies_open:2, critical_anomalies:0, tasks_open:0, missing_insurance:18, validation_pending, validation_rdv) ✅. TEST 7 (convention PDF): GET /api/exposant/documents/convention/reg-arue-A-C02 → 200 avec Content-Type:application/pdf, 10196 bytes, magic bytes %PDF- vérifiés ✅. TEST 8 (guide PDF): GET /api/exposant/documents/guide/reg-arue-A-C02 → 200 avec Content-Type:application/pdf, 7425 bytes, PDF valide ✅. TEST 9 (questionnaire-blank PDF): GET /api/exposant/documents/questionnaire-blank → 200 avec Content-Type:application/pdf, 6377 bytes, PDF valide ✅. TEST 10 (unlock-candidature success): POST /api/admin/registrations/reg-arue-A-C02/unlock-candidature avec admin → 200 {ok:true, action:'candidature_unlocked'}, vérification GET confirme candidature_locked:false ✅. TEST 11 (unlock-candidature 404): POST /api/admin/registrations/non-existent-id-12345/unlock-candidature → 404 {error:'Inscription introuvable'} ✅. TEST 12 (unlock-candidature 403): POST /api/admin/registrations/reg-arue-A-C02/unlock-candidature avec x-user-role:exposant → 403 {error:'Accès admin requis'} ✅. CONCLUSION: Tous les endpoints extraits vers les handlers modulaires fonctionnent parfaitement. Aucune régression introduite par le refactoring. Les 5 modules (dashboard.js, exposant-documents.js, admin-delete-reset.js, caution-appointments.js, caution-receipts.js) sont 100% opérationnels."
 
+  - task: "SESSION 28g — User-Organization Linking (GET users-without-org + POST link-organization)"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js, app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 8/8 TESTS PASSÉS (100%). SESSION 28g endpoints pour lier des utilisateurs à des organisations testés avec succès. TEST 1 (GET sans admin): GET /api/admin/users-without-org avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 2 (GET avec admin): GET /api/admin/users-without-org avec x-user-role=aracom_admin → 200 avec array de 1 utilisateur, test user présent avec tous les champs requis (id, email, role_code, is_active), organization_id=null, pas de champ password (sécurité OK), aucun admin dans la liste (correctement exclus), aucun utilisateur inactif (correctement exclus) ✅. TEST 3 (POST 404 user): POST /api/admin/users/non-existent-user-12345/link-organization avec body {organization_id:'org-19'} → 404 'Utilisateur introuvable' ✅. TEST 4 (POST sans org_id): POST /api/admin/users/:userId/link-organization avec body {} → 400 'organization_id requis dans le body' ✅. TEST 5 (POST org invalide): POST avec body {organization_id:'non-existent-org-12345'} → 404 'Organisation introuvable' ✅. TEST 6 (POST sans admin): POST avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 7 (HAPPY PATH): POST /api/admin/users/u-test-link-xxx/link-organization avec admin + body {organization_id:'org-19'} → 200 {ok:true, action:'user_linked', user_id:'u-test-link-xxx', organization_id:'org-19'}. Vérification DB: user.organization_id='org-19', user.linked_at défini, user.linked_by='u-admin'. Vérification liste: utilisateur n'apparaît plus dans GET /api/admin/users-without-org ✅. TEST 8 (Re-link): POST avec body {organization_id:'org-31'} → 200 OK, re-linking autorisé. Vérification DB: user.organization_id='org-31' ✅. CONCLUSION: Tous les endpoints SESSION 28g fonctionnent parfaitement. Permissions (403), validations (400/404), happy path et re-linking opérationnels. Feature 100% fonctionnelle."
+
 
 metadata:
   created_by: "main_agent"
-  version: "2.5"
-  test_sequence: 6
+  version: "2.6"
+  test_sequence: 7
   run_ui: false
 
 test_plan:
@@ -616,6 +628,10 @@ test_plan:
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+  - agent: "testing"
+    message: "SESSION 28g testing completed successfully. All 8 tests passed (100%). Both endpoints (GET /api/admin/users-without-org and POST /api/admin/users/:userId/link-organization) are fully functional. Permissions, validations, happy path, and re-linking all working correctly. Feature is production-ready."
 
 frontend:
   - task: "SESSION 28 UI — Résumé Choix Forum + Débloquer candidature + Exposant portal flow"

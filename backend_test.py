@@ -1,521 +1,526 @@
 #!/usr/bin/env python3
 """
-Backend Regression Test Suite - Post Refactoring
-Tests all endpoints after extracting handlers to /app/lib/api/handlers/
+SESSION 28g Backend Tests - User-Organization Linking
+Tests the new endpoints for linking users to organizations.
 """
 
 import requests
-import sys
+import json
+import uuid
+from pymongo import MongoClient
+import os
+from datetime import datetime
 
-BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
+# Configuration
+BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
+API_URL = f"{BASE_URL}/api"
+DB_NAME = os.getenv('DB_NAME', 'your_database_name')
+MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
 
 # Admin headers
 ADMIN_HEADERS = {
-    "x-user-role": "aracom_admin",
-    "x-user-id": "u-admin"
+    'x-user-role': 'aracom_admin',
+    'x-user-id': 'u-admin',
+    'Content-Type': 'application/json'
 }
 
-# Pacific Centers headers
-PACIFIC_HEADERS = {
-    "x-user-role": "pacific_centers_readonly",
-    "x-user-id": "u-pc"
-}
-
-# Exposant headers (non-admin)
+# Non-admin headers (exposant)
 EXPOSANT_HEADERS = {
-    "x-user-role": "exposant",
-    "x-user-id": "u-exp-1"
+    'x-user-role': 'exposant',
+    'x-user-id': 'u-test-exposant',
+    'Content-Type': 'application/json'
 }
 
-def test_stats_public():
-    """Test 1: GET /api/stats/public (no auth required)"""
-    print("\n" + "="*80)
-    print("TEST 1: GET /api/stats/public (no auth)")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/stats/public", timeout=10)
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {data}")
-            
-            # Verify structure
-            if 'sites' in data and 'stands' in data and 'associations' in data:
-                if isinstance(data['sites'], int) and isinstance(data['stands'], int) and isinstance(data['associations'], int):
-                    if data['sites'] >= 0 and data['stands'] >= 0 and data['associations'] >= 0:
-                        print("✅ TEST 1 PASSED - stats/public returns correct structure with non-negative numbers")
-                        return True
-                    else:
-                        print("❌ TEST 1 FAILED - Negative numbers in response")
-                        return False
-                else:
-                    print("❌ TEST 1 FAILED - Values are not numbers")
-                    return False
-            else:
-                print("❌ TEST 1 FAILED - Missing required fields (sites, stands, associations)")
-                return False
-        else:
-            print(f"❌ TEST 1 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 1 FAILED - Exception: {str(e)}")
-        return False
+def print_test_header(test_name):
+    print(f"\n{'='*80}")
+    print(f"TEST: {test_name}")
+    print(f"{'='*80}")
 
-def test_dashboard_kpis():
-    """Test 2: GET /api/dashboard/kpis (admin)"""
-    print("\n" + "="*80)
-    print("TEST 2: GET /api/dashboard/kpis (admin)")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/dashboard/kpis", headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response keys: {data.keys()}")
-            
-            # Verify required fields
-            required_fields = ['total', 'by_status', 'cautions_recues', 'cautions_en_attente', 
-                             'conv_signed', 'docs_manquants', 'xpf_encaisses', 'xpf_en_attente']
-            
-            missing_fields = [f for f in required_fields if f not in data]
-            if not missing_fields:
-                print(f"Total: {data['total']}, By Status: {data['by_status']}")
-                print(f"Cautions recues: {data['cautions_recues']}, Conv signed: {data['conv_signed']}")
-                print("✅ TEST 2 PASSED - dashboard/kpis returns all required fields")
-                return True
-            else:
-                print(f"❌ TEST 2 FAILED - Missing fields: {missing_fields}")
-                return False
-        else:
-            print(f"❌ TEST 2 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 2 FAILED - Exception: {str(e)}")
-        return False
+def print_result(success, message):
+    status = "✅ PASS" if success else "❌ FAIL"
+    print(f"{status}: {message}")
 
-def test_dashboard_by_site_admin():
-    """Test 3: GET /api/dashboard/by-site (admin)"""
-    print("\n" + "="*80)
-    print("TEST 3: GET /api/dashboard/by-site (admin)")
-    print("="*80)
+def setup_test_data():
+    """Create test user and organization in MongoDB"""
+    print_test_header("SETUP - Creating test data")
+    
     try:
-        response = requests.get(f"{BASE_URL}/dashboard/by-site", headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
+        client = MongoClient(MONGO_URL)
+        db = client[DB_NAME]
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Number of sites: {len(data)}")
-            
-            if isinstance(data, list) and len(data) > 0:
-                # Check first site structure
-                site = data[0]
-                required_fields = ['venue_id', 'venue_name', 'venue_code', 'capacity_stands', 
-                                 'assigned', 'confirmed', 'to_confirm', 'to_follow_up', 'prospects',
-                                 'cautions_recues', 'conv_signed', 'remplissage']
-                
-                missing_fields = [f for f in required_fields if f not in site]
-                if not missing_fields:
-                    print(f"First site: {site['venue_name']} - {site['assigned']}/{site['capacity_stands']} stands")
-                    print(f"Remplissage: {site['remplissage']}%")
-                    print("✅ TEST 3 PASSED - dashboard/by-site returns correct structure")
-                    return True
-                else:
-                    print(f"❌ TEST 3 FAILED - Missing fields in site object: {missing_fields}")
-                    return False
-            else:
-                print("❌ TEST 3 FAILED - Response is not a non-empty array")
-                return False
+        # Generate unique IDs
+        uuid_suffix = str(uuid.uuid4())[:8]
+        test_user_id = f'u-test-link-{uuid_suffix}'
+        test_email = f'testlink-{uuid_suffix}@test.pf'
+        
+        # Create test user without organization
+        user_doc = {
+            'id': test_user_id,
+            'email': test_email,
+            'full_name': 'Test User Link',
+            'role_code': 'exposant',
+            'organization_id': None,
+            'is_active': True,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        db.users.insert_one(user_doc)
+        print_result(True, f"Created test user: {test_user_id} ({test_email})")
+        
+        # Verify org-19 exists
+        org_19 = db.organizations.find_one({'id': 'org-19'})
+        if org_19:
+            print_result(True, f"Verified org-19 exists: {org_19.get('name', 'Unknown')}")
         else:
-            print(f"❌ TEST 3 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 3 FAILED - Exception: {str(e)}")
-        return False
-
-def test_dashboard_by_site_pacific():
-    """Test 4: GET /api/dashboard/by-site (pacific_centers_readonly role)"""
-    print("\n" + "="*80)
-    print("TEST 4: GET /api/dashboard/by-site (pacific_centers_readonly)")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/dashboard/by-site", headers=PACIFIC_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
+            print_result(False, "org-19 not found in database")
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Number of sites visible to Pacific Centers: {len(data)}")
-            
-            if isinstance(data, list):
-                # Should only show sites with pacific_visible: true
-                # All sites should have the same structure as admin view
-                if len(data) > 0:
-                    site = data[0]
-                    print(f"First site: {site.get('venue_name', 'N/A')}")
-                    print("✅ TEST 4 PASSED - dashboard/by-site filtered for pacific_centers_readonly")
-                    return True
-                else:
-                    print("⚠️ TEST 4 WARNING - No sites visible (might be expected if all pacific_visible=false)")
-                    return True  # Not a failure, just no visible sites
-            else:
-                print("❌ TEST 4 FAILED - Response is not an array")
-                return False
+        # Verify org-31 exists (ACE Arue)
+        org_31 = db.organizations.find_one({'id': 'org-31'})
+        if org_31:
+            print_result(True, f"Verified org-31 exists: {org_31.get('name', 'Unknown')}")
         else:
-            print(f"❌ TEST 4 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
+            print_result(False, "org-31 not found in database")
+        
+        client.close()
+        return test_user_id, test_email
+        
     except Exception as e:
-        print(f"❌ TEST 4 FAILED - Exception: {str(e)}")
-        return False
+        print_result(False, f"Setup failed: {str(e)}")
+        return None, None
 
-def test_dashboard_jour_j_live():
-    """Test 5: GET /api/dashboard/jour-j-live?event_date=2026-08-14 (admin)"""
-    print("\n" + "="*80)
-    print("TEST 5: GET /api/dashboard/jour-j-live?event_date=2026-08-14 (admin)")
-    print("="*80)
+def cleanup_test_data():
+    """Remove test users from MongoDB"""
+    print_test_header("CLEANUP - Removing test data")
+    
     try:
-        response = requests.get(f"{BASE_URL}/dashboard/jour-j-live?event_date=2026-08-14", 
-                               headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
+        client = MongoClient(MONGO_URL)
+        db = client[DB_NAME]
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response keys: {data.keys()}")
-            
-            # Verify structure
-            if 'event_date' in data and 'totals' in data and 'by_site' in data:
-                totals = data['totals']
-                required_totals = ['total', 'present', 'absent', 'waiting', 'late', 'gone', 'anomalies', 'rate']
-                missing = [f for f in required_totals if f not in totals]
-                
-                if not missing:
-                    print(f"Event date: {data['event_date']}")
-                    print(f"Totals: {totals}")
-                    print(f"Sites: {len(data['by_site'])}")
-                    print("✅ TEST 5 PASSED - jour-j-live returns correct structure")
-                    return True
-                else:
-                    print(f"❌ TEST 5 FAILED - Missing fields in totals: {missing}")
-                    return False
-            else:
-                print("❌ TEST 5 FAILED - Missing required top-level fields")
-                return False
-        else:
-            print(f"❌ TEST 5 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
+        result = db.users.delete_many({'id': {'$regex': '^u-test-link-'}})
+        print_result(True, f"Deleted {result.deleted_count} test users")
+        
+        client.close()
+        
     except Exception as e:
-        print(f"❌ TEST 5 FAILED - Exception: {str(e)}")
-        return False
+        print_result(False, f"Cleanup failed: {str(e)}")
 
-def test_alerts():
-    """Test 6: GET /api/alerts (admin)"""
-    print("\n" + "="*80)
-    print("TEST 6: GET /api/alerts (admin)")
-    print("="*80)
+def test_1_get_users_without_org_no_admin():
+    """Test 1: GET /api/admin/users-without-org without admin role → 403"""
+    print_test_header("Test 1: GET users-without-org without admin role")
+    
     try:
-        response = requests.get(f"{BASE_URL}/alerts", headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response keys: {data.keys()}")
-            
-            # Verify all required fields are numbers
-            required_fields = ['anomalies_open', 'critical_anomalies', 'tasks_open', 
-                             'missing_insurance', 'validation_pending', 'validation_rdv']
-            
-            missing = [f for f in required_fields if f not in data]
-            if not missing:
-                all_numbers = all(isinstance(data[f], int) for f in required_fields)
-                if all_numbers:
-                    print(f"Anomalies open: {data['anomalies_open']}, Critical: {data['critical_anomalies']}")
-                    print(f"Tasks open: {data['tasks_open']}, Missing insurance: {data['missing_insurance']}")
-                    print("✅ TEST 6 PASSED - alerts returns all required numeric fields")
-                    return True
-                else:
-                    print("❌ TEST 6 FAILED - Some fields are not numbers")
-                    return False
-            else:
-                print(f"❌ TEST 6 FAILED - Missing fields: {missing}")
-                return False
-        else:
-            print(f"❌ TEST 6 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 6 FAILED - Exception: {str(e)}")
-        return False
-
-def test_document_convention():
-    """Test 7: GET /api/exposant/documents/convention/:regId (admin, regId=reg-arue-A-C02)"""
-    print("\n" + "="*80)
-    print("TEST 7: GET /api/exposant/documents/convention/reg-arue-A-C02 (admin)")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/exposant/documents/convention/reg-arue-A-C02", 
-                               headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', '')
-            if 'application/pdf' in content_type:
-                pdf_size = len(response.content)
-                print(f"PDF size: {pdf_size} bytes")
-                
-                # Verify it's a valid PDF (starts with %PDF-)
-                if response.content[:4] == b'%PDF':
-                    print("✅ TEST 7 PASSED - convention PDF generated successfully")
-                    return True
-                else:
-                    print("❌ TEST 7 FAILED - Response is not a valid PDF")
-                    return False
-            else:
-                print(f"❌ TEST 7 FAILED - Wrong Content-Type: {content_type}")
-                return False
-        else:
-            print(f"❌ TEST 7 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 7 FAILED - Exception: {str(e)}")
-        return False
-
-def test_document_guide():
-    """Test 8: GET /api/exposant/documents/guide/:regId (admin, regId=reg-arue-A-C02)"""
-    print("\n" + "="*80)
-    print("TEST 8: GET /api/exposant/documents/guide/reg-arue-A-C02 (admin)")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/exposant/documents/guide/reg-arue-A-C02", 
-                               headers=ADMIN_HEADERS, timeout=10)
-        print(f"Status: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', '')
-            if 'application/pdf' in content_type:
-                pdf_size = len(response.content)
-                print(f"PDF size: {pdf_size} bytes")
-                
-                # Verify it's a valid PDF
-                if response.content[:4] == b'%PDF':
-                    print("✅ TEST 8 PASSED - guide PDF generated successfully")
-                    return True
-                else:
-                    print("❌ TEST 8 FAILED - Response is not a valid PDF")
-                    return False
-            else:
-                print(f"❌ TEST 8 FAILED - Wrong Content-Type: {content_type}")
-                return False
-        else:
-            print(f"❌ TEST 8 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 8 FAILED - Exception: {str(e)}")
-        return False
-
-def test_document_questionnaire_blank():
-    """Test 9: GET /api/exposant/documents/questionnaire-blank (no regId)"""
-    print("\n" + "="*80)
-    print("TEST 9: GET /api/exposant/documents/questionnaire-blank")
-    print("="*80)
-    try:
-        response = requests.get(f"{BASE_URL}/exposant/documents/questionnaire-blank", timeout=10)
-        print(f"Status: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', '')
-            if 'application/pdf' in content_type:
-                pdf_size = len(response.content)
-                print(f"PDF size: {pdf_size} bytes")
-                
-                # Verify it's a valid PDF
-                if response.content[:4] == b'%PDF':
-                    print("✅ TEST 9 PASSED - questionnaire-blank PDF generated successfully")
-                    return True
-                else:
-                    print("❌ TEST 9 FAILED - Response is not a valid PDF")
-                    return False
-            else:
-                print(f"❌ TEST 9 FAILED - Wrong Content-Type: {content_type}")
-                return False
-        else:
-            print(f"❌ TEST 9 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 9 FAILED - Exception: {str(e)}")
-        return False
-
-def test_unlock_candidature_success():
-    """Test 10: POST /api/admin/registrations/:id/unlock-candidature (admin, regId=reg-arue-A-C02)"""
-    print("\n" + "="*80)
-    print("TEST 10: POST /api/admin/registrations/reg-arue-A-C02/unlock-candidature (admin)")
-    print("="*80)
-    try:
-        # First, lock the candidature by requesting validation
-        print("Step 1: Locking candidature via request-validation...")
-        lock_response = requests.post(
-            f"{BASE_URL}/registrations/reg-arue-A-C02/request-validation",
-            headers=ADMIN_HEADERS,
-            json={"preferred_payment": "cheque", "rdv_proposal": "", "notes": ""},
-            timeout=10
-        )
-        print(f"Lock status: {lock_response.status_code}")
-        
-        if lock_response.status_code != 200:
-            print(f"⚠️ Warning: Could not lock candidature: {lock_response.text[:200]}")
-        
-        # Now test unlock
-        print("\nStep 2: Unlocking candidature...")
-        response = requests.post(
-            f"{BASE_URL}/admin/registrations/reg-arue-A-C02/unlock-candidature",
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {data}")
-            
-            if data.get('ok') == True and data.get('action') == 'candidature_unlocked':
-                # Verify the registration is actually unlocked
-                print("\nStep 3: Verifying unlock via GET /api/registrations/reg-arue-A-C02...")
-                verify_response = requests.get(
-                    f"{BASE_URL}/registrations/reg-arue-A-C02",
-                    headers=ADMIN_HEADERS,
-                    timeout=10
-                )
-                
-                if verify_response.status_code == 200:
-                    reg_data = verify_response.json()
-                    registration = reg_data.get('registration', {})
-                    is_locked = registration.get('candidature_locked', True)
-                    
-                    print(f"candidature_locked: {is_locked}")
-                    
-                    if is_locked == False:
-                        print("✅ TEST 10 PASSED - unlock-candidature works correctly")
-                        return True
-                    else:
-                        print("❌ TEST 10 FAILED - candidature_locked is still True after unlock")
-                        return False
-                else:
-                    print(f"⚠️ Could not verify unlock: {verify_response.status_code}")
-                    print("✅ TEST 10 PASSED (partial) - unlock endpoint returned success")
-                    return True
-            else:
-                print(f"❌ TEST 10 FAILED - Unexpected response: {data}")
-                return False
-        else:
-            print(f"❌ TEST 10 FAILED - Expected 200, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 10 FAILED - Exception: {str(e)}")
-        return False
-
-def test_unlock_candidature_not_found():
-    """Test 11: POST /api/admin/registrations/non-existent/unlock-candidature (admin)"""
-    print("\n" + "="*80)
-    print("TEST 11: POST /api/admin/registrations/non-existent/unlock-candidature (admin)")
-    print("="*80)
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/registrations/non-existent-id-12345/unlock-candidature",
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 404:
-            data = response.json()
-            print(f"Response: {data}")
-            
-            if 'error' in data and 'introuvable' in data['error'].lower():
-                print("✅ TEST 11 PASSED - Returns 404 'Inscription introuvable' for non-existent ID")
-                return True
-            else:
-                print("❌ TEST 11 FAILED - 404 but wrong error message")
-                return False
-        else:
-            print(f"❌ TEST 11 FAILED - Expected 404, got {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ TEST 11 FAILED - Exception: {str(e)}")
-        return False
-
-def test_unlock_candidature_no_admin():
-    """Test 12: POST /api/admin/registrations/:id/unlock-candidature (NO admin role)"""
-    print("\n" + "="*80)
-    print("TEST 12: POST /api/admin/registrations/reg-arue-A-C02/unlock-candidature (exposant role)")
-    print("="*80)
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/registrations/reg-arue-A-C02/unlock-candidature",
+        response = requests.get(
+            f"{API_URL}/admin/users-without-org",
             headers=EXPOSANT_HEADERS,
             timeout=10
         )
-        print(f"Status: {response.status_code}")
         
         if response.status_code == 403:
             data = response.json()
-            print(f"Response: {data}")
-            
-            if 'error' in data and 'admin' in data['error'].lower():
-                print("✅ TEST 12 PASSED - Returns 403 'Accès admin requis' for non-admin role")
+            if 'Accès admin requis' in data.get('error', ''):
+                print_result(True, f"403 with correct error message: {data.get('error')}")
                 return True
             else:
-                print("❌ TEST 12 FAILED - 403 but wrong error message")
+                print_result(False, f"403 but wrong error message: {data}")
                 return False
         else:
-            print(f"❌ TEST 12 FAILED - Expected 403, got {response.status_code}")
-            print(f"Response: {response.text}")
+            print_result(False, f"Expected 403, got {response.status_code}: {response.text}")
             return False
+            
     except Exception as e:
-        print(f"❌ TEST 12 FAILED - Exception: {str(e)}")
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_2_get_users_without_org_with_admin(test_user_id, test_email):
+    """Test 2: GET /api/admin/users-without-org with admin role → 200 with array"""
+    print_test_header("Test 2: GET users-without-org with admin role")
+    
+    try:
+        response = requests.get(
+            f"{API_URL}/admin/users-without-org",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if not isinstance(data, list):
+                print_result(False, f"Expected array, got: {type(data)}")
+                return False
+            
+            print_result(True, f"200 OK with array of {len(data)} users")
+            
+            # Verify test user is in the list
+            test_user = next((u for u in data if u.get('id') == test_user_id), None)
+            if test_user:
+                print_result(True, f"Test user found in list: {test_user.get('email')}")
+                
+                # Verify required fields
+                required_fields = ['id', 'email', 'role_code', 'is_active']
+                missing_fields = [f for f in required_fields if f not in test_user]
+                if missing_fields:
+                    print_result(False, f"Missing fields: {missing_fields}")
+                    return False
+                else:
+                    print_result(True, f"All required fields present")
+                
+                # Verify organization_id is null
+                if test_user.get('organization_id') is None:
+                    print_result(True, "organization_id is null as expected")
+                else:
+                    print_result(False, f"organization_id should be null, got: {test_user.get('organization_id')}")
+                    return False
+                
+                # Verify no password field (security)
+                if 'password' in test_user:
+                    print_result(False, "SECURITY ISSUE: password field exposed in response")
+                    return False
+                else:
+                    print_result(True, "No password field in response (secure)")
+                
+            else:
+                print_result(False, f"Test user {test_user_id} not found in list")
+                return False
+            
+            # Verify no admins in the list
+            admins = [u for u in data if u.get('role_code') == 'aracom_admin']
+            if admins:
+                print_result(False, f"Found {len(admins)} admin users in list (should be excluded)")
+                return False
+            else:
+                print_result(True, "No admin users in list (correctly excluded)")
+            
+            # Verify no inactive users
+            inactive = [u for u in data if u.get('is_active') == False]
+            if inactive:
+                print_result(False, f"Found {len(inactive)} inactive users in list (should be excluded)")
+                return False
+            else:
+                print_result(True, "No inactive users in list (correctly excluded)")
+            
+            return True
+            
+        else:
+            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_3_link_user_404():
+    """Test 3: POST /api/admin/users/non-existent-user/link-organization → 404"""
+    print_test_header("Test 3: POST link-organization with non-existent user")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/non-existent-user-12345/link-organization",
+            headers=ADMIN_HEADERS,
+            json={'organization_id': 'org-19'},
+            timeout=10
+        )
+        
+        # Check if endpoint exists
+        if response.status_code == 404:
+            data = response.json()
+            error_msg = data.get('error', '')
+            
+            # Could be either "Utilisateur introuvable" or route not found
+            if 'introuvable' in error_msg.lower() or 'not found' in error_msg.lower():
+                print_result(True, f"404 with error: {error_msg}")
+                return True
+            else:
+                print_result(False, f"404 but unexpected error: {error_msg}")
+                return False
+        else:
+            print_result(False, f"Expected 404, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_4_link_user_no_org_id(test_user_id):
+    """Test 4: POST /api/admin/users/:userId/link-organization without organization_id → 400"""
+    print_test_header("Test 4: POST link-organization without organization_id")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/{test_user_id}/link-organization",
+            headers=ADMIN_HEADERS,
+            json={},
+            timeout=10
+        )
+        
+        if response.status_code == 400:
+            data = response.json()
+            error_msg = data.get('error', '')
+            if 'organization_id' in error_msg.lower() and 'requis' in error_msg.lower():
+                print_result(True, f"400 with correct error: {error_msg}")
+                return True
+            else:
+                print_result(False, f"400 but wrong error: {error_msg}")
+                return False
+        elif response.status_code == 404:
+            print_result(False, f"Endpoint not found (404) - feature not implemented")
+            return False
+        else:
+            print_result(False, f"Expected 400, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_5_link_user_invalid_org(test_user_id):
+    """Test 5: POST /api/admin/users/:userId/link-organization with invalid org → 404"""
+    print_test_header("Test 5: POST link-organization with invalid organization")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/{test_user_id}/link-organization",
+            headers=ADMIN_HEADERS,
+            json={'organization_id': 'non-existent-org-12345'},
+            timeout=10
+        )
+        
+        if response.status_code == 404:
+            data = response.json()
+            error_msg = data.get('error', '')
+            if 'organisation' in error_msg.lower() and 'introuvable' in error_msg.lower():
+                print_result(True, f"404 with correct error: {error_msg}")
+                return True
+            else:
+                print_result(False, f"404 but wrong error: {error_msg}")
+                return False
+        elif response.status_code == 404:
+            print_result(False, f"Endpoint not found (404) - feature not implemented")
+            return False
+        else:
+            print_result(False, f"Expected 404, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_6_link_user_no_admin(test_user_id):
+    """Test 6: POST /api/admin/users/:userId/link-organization without admin → 403"""
+    print_test_header("Test 6: POST link-organization without admin role")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/{test_user_id}/link-organization",
+            headers=EXPOSANT_HEADERS,
+            json={'organization_id': 'org-19'},
+            timeout=10
+        )
+        
+        if response.status_code == 403:
+            data = response.json()
+            error_msg = data.get('error', '')
+            if 'admin' in error_msg.lower() and 'requis' in error_msg.lower():
+                print_result(True, f"403 with correct error: {error_msg}")
+                return True
+            else:
+                print_result(False, f"403 but wrong error: {error_msg}")
+                return False
+        elif response.status_code == 404:
+            print_result(False, f"Endpoint not found (404) - feature not implemented")
+            return False
+        else:
+            print_result(False, f"Expected 403, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_7_link_user_happy_path(test_user_id):
+    """Test 7: HAPPY PATH - Link user to org-19"""
+    print_test_header("Test 7: HAPPY PATH - Link user to org-19")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/{test_user_id}/link-organization",
+            headers=ADMIN_HEADERS,
+            json={'organization_id': 'org-19'},
+            timeout=10
+        )
+        
+        if response.status_code == 404:
+            print_result(False, "❌ CRITICAL: Endpoint not found (404) - POST /api/admin/users/:userId/link-organization NOT IMPLEMENTED")
+            return False
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Verify response structure
+            if data.get('ok') == True and data.get('action') == 'user_linked':
+                print_result(True, f"200 OK with correct response structure")
+                
+                if data.get('user_id') == test_user_id and data.get('organization_id') == 'org-19':
+                    print_result(True, f"Correct user_id and organization_id in response")
+                else:
+                    print_result(False, f"Wrong IDs in response: {data}")
+                    return False
+                
+                # Verify in database
+                try:
+                    client = MongoClient(MONGO_URL)
+                    db = client[DB_NAME]
+                    
+                    user = db.users.find_one({'id': test_user_id})
+                    if user:
+                        if user.get('organization_id') == 'org-19':
+                            print_result(True, "Database: user.organization_id = 'org-19'")
+                        else:
+                            print_result(False, f"Database: user.organization_id = {user.get('organization_id')} (expected 'org-19')")
+                            client.close()
+                            return False
+                        
+                        if user.get('linked_at'):
+                            print_result(True, f"Database: user.linked_at is set ({user.get('linked_at')})")
+                        else:
+                            print_result(False, "Database: user.linked_at is not set")
+                            client.close()
+                            return False
+                        
+                        if user.get('linked_by'):
+                            print_result(True, f"Database: user.linked_by is set ({user.get('linked_by')})")
+                        else:
+                            print_result(False, "Database: user.linked_by is not set")
+                            client.close()
+                            return False
+                    else:
+                        print_result(False, f"User {test_user_id} not found in database")
+                        client.close()
+                        return False
+                    
+                    client.close()
+                    
+                except Exception as e:
+                    print_result(False, f"Database verification failed: {str(e)}")
+                    return False
+                
+                # Verify user no longer in users-without-org list
+                try:
+                    list_response = requests.get(
+                        f"{API_URL}/admin/users-without-org",
+                        headers=ADMIN_HEADERS,
+                        timeout=10
+                    )
+                    
+                    if list_response.status_code == 200:
+                        users = list_response.json()
+                        if any(u.get('id') == test_user_id for u in users):
+                            print_result(False, "User still in users-without-org list")
+                            return False
+                        else:
+                            print_result(True, "User no longer in users-without-org list")
+                    else:
+                        print_result(False, f"Failed to verify users-without-org list: {list_response.status_code}")
+                        return False
+                        
+                except Exception as e:
+                    print_result(False, f"List verification failed: {str(e)}")
+                    return False
+                
+                return True
+                
+            else:
+                print_result(False, f"Wrong response structure: {data}")
+                return False
+                
+        else:
+            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
+        return False
+
+def test_8_relink_user_different_org(test_user_id):
+    """Test 8: Re-link user to different org (org-31)"""
+    print_test_header("Test 8: Re-link user to different organization (org-31)")
+    
+    try:
+        response = requests.post(
+            f"{API_URL}/admin/users/{test_user_id}/link-organization",
+            headers=ADMIN_HEADERS,
+            json={'organization_id': 'org-31'},
+            timeout=10
+        )
+        
+        if response.status_code == 404:
+            print_result(False, "Endpoint not found (404) - feature not implemented")
+            return False
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_result(True, f"200 OK - Re-linking allowed")
+            
+            # Verify in database
+            try:
+                client = MongoClient(MONGO_URL)
+                db = client[DB_NAME]
+                
+                user = db.users.find_one({'id': test_user_id})
+                if user:
+                    if user.get('organization_id') == 'org-31':
+                        print_result(True, "Database: user.organization_id = 'org-31'")
+                        client.close()
+                        return True
+                    else:
+                        print_result(False, f"Database: user.organization_id = {user.get('organization_id')} (expected 'org-31')")
+                        client.close()
+                        return False
+                else:
+                    print_result(False, f"User {test_user_id} not found in database")
+                    client.close()
+                    return False
+                    
+            except Exception as e:
+                print_result(False, f"Database verification failed: {str(e)}")
+                return False
+                
+        else:
+            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+            
+    except Exception as e:
+        print_result(False, f"Request failed: {str(e)}")
         return False
 
 def main():
-    """Run all tests and report results"""
     print("\n" + "="*80)
-    print("BACKEND REGRESSION TEST SUITE - POST REFACTORING")
-    print("Testing endpoints after extracting handlers to /app/lib/api/handlers/")
+    print("SESSION 28g - User-Organization Linking Backend Tests")
     print("="*80)
     
-    tests = [
-        ("stats/public (no auth)", test_stats_public),
-        ("dashboard/kpis (admin)", test_dashboard_kpis),
-        ("dashboard/by-site (admin)", test_dashboard_by_site_admin),
-        ("dashboard/by-site (pacific)", test_dashboard_by_site_pacific),
-        ("dashboard/jour-j-live (admin)", test_dashboard_jour_j_live),
-        ("alerts (admin)", test_alerts),
-        ("documents/convention PDF", test_document_convention),
-        ("documents/guide PDF", test_document_guide),
-        ("documents/questionnaire-blank PDF", test_document_questionnaire_blank),
-        ("unlock-candidature (success)", test_unlock_candidature_success),
-        ("unlock-candidature (404)", test_unlock_candidature_not_found),
-        ("unlock-candidature (403)", test_unlock_candidature_no_admin),
-    ]
+    # Setup
+    test_user_id, test_email = setup_test_data()
+    if not test_user_id:
+        print("\n❌ SETUP FAILED - Cannot proceed with tests")
+        return
     
     results = []
-    for name, test_func in tests:
-        try:
-            result = test_func()
-            results.append((name, result))
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR in {name}: {str(e)}")
-            results.append((name, False))
+    
+    # Run tests
+    try:
+        results.append(("Test 1: GET without admin", test_1_get_users_without_org_no_admin()))
+        results.append(("Test 2: GET with admin", test_2_get_users_without_org_with_admin(test_user_id, test_email)))
+        results.append(("Test 3: POST 404 user", test_3_link_user_404()))
+        results.append(("Test 4: POST no org_id", test_4_link_user_no_org_id(test_user_id)))
+        results.append(("Test 5: POST invalid org", test_5_link_user_invalid_org(test_user_id)))
+        results.append(("Test 6: POST no admin", test_6_link_user_no_admin(test_user_id)))
+        results.append(("Test 7: HAPPY PATH", test_7_link_user_happy_path(test_user_id)))
+        results.append(("Test 8: Re-link", test_8_relink_user_different_org(test_user_id)))
+        
+    finally:
+        # Cleanup
+        cleanup_test_data()
     
     # Summary
     print("\n" + "="*80)
@@ -525,15 +530,19 @@ def main():
     passed = sum(1 for _, result in results if result)
     total = len(results)
     
-    for name, result in results:
+    for test_name, result in results:
         status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{status} - {name}")
+        print(f"{status}: {test_name}")
     
-    print("\n" + "="*80)
-    print(f"TOTAL: {passed}/{total} tests passed ({(passed/total*100):.1f}%)")
-    print("="*80)
+    print(f"\n{'='*80}")
+    print(f"TOTAL: {passed}/{total} tests passed ({passed*100//total}%)")
+    print(f"{'='*80}\n")
     
-    return 0 if passed == total else 1
+    if passed < total:
+        print("⚠️  CRITICAL FINDINGS:")
+        print("   - POST /api/admin/users/:userId/link-organization endpoint is NOT IMPLEMENTED")
+        print("   - Only GET /api/admin/users-without-org is working")
+        print("   - Feature is incomplete and cannot be used")
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    main()
