@@ -920,7 +920,48 @@ export async function GET(request, { params }) {
       }
       let organization = null;
       if (user.organization_id) organization = await db.collection('organizations').findOne({ id: user.organization_id });
+
+      // 🛡️ SESSION 28p — AUTO-SELF-HEALING : si pas d'org liée OU org introuvable, on tente de
+      //     déduire l'orgId depuis le user.id (pattern "u-exp-{orgId}") et on auto-répare en DB.
+      //     Idempotent : ne fait rien si déjà OK. Cas typique = utilisateur orphelin créé sans link.
+      if ((!organization || !user.organization_id) && typeof user.id === 'string' && user.id.startsWith('u-exp-')) {
+        const candidateOrgId = user.id.slice(6); // strip "u-exp-" prefix
+        const foundOrg = await db.collection('organizations').findOne({ id: candidateOrgId });
+        if (foundOrg) {
+          // Auto-link en DB pour ne plus jamais repasser ici
+          await db.collection('users').updateOne(
+            { id: user.id },
+            {
+              $set: {
+                organization_id: candidateOrgId,
+                role_code: user.role_code || 'exposant',
+                updated_at: new Date(),
+                auto_healed_at: new Date(),
+                auto_healed_reason: 'self_healing_auth_me',
+              },
+            }
+          );
+          user.organization_id = candidateOrgId;
+          user.role_code = user.role_code || 'exposant';
+          organization = foundOrg;
+          // Trace dans activity_logs pour audit
+          try {
+            await db.collection('activity_logs').insertOne({
+              id: uuid(),
+              user_id: user.id,
+              entity_type: 'user',
+              entity_id: user.id,
+              action_type: 'auto_heal_link_org',
+              old_values_json: { organization_id: null },
+              new_values_json: { organization_id: candidateOrgId, org_name: foundOrg.name },
+              created_at: new Date(),
+            });
+          } catch {}
+        }
+      }
+
       delete user.password; delete user._id;
+      if (organization) delete organization._id;
       return json({ user, organization });
     }
 
