@@ -1983,6 +1983,39 @@ agent_communication:
     implemented: true
     working: true
     file: "components/aracom/orgs-sans-dossier-view.jsx"
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28h — FIX critique : message d'erreur exposant + diagnostics
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "FIX CRITIQUE — Bug : data null quand pas d'org → diagnostics manquants"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "FIX CRITIQUE — Bug trouvé : quand le user n'a pas d'organisation (me.organization=null), le code faisait setLoading(false) SANS appeler setData(). Donc data restait null et le message d'erreur affichait '—' à la place des infos du compte. Maintenant setData({ me, registration: null }) est appelé dans ce cas, pour pouvoir afficher : nom complet, email, ID du compte connecté + boutons 'Rafraîchir ma session' et 'Me reconnecter'. Testé E2E en preview avec un user test sans org : message d'erreur enrichi affiché correctement, lien admin fonctionne, reload → portail exposant complet visible (Dossier 3TBC, Convention, Guide, stepper 1-6)."
+
+  - task: "NEW UX — Self-heal boutons 'Rafraîchir ma session' + 'Me reconnecter'"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UX — Quand l'exposant voit 'Aucune organisation liée' : (1) Bloc diagnostic affichant nom + email + ID du compte connecté (sélectionnables/copiables pour transmettre à ARACOM). (2) Bouton 'Rafraîchir ma session' qui re-fetch /api/auth/me sans recharger la page (utile si admin vient de lier le compte). (3) Bouton 'Me reconnecter' qui clear localStorage + redirige vers /. Message explicatif clair : 'Si votre admin vient de lier votre compte, cliquez sur Rafraîchir'."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28h — FIX du message d'erreur exposant. Le user signalait que rien ne marchait en production malgré 2 tests. Investigation : bug trouvé dans load() — quand me.organization est null, setData() n'était jamais appelé donc data restait null. Mes diagnostics (email, ID) affichaient '—'. Fix : setData({ me, registration: null }) appelé même dans le cas no-org. Ajout de boutons 'Rafraîchir ma session' (re-fetch auth/me sans reload) et 'Me reconnecter' (clear localStorage + /). Le message est maintenant ACTIONNABLE pour l'utilisateur : il voit son email/ID, peut les donner à ARACOM, et après que l'admin l'a lié, il clique Rafraîchir pour voir son portail. Testé E2E en preview : user u-test-noorg → message diagnostic visible → admin lie via UI → user reload → portail 3TBC complet visible (Convention, Guide, stepper). Prêt pour Save to Github."
+
     stuck_count: 0
     priority: "critical"
     needs_retesting: false

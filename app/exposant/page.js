@@ -96,7 +96,14 @@ export default function ExposantPortal() {
     try {
       const me = await api('/api/auth/me');
       setUser(me.user);
-      if (!me.organization) { toast.error('Aucune organisation liée'); setLoading(false); return; }
+      // 🆕 SESSION 28h — Toujours sauvegarder `me` dans data pour permettre l'affichage
+      // des infos du compte connecté (email, ID) dans le message d'erreur.
+      if (!me.organization) {
+        toast.error('Aucune organisation liée à votre compte');
+        setData({ me, registration: null });
+        setLoading(false);
+        return;
+      }
       // 🆕 MULTI-SITES : charger toutes les registrations de l'organisation
       const mySites = await api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(me.organization.id)}`).catch(() => []);
       if (!Array.isArray(mySites) || mySites.length === 0) { setData({ me, registration: null }); setLoading(false); return; }
@@ -127,9 +134,25 @@ export default function ExposantPortal() {
   if (!data?.registration) {
     // 🆕 Distinguer les 2 causes possibles pour mieux orienter l'utilisateur
     const hasOrg = !!data?.me?.organization;
-    return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><Card><CardContent className="py-12 text-center">
+    const myEmail = data?.me?.user?.email || data?.me?.email;
+    const myName = data?.me?.user?.full_name || data?.me?.full_name;
+    const myId = data?.me?.user?.id || data?.me?.id;
+    const refreshSession = async () => {
+      try {
+        // Force un re-fetch de /api/auth/me et /api/exposant/my-sites
+        await load();
+        toast.success('Session rafraîchie');
+      } catch (e) { toast.error(e.message); }
+    };
+    const fullLogout = () => {
+      try {
+        localStorage.removeItem('fr26_session');
+        if (typeof window !== 'undefined') window.location.href = '/';
+      } catch {}
+    };
+    return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><Card><CardContent className="py-10 text-center">
       <Info className="w-12 h-12 mx-auto text-slate-400" />
-      <p className="mt-3 font-medium">Votre dossier n&apos;a pas encore été initialisé</p>
+      <p className="mt-3 font-medium text-slate-900">Votre dossier n&apos;a pas encore été initialisé</p>
       {hasOrg ? (
         <>
           <p className="text-slate-500 text-sm mt-2">
@@ -142,12 +165,28 @@ export default function ExposantPortal() {
           <p className="text-slate-500 text-sm mt-2">
             Aucune organisation n&apos;est liée à votre compte.
           </p>
-          <p className="text-slate-500 text-xs mt-2">
-            Contactez ARACOM si vous pensez qu&apos;il s&apos;agit d&apos;une erreur — votre lien d&apos;accès est peut-être à régénérer.
+          <p className="text-slate-500 text-xs mt-2 max-w-md mx-auto">
+            Si votre admin vient de lier votre compte, cliquez sur <b>« Rafraîchir ma session »</b> ci-dessous.
+            Sinon, contactez ARACOM pour qu&apos;il lie votre compte à votre organisation.
           </p>
         </>
       )}
-      <p className="text-xs text-slate-400 mt-4">
+      {/* 🆕 SESSION 28h — Diagnostics du compte connecté + boutons d'action */}
+      <div className="mt-5 mx-auto max-w-md text-left bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1">
+        <div className="font-semibold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">🔍 Informations à donner à ARACOM</div>
+        <div><span className="text-slate-500">Compte connecté :</span> <b className="text-slate-900">{myName || '—'}</b></div>
+        <div><span className="text-slate-500">Email :</span> <b className="text-slate-900 select-all">{myEmail || '—'}</b></div>
+        <div><span className="text-slate-500">Identifiant :</span> <span className="font-mono text-slate-700 select-all">{myId || '—'}</span></div>
+      </div>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        <Button size="sm" variant="outline" onClick={refreshSession} className="gap-1.5">
+          🔄 Rafraîchir ma session
+        </Button>
+        <Button size="sm" variant="outline" onClick={fullLogout} className="gap-1.5">
+          ↩️ Me reconnecter
+        </Button>
+      </div>
+      <p className="text-xs text-slate-400 mt-5">
         📧 contact@aracom.pf
       </p>
     </CardContent></Card></Shell>;
