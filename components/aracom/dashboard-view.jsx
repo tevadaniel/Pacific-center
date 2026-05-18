@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Sparkles, RefreshCw, Users, Layers3, MapPin, Wallet, Calendar, Mail, AlertCircle, CheckCircle2, Clock, Layers, FileText, Activity, ChartBar, Eye, Send, ChevronRight, ChevronUp, ChevronDown, BellRing, Search } from 'lucide-react';
+import { Sparkles, RefreshCw, Users, Layers3, MapPin, Wallet, Calendar, Mail, AlertCircle, CheckCircle2, Clock, Layers, FileText, Activity, ChartBar, Eye, Send, ChevronRight, ChevronUp, ChevronDown, BellRing, Search, Lock, AlertTriangle, Download, FileCheck2, ThumbsUp, TrendingUp, Zap } from 'lucide-react';
+import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
 import { api } from '@/lib/auth-client';
 import { KpiCard } from '@/components/app-shell';
@@ -10,8 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { ExposantLink } from './exposant-panel-context';
+import { ExposantLink, useExposantPanel } from './exposant-panel-context';
 
 /**
  * DASHBOARD VIEW — Vue principale Aracom (KPIs, alertes, anomalies, validations).
@@ -410,3 +412,196 @@ function AracomTools({ onRefresh }) {
 function Stat({ label, value, c }) {
   return <div><div className={`text-xl font-bold ${c}`}>{value}</div><div className="text-[11px] text-slate-500 uppercase tracking-wider">{label}</div></div>;
 }
+
+// =====================================================================
+// PendingValidationsCard — affichée dans le dashboard pour relayer les demandes en attente
+// =====================================================================
+function PendingValidationsCard({ onGoto }) {
+  const [items, setItems] = useState(null);
+  const load = async () => {
+    try {
+      const list = await api('/api/validation-requests');
+      const pending = list.filter(r => r.status === 'en_attente' || r.status === 'rdv_fixe');
+      setItems(pending);
+    } catch {/* ignore */}
+  };
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  if (!items || items.length === 0) return null;
+  const enAttente = items.filter(r => r.status === 'en_attente');
+  const rdvFixe = items.filter(r => r.status === 'rdv_fixe');
+  return (
+    <Card className="border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="text-3xl">🔔</div>
+          <div className="flex-1">
+            <h3 className="font-bold text-violet-900 text-lg">Demandes de validation à traiter</h3>
+            <p className="text-sm text-violet-800">{enAttente.length} en attente · {rdvFixe.length} avec RDV fixé. Action requise pour verrouiller les inscriptions.</p>
+          </div>
+          <Button size="sm" onClick={() => onGoto?.('validations')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Lock className="w-4 h-4" /> Ouvrir l&apos;onglet Validations</Button>
+        </div>
+        <div className="grid md:grid-cols-2 gap-2">
+          {items.slice(0, 4).map(r => (
+            <div key={r.id} className="bg-white rounded-md border border-violet-200 p-2 flex items-center gap-2">
+              <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" /><ExposantLink id={r.registration_id || r.id}>{r.organization?.name || '—'}</ExposantLink></div>
+                <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
+                {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
+              </div>
+            </div>
+          ))}
+          {items.length > 4 && <div className="text-xs text-slate-500 text-center md:col-span-2">+ {items.length - 4} autre(s) demande(s)…</div>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =====================================================================
+// DisciplinesCard — graphique horizontal des disciplines + filtre par site
+// =====================================================================
+function DisciplinesCard({ analytics }) {
+  const [selectedSite, setSelectedSite] = useState('all');
+  const [showMultiList, setShowMultiList] = useState(false);
+
+  const data = useMemo(() => {
+    if (selectedSite === 'all') {
+      return {
+        list: analytics.disciplines || [],
+        total: analytics.total_organizations || 0,
+        multiSites: analytics.multi_site_orgs_count || 0,
+        multiOrgs: analytics.multi_site_orgs_list || [],
+        label: 'Tous sites confondus',
+      };
+    }
+    const site = analytics.disciplines_by_site?.[selectedSite];
+    if (!site) return { list: [], total: 0, multiSites: 0, multiOrgs: [], label: '—' };
+    const orgsMap = new Map();
+    (site.disciplines || []).forEach(d => {
+      (d.multi_site_orgs || []).forEach(o => {
+        if (!orgsMap.has(o.id)) orgsMap.set(o.id, { ...o, discipline: d.name });
+      });
+    });
+    return {
+      list: site.disciplines,
+      total: site.total_orgs,
+      multiSites: orgsMap.size,
+      multiOrgs: Array.from(orgsMap.values()),
+      label: site.venue_name,
+    };
+  }, [analytics, selectedSite]);
+
+  const sites = analytics.sites_list || [];
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0].payload;
+    return (
+      <div className="bg-white border border-violet-200 rounded-md p-3 shadow-lg text-xs max-w-xs">
+        <div className="font-bold text-slate-800">{d.name}</div>
+        <div className="mt-1">
+          <b>{d.count}</b> exposant{d.count > 1 ? 's' : ''}
+        </div>
+        {d.multi_site_count > 0 && (
+          <div className="mt-1 text-orange-700">
+            <div className="flex items-center gap-1 font-semibold">🔄 {d.multi_site_count} sur plusieurs sites :</div>
+            <ul className="mt-1 ml-3 list-disc text-orange-900 space-y-0.5">
+              {(d.multi_site_orgs || []).slice(0, 5).map(o => (
+                <li key={o.id}><b>{o.name}</b> <span className="text-orange-600 text-[10px]">({o.sites?.join(' · ') || '—'})</span></li>
+              ))}
+              {(d.multi_site_orgs?.length || 0) > 5 && <li className="italic text-orange-600">+ {d.multi_site_orgs.length - 5} autres…</li>}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="w-4 h-4 text-violet-600" /> Top disciplines
+            </CardTitle>
+            <p className="text-[11px] text-slate-500 mt-0.5">{data.label} · {data.total} exposant{data.total > 1 ? 's' : ''}</p>
+          </div>
+          <Select value={selectedSite} onValueChange={setSelectedSite}>
+            <SelectTrigger className="w-44 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">🌐 Tous les sites</SelectItem>
+              {sites.map(s => (
+                <SelectItem key={s.id} value={s.id}>📍 {s.name} ({s.count})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {data.multiSites > 0 && (
+          <button
+            onClick={() => setShowMultiList(s => !s)}
+            className="w-full text-left text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-md p-2 mt-2 flex items-center gap-2 transition"
+          >
+            <span className="text-lg">🔄</span>
+            <span className="flex-1"><b>{data.multiSites}</b> exposant{data.multiSites > 1 ? 's' : ''} {selectedSite === 'all' ? 'inscrit(s) sur plusieurs sites' : 'aussi présent(s) sur un autre site'}</span>
+            <span className="text-orange-600 underline-offset-2 underline">{showMultiList ? 'Masquer' : 'Voir la liste'}</span>
+          </button>
+        )}
+        {showMultiList && data.multiOrgs.length > 0 && (
+          <div className="bg-orange-50/40 border border-orange-200 rounded-md p-3 mt-2 max-h-56 overflow-y-auto">
+            <div className="text-[10px] uppercase tracking-wider text-orange-700 font-semibold mb-2">Associations sur plusieurs sites</div>
+            <div className="space-y-1.5">
+              {data.multiOrgs.map(o => (
+                <div key={o.id} className="flex items-center justify-between gap-2 text-xs p-1.5 rounded hover:bg-white transition">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-800 truncate">{o.name}</div>
+                    {o.discipline && <div className="text-[10px] text-slate-500">{o.discipline}</div>}
+                  </div>
+                  <div className="flex flex-wrap gap-1 justify-end max-w-[55%]">
+                    {(o.sites || []).map(s => (
+                      <Badge key={s} variant="outline" className="text-[10px] bg-white border-orange-300 text-orange-700">📍 {s}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent>
+        {data.list.length === 0 ? (
+          <div className="text-sm text-slate-500 italic text-center py-8">Aucune donnée pour ce site.</div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data.list} layout="vertical" margin={{ left: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mt-3 pt-3 border-t border-slate-100 max-h-32 overflow-y-auto space-y-1">
+              {data.list.map(d => (
+                <div key={d.name} className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-slate-50">
+                  <span className="text-slate-700 truncate flex-1">{d.name}</span>
+                  <div className="flex items-center gap-2">
+                    {d.multi_site_count > 0 && (
+                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] gap-1" title={(d.multi_site_orgs || []).map(o => `${o.name} (${o.sites?.join(', ') || ''})`).join('\n')}>
+                        🔄 {d.multi_site_count}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] font-bold">{d.count}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+

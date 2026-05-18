@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Sparkles, Star, Users, AlertCircle, CheckCircle2, FileText } from 'lucide-react';
+import { Sparkles, Star, Users, AlertCircle, CheckCircle2, FileText, MessageCircle, ThumbsUp } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ExposantLink, useExposantPanel } from './exposant-panel-context';
 
 /**
  * SATISFACTION ADMIN VIEW — Vue admin du module de satisfaction.
@@ -277,7 +278,7 @@ function RatingInline({ n }) {
 }
 
 // ---------- ConfirmedExposantsPanel: liste des exposants confirmés + caution à jour pour un site ----------
-function ConfirmedExposantsPanel({ stands, venue }) {
+export function ConfirmedExposantsPanel({ stands, venue }) {
   const { open: openExposant } = useExposantPanel();
   if (!venue) return null;
 

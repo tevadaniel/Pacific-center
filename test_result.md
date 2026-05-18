@@ -1721,6 +1721,29 @@ agent_communication:
     file: "components/aracom/choix-forum-summary.jsx + app/aracom/page.js + app/api/[[...path]]/route.js"
     stuck_count: 0
     priority: "medium"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28b — FIX critique de régression d'imports (refactoring Phase 5)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "FIX — Imports manquants dans composants extraits (dashboard-view, satisfaction-admin-view)"
+    implemented: true
+    working: true
+    file: "components/aracom/dashboard-view.jsx + components/aracom/satisfaction-admin-view.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "FIX CRITIQUE — Au chargement de /aracom, ReferenceError: useExposantPanel is not defined (dashboard-view.jsx) bloquait toute l'app. Suite d'erreurs en cascade après chaque fix : (1) useExposantPanel manquant → ajouté dans imports dashboard-view + satisfaction-admin-view. (2) PendingValidationsCard défini dans aracom/page.js mais utilisé dans dashboard-view.jsx → fonction déplacée dans dashboard-view.jsx. (3) Icons manquants (Lock, AlertTriangle, Download, FileCheck2, ThumbsUp, TrendingUp, Zap, MessageCircle) → ajoutés. (4) recharts manquant (AreaChart, BarChart, Pie, Cell, etc.) → import ajouté. (5) Progress manquant → ajouté. (6) DisciplinesCard défini dans aracom/page.js mais utilisé dans dashboard-view → déplacé dans dashboard-view + useMemo importé. (7) ConfirmedExposantsPanel défini dans satisfaction-admin-view mais utilisé dans aracom/page.js → exporté + importé. (8) VIGILANCE_STYLE référencé par AiInsightCard dans aracom/page.js → déclaré localement dans aracom/page.js. (9) React import manquant pour <React.Fragment> dans satisfaction-admin-view. RESULTAT : /aracom dashboard charge correctement, fiche exposant ouvre correctement avec résumé Choix Forum + bouton 'Débloquer candidature' visible quand candidature_locked=true. Testé visuellement : verrouillage + déblocage fonctionnent en E2E (toast 'Candidature débloquée ✓', badge passe de verrouillée à modifiable)."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28b — FIX URGENT régression imports. L'utilisateur a signalé que 'ça ne marche pas en totalité' — investigation a révélé que le refactoring Phase 5 avait laissé plusieurs références manquantes dans les composants extraits (notamment dashboard-view.jsx et satisfaction-admin-view.jsx). 9 fixes appliqués : imports React/icons/recharts/Progress + déplacement de fonctions helper (PendingValidationsCard, DisciplinesCard) vers leur view extraite + export de ConfirmedExposantsPanel + définition locale de VIGILANCE_STYLE. Toute l'app charge maintenant correctement. UI testé visuellement : Résumé Choix Forum visible avec stand A-C02 + animations détaillées, bouton 'Débloquer candidature' visible/cliquable, toast de succès au déblocage, badges 'Candidature verrouillée' → 'Modifiable' dynamiques. Lint clean."
+
+
     needs_retesting: false
     status_history:
       - working: "NA"

@@ -50,7 +50,7 @@ import MailingView from '@/components/aracom/mailing-view';
 import BilansView from '@/components/aracom/bilans-view';
 import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
-import SatisfactionAdminView from '@/components/aracom/satisfaction-admin-view';
+import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
@@ -2121,6 +2121,13 @@ function NewSlotForm({ registrationId, venueId, onDone }) {
 
 
 // ---------- SatisfactionAdminView ----------
+const VIGILANCE_STYLE = {
+  low:    { bg: 'bg-emerald-50 border-emerald-300', label: '🟢 Fiable',         text: 'text-emerald-900' },
+  medium: { bg: 'bg-amber-50 border-amber-300',     label: '🟡 À surveiller',   text: 'text-amber-900' },
+  high:   { bg: 'bg-rose-50 border-rose-300',       label: '🔴 Vigilance',      text: 'text-rose-900' },
+  new:    { bg: 'bg-violet-50 border-violet-300',   label: '🆕 Nouveau dossier', text: 'text-violet-900' },
+};
+
 function AiInsightCard({ registration, onRefresh }) {
   const [busy, setBusy] = useState(false);
   if (!registration) return null;
