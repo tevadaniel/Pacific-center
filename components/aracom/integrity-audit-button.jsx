@@ -22,14 +22,19 @@ export default function IntegrityAuditButton() {
   const run = async () => {
     setRunning(true);
     try {
-      const r = await api('/api/maintenance/audit', { method: 'POST', body: JSON.stringify({ heal: true }) });
-      setLastReport(r);
-      if (r.total_healed > 0) {
-        toast.success(`🛡️ ${r.total_healed} incohérence(s) réparée(s) automatiquement`);
-      } else if (r.total_issues > 0) {
-        toast.warning(`${r.total_issues} alerte(s) — ${r.total_warnings} nécessitent une action manuelle`);
+      // Étape 1 : audit (heal=true par défaut)
+      const audit = await api('/api/maintenance/audit', { method: 'POST', body: JSON.stringify({ heal: true }) });
+      // Étape 2 : cleanup (déduplique users, vide corbeille, purge tokens anciens)
+      const cleanup = await api('/api/maintenance/cleanup', { method: 'POST', body: JSON.stringify({}) });
+      const totalCleaned = (cleanup.actions || []).reduce((acc, a) => acc + (a.count || 0), 0);
+      const totalHealed = audit.total_healed || 0;
+      setLastReport(audit);
+      if (totalHealed > 0 || totalCleaned > 0) {
+        toast.success(`🛡️ ${totalHealed} cohérence(s) réparée(s) · 🧹 ${totalCleaned} entrée(s) nettoyée(s)`);
+      } else if ((audit.total_issues || 0) > 0) {
+        toast.warning(`${audit.total_issues} alerte(s) — review manuelle`);
       } else {
-        toast.success('✅ Tout est cohérent — aucune réparation nécessaire');
+        toast.success('✅ Base 100% propre — rien à nettoyer');
       }
     } catch (e) {
       toast.error('Erreur audit : ' + e.message);

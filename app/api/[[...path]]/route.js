@@ -272,6 +272,50 @@ function sanitizeEmailHtml(html) {
 }
 
 /**
+ * 🗑️ HARD-DELETE complet d'une organisation et de TOUTES ses données liées.
+ * Aucune trace : org + users + tokens + registrations + docs + anims + deposits + tasks + emails.
+ * Utilisée par /api/maintenance/cleanup (vide la corbeille) et /api/organizations/:id/hard-delete.
+ */
+async function hardDeleteOrgCascade(db, organizationId) {
+  if (!organizationId) return { ok: false, error: 'org_id_required' };
+  const org = await db.collection('organizations').findOne({ id: organizationId });
+  const counts = {};
+  // Find all related regs first (for cascade)
+  const regs = await db.collection('registrations').find({ organization_id: organizationId }, { projection: { id: 1 } }).toArray();
+  const regIds = regs.map((r) => r.id);
+  // Cascade par registration_id
+  const regBasedCols = [
+    'stand_assignments', 'animation_slots', 'validation_requests', 'modification_tokens',
+    'registration_documents', 'deposit_transactions', 'caution_appointments',
+    'attendance_sessions', 'attendance_events', 'registration_anomalies',
+    'field_comments', 'field_media', 'tasks_or_followups',
+  ];
+  if (regIds.length > 0) {
+    for (const col of regBasedCols) {
+      const r = await db.collection(col).deleteMany({ registration_id: { $in: regIds } });
+      if (r.deletedCount > 0) counts[col] = r.deletedCount;
+    }
+    const rr = await db.collection('registrations').deleteMany({ id: { $in: regIds } });
+    counts.registrations = rr.deletedCount;
+  }
+  // Cascade par organization_id
+  const orgBasedCols = ['access_tokens', 'users', 'organization_contacts', 'email_messages', 'satisfaction_surveys'];
+  for (const col of orgBasedCols) {
+    const r = await db.collection(col).deleteMany({ organization_id: organizationId });
+    if (r.deletedCount > 0) counts[col] = r.deletedCount;
+  }
+  // Si l'email de l'org existe, nettoie aussi les users liés par email
+  if (org?.main_email) {
+    const r = await db.collection('users').deleteMany({ email: org.main_email.toLowerCase().trim() });
+    if (r.deletedCount > 0) counts.users_by_email = r.deletedCount;
+  }
+  // Finalement, l'org elle-même
+  const o = await db.collection('organizations').deleteOne({ id: organizationId });
+  counts.organization = o.deletedCount;
+  return { ok: true, org_id: organizationId, org_name: org?.name, cascaded: counts };
+}
+
+/**
  * Get-or-create a permanent access magic link for an exposant.
  * Returns the full URL (https://.../access/TOKEN).
  * Reuses the most recent non-revoked token if it exists, otherwise creates one.
@@ -2533,6 +2577,80 @@ export async function POST(request, { params }) {
         console.error('[maintenance/audit]', e);
         return err('Erreur audit: ' + e.message, 500);
       }
+    }
+
+    // ─── POST /api/maintenance/cleanup — Nettoyage profond : dédupliquer users, vider corbeille, etc.
+    if (route === 'maintenance/cleanup') {
+      const opts = body || {};
+      const report = { started_at: new Date(), actions: [] };
+
+      // ─── A. Déduplication des users avec même email ────────────────
+      const allUsers = await db.collection('users').find({}, { projection: { id:1, email:1, organization_id:1, role_code:1, created_at:1, auto_healed_at:1, passwordless:1 } }).toArray();
+      const byEmail = new Map();
+      for (const u of allUsers) {
+        const key = (u.email || '').toLowerCase().trim();
+        if (!key) continue;
+        if (!byEmail.has(key)) byEmail.set(key, []);
+        byEmail.get(key).push(u);
+      }
+      let dedupedUsers = 0;
+      for (const [email, users] of byEmail.entries()) {
+        if (users.length < 2) continue;
+        // Garde le plus ancien (généralement le legit), supprime les doublons auto-healed
+        users.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        const keep = users[0];
+        for (const dup of users.slice(1)) {
+          // Re-pointe access_tokens du dup vers le keep
+          await db.collection('access_tokens').updateMany({ user_id: dup.id }, { $set: { user_id: keep.id } });
+          await db.collection('users').deleteOne({ id: dup.id });
+          dedupedUsers++;
+        }
+      }
+      report.actions.push({ type: 'deduplicate_users', count: dedupedUsers });
+
+      // ─── B. Vide la corbeille (delete-full des orgs archivées) ────
+      if (opts.empty_trash !== false) {
+        const trashed = await db.collection('organizations').find({ archived_at: { $ne: null } }, { projection: { id: 1 } }).toArray();
+        let trashCount = 0;
+        for (const o of trashed) {
+          // Cascade-delete via le helper
+          await hardDeleteOrgCascade(db, o.id);
+          trashCount++;
+        }
+        report.actions.push({ type: 'empty_trash', count: trashCount });
+      }
+
+      // ─── C. Supprime les auto-users @auto.aracom.pf qui n'ont JAMAIS été utilisés ───
+      if (opts.clean_unused_auto_users !== false) {
+        const tokens = await db.collection('access_tokens').find({}, { projection: { user_id: 1, last_used_at: 1 } }).toArray();
+        const usedUserIds = new Set(tokens.filter(t => t.last_used_at).map(t => t.user_id).filter(Boolean));
+        const autoUsers = await db.collection('users').find({ email: /@auto\.aracom\.pf$/i, passwordless: true }).toArray();
+        let cleaned = 0;
+        for (const u of autoUsers) {
+          if (!usedUserIds.has(u.id)) {
+            // Pas encore utilisé → safe à supprimer (sera recréé au besoin)
+            await db.collection('users').deleteOne({ id: u.id });
+            cleaned++;
+          }
+        }
+        report.actions.push({ type: 'clean_unused_auto_users', count: cleaned });
+      }
+
+      // ─── D. Supprime les tokens révoqués depuis plus de 30 jours ───
+      if (opts.purge_old_tokens !== false) {
+        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const r = await db.collection('access_tokens').deleteMany({ revoked_at: { $lt: cutoff } });
+        report.actions.push({ type: 'purge_old_revoked_tokens', count: r.deletedCount });
+      }
+
+      // ─── E. Audit pour s'assurer que le reste est cohérent ─────────
+      const { runDataIntegrityCheck } = await import('@/lib/data-integrity');
+      const audit = await runDataIntegrityCheck(db, { heal: true });
+      report.actions.push({ type: 'integrity_check', issues: audit.total_issues, healed: audit.total_healed });
+
+      report.finished_at = new Date();
+      report.duration_ms = report.finished_at - report.started_at;
+      return json(report);
     }
 
     // ─── POST /api/registration-documents — Upload un document depuis la fiche (cockpit ou portail)
@@ -8428,9 +8546,40 @@ export async function DELETE(request, { params }) {
     const db = await getDb();
     const p = params.path || [];
     const route = p.join('/');
+    // 🗑️ DELETE /api/organizations/:id — HARD-DELETE cascade (org + users + tokens + regs + docs + ...)
+    if (route.startsWith('organizations/')) {
+      const orgId = p[1];
+      const r = await hardDeleteOrgCascade(db, orgId);
+      await logActivity(db, getUserContext(request).userId, 'organization', orgId, 'hard_delete', { org_name: r.org_name }, { cascaded: r.cascaded });
+      return json(r);
+    }
     if (route.startsWith('registrations/')) {
-      await db.collection('registrations').deleteOne({ id: p[1] });
-      return json({ ok: true });
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Cascade par registration_id (ne touche pas l'org)
+      const regBasedCols = [
+        'stand_assignments', 'animation_slots', 'validation_requests', 'modification_tokens',
+        'registration_documents', 'deposit_transactions', 'caution_appointments',
+        'attendance_sessions', 'attendance_events', 'registration_anomalies',
+        'field_comments', 'field_media', 'tasks_or_followups',
+      ];
+      const counts = {};
+      for (const c of regBasedCols) {
+        const rr = await db.collection(c).deleteMany({ registration_id: regId });
+        if (rr.deletedCount > 0) counts[c] = rr.deletedCount;
+      }
+      await db.collection('registrations').deleteOne({ id: regId });
+      // Si l'org n'a plus aucune reg, on supprime aussi l'org (hard-cascade)
+      if (reg.organization_id) {
+        const otherRegs = await db.collection('registrations').countDocuments({ organization_id: reg.organization_id });
+        if (otherRegs === 0) {
+          const orgResult = await hardDeleteOrgCascade(db, reg.organization_id);
+          counts.org_also_deleted = orgResult.cascaded;
+        }
+      }
+      await logActivity(db, getUserContext(request).userId, 'registration', regId, 'hard_delete', {}, { cascaded: counts });
+      return json({ ok: true, cascaded: counts });
     }
     if (route.startsWith('documents/')) {
       await db.collection('registration_documents').deleteOne({ id: p[1] });
