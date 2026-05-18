@@ -974,12 +974,19 @@ export async function GET(request, { params }) {
       for (const s of slots) { (slotsByReg[s.registration_id] = slotsByReg[s.registration_id] || []).push(s); }
       const deposits = await db.collection('deposit_transactions').find({ registration_id: { $in: regs.map(r => r.id) } }).toArray();
       const depByReg = Object.fromEntries(deposits.map(d => [d.registration_id, d]));
+      // 🆕 SESSION 28l — Statut de la demande de validation par site
+      const validationReqs = await db.collection('validation_requests').find({
+        registration_id: { $in: regs.map(r => r.id) },
+        status: { $in: ['en_attente', 'rdv_fixe', 'verrouille'] },
+      }).toArray();
+      const valReqByReg = Object.fromEntries(validationReqs.map(v => [v.registration_id, v]));
       const out = regs.map(r => {
         const v = vById[r.venue_id];
         const regSlots = slotsByReg[r.id] || [];
         const has_vendredi = regSlots.some(s => s.day_label === 'vendredi');
         const has_samedi = regSlots.some(s => s.day_label === 'samedi');
         delete r._id;
+        const valReq = valReqByReg[r.id] || null;
         return {
           ...r,
           is_locked: r.is_locked ?? false,
@@ -991,6 +998,9 @@ export async function GET(request, { params }) {
           has_vendredi_animation: has_vendredi,
           has_samedi_animation: has_samedi,
           is_complete: has_vendredi && has_samedi && !!r.venue_id && !!r.stand_code,
+          // 🆕 SESSION 28l — Statut de soumission par-site
+          validation_request: valReq ? { id: valReq.id, status: valReq.status, requested_at: valReq.created_at, rdv_date: valReq.rdv_date || null } : null,
+          can_submit: has_vendredi && has_samedi && !!r.venue_id && !!r.stand_code && !valReq && !r.candidature_locked && !r.is_locked,
         };
       }).sort((a, b) => (a.site_priority || 99) - (b.site_priority || 99));
       return json(out);

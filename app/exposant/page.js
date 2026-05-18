@@ -23,7 +23,7 @@ import { toast } from 'sonner';
 import {
   Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
   FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft,
-  ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck,
+  ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck, Loader2,
 } from 'lucide-react';
 import {
   DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
@@ -567,6 +567,25 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
   const [showAdd, setShowAdd] = useState(false);
   const [addVenueId, setAddVenueId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [busySubmit, setBusySubmit] = useState(null); // 🆕 SESSION 28l : id du site en cours de soumission
+
+  // 🆕 SESSION 28l — Soumettre UN SEUL site (validation_request individuel)
+  const submitSingleSite = async (site) => {
+    const msg = `Soumettre la candidature pour le site « ${site.venue?.name} » (stand ${site.stand_code}) ?\n\n` +
+      `Ce site sera verrouillé et ARACOM vous contactera pour fixer un RDV de remise de caution (20 000 XPF).\n` +
+      `Les autres sites restent modifiables.`;
+    if (!window.confirm(msg)) return;
+    setBusySubmit(site.id);
+    try {
+      await api(`/api/registrations/${site.id}/request-validation`, {
+        method: 'POST',
+        body: JSON.stringify({ preferred_payment: 'cheque', rdv_proposal: '', notes: '' }),
+      });
+      toast.success(`✅ Candidature soumise pour ${site.venue?.name}`);
+      onRefresh();
+    } catch (e) { toast.error(`❌ ${e.message}`); }
+    finally { setBusySubmit(null); }
+  };
 
   useEffect(() => {
     api('/api/venues').then(async (vs) => {
@@ -674,6 +693,9 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
         {allSites.map((s) => {
           const isActive = s.id === currentRegId;
           const isLocked = s.is_locked || s.is_deposit_received || s.candidature_locked;
+          // 🆕 SESSION 28l — Statut soumission par site
+          const valReq = s.validation_request;
+          const canSubmit = !!s.can_submit;
           return (
             <div key={s.id} className={`rounded-md border-2 p-3 transition ${isActive ? 'bg-white border-blue-500 shadow-sm' : 'bg-white/50 border-slate-200 hover:border-blue-300'}`}>
               <div className="flex items-center gap-3 flex-wrap">
@@ -695,7 +717,10 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                       {s.venue?.name || '— site à choisir —'}
                       {isActive && <Badge className="bg-blue-600 text-white text-[10px]">Actif</Badge>}
                       {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
-                      {s.is_complete && !isLocked && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
+                      {s.is_complete && !isLocked && !valReq && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
+                      {/* 🆕 SESSION 28l — Badge statut soumission */}
+                      {valReq?.status === 'en_attente' && <Badge className="bg-amber-500 text-white text-[10px]">⏳ Soumis · en attente</Badge>}
+                      {valReq?.status === 'rdv_fixe' && <Badge className="bg-blue-500 text-white text-[10px]">📅 RDV fixé</Badge>}
                     </div>
                     <div className="text-xs text-slate-600 mt-0.5 flex flex-wrap gap-x-3">
                       <span>Stand : <b>{s.stand_code || '— à réserver —'}</b></span>
@@ -704,13 +729,25 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-1 flex-wrap">
+                <div className="flex gap-1 flex-wrap items-center">
                   {!isActive && (
                     <Button size="sm" variant="outline" onClick={() => switchTo(s.id)} className="text-xs gap-1 h-8">
                       → Travailler sur ce site
                     </Button>
                   )}
-                  {!isLocked && allSites.length > 1 && (
+                  {/* 🆕 SESSION 28l — Bouton "Soumettre ce site" par-site */}
+                  {canSubmit && (
+                    <Button
+                      size="sm"
+                      onClick={() => submitSingleSite(s)}
+                      disabled={busySubmit === s.id}
+                      className="text-xs gap-1 h-8 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white"
+                    >
+                      {busySubmit === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
+                      Soumettre ce site
+                    </Button>
+                  )}
+                  {!isLocked && !valReq && allSites.length > 1 && (
                     <Button size="sm" variant="outline" onClick={() => removeSite(s.id, s.venue?.name || 'ce site')} className="text-xs gap-1 h-8 border-red-300 text-red-700 hover:bg-red-50">
                       Retirer
                     </Button>

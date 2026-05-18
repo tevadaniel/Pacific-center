@@ -628,11 +628,24 @@ frontend:
         agent: "testing"
         comment: "✅ TESTÉ EXHAUSTIVEMENT - 3/3 TESTS PASSÉS (100%). SESSION 28i auto-repair endpoint pour créer en masse les dossiers manquants testé avec succès. TEST 1 (Sans admin): POST /api/admin/auto-repair/initialize-all-missing-registrations avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 2 (HAPPY PATH): Setup: 4 orgs de test créées (org-test-r1 sans registration, org-test-r2 avec registration existante, org-test-r3 archivée, org-test-r4 mailing_only). Step A: POST avec admin → 200 {ok:true, action:'auto_repair_done', created:1, already_ok:67, errors:[]} ✅. Step B: Vérification DB - org-test-r1: 1 registration créée ✅, org-test-r2: 1 registration (pas de duplication) ✅, org-test-r3: 0 registration (archivée → skippée) ✅, org-test-r4: 0 registration (mailing_only → skippée) ✅. Step C: Vérification détails registration org-test-r1 - status='a_confirmer' ✅, source='auto_repair_bulk' ✅, candidature_locked=false ✅, edition_id='edition-2026' ✅. Step D: Idempotence - Second appel → 200 {created:0, already_ok:68} ✅, aucune duplication ✅. TEST 3 (Régression): GET /api/dashboard/kpis → 200 OK ✅, GET /api/stats/public → 200 OK ✅, POST /api/admin/registrations/:id/unlock-candidature → 200 OK ✅. CONCLUSION: Endpoint auto-repair 100% fonctionnel. Crée correctement les registrations manquantes, skip les orgs archivées/mailing_only, idempotent, aucune régression détectée."
 
+  - task: "SESSION 28l — Per-site submission and my-sites endpoint enrichment"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 3/3 TESTS PASSÉS (100%). SESSION 28l per-site submission and my-sites enrichment tested successfully. TEST 1 (GET my-sites enrichment): GET /api/exposant/my-sites?organization_id=org-3 (Ecole Judo de Polynésie) avec admin headers → 200 OK avec array de 2 sites. Chaque site contient les nouveaux champs: validation_request (object {id, status, requested_at, rdv_date} ou null) ✅, can_submit (boolean) ✅. Site reg-faaa-F-A03 (déjà soumis): validation_request non-null avec status='en_attente', can_submit=false ✅. Site reg-arue-A-C08 (complet mais non soumis): validation_request=null, can_submit=true (stand + 2 animations présents) ✅. TEST 2 (POST request-validation per site): POST /api/registrations/reg-arue-A-C08/request-validation avec body {preferred_payment:'cheque', rdv_proposal:'', notes:''} → 200 OK avec {ok:true, validation_request_id:<uuid>} ✅. Vérification GET my-sites après soumission: seul reg-arue-A-C08 a maintenant validation_request défini, can_submit=false, candidature_locked=true ✅. Autre site (reg-faaa-F-A03) inchangé ✅. TEST 3 (Cleanup unlock): POST /api/admin/registrations/reg-arue-A-C08/unlock-candidature avec admin headers → 200 OK avec {ok:true, action:'candidature_unlocked'} ✅. Vérification GET registration: candidature_locked=false/null (unlocked) ✅. Validation_requests avec status 'en_attente' correctement annulées ✅. CONCLUSION: Tous les endpoints SESSION 28l fonctionnent parfaitement. Per-site submission permet à un exposant multi-sites de soumettre chaque site indépendamment. Endpoint my-sites enrichi avec validation_request et can_submit pour afficher l'état de soumission par site. Feature 100% opérationnelle."
+
+
 
 metadata:
   created_by: "main_agent"
-  version: "2.7"
-  test_sequence: 8
+  version: "2.8"
+  test_sequence: 9
   run_ui: false
 
 test_plan:
@@ -646,6 +659,8 @@ agent_communication:
     message: "SESSION 28g testing completed successfully. All 8 tests passed (100%). Both endpoints (GET /api/admin/users-without-org and POST /api/admin/users/:userId/link-organization) are fully functional. Permissions, validations, happy path, and re-linking all working correctly. Feature is production-ready."
   - agent: "testing"
     message: "SESSION 28i testing completed successfully. All 3 tests passed (100%). POST /api/admin/auto-repair/initialize-all-missing-registrations endpoint is fully functional. Tested: (1) Permission check (403 without admin) ✅, (2) Happy path with 4 test orgs - creates missing registrations, skips archived/mailing_only orgs, idempotent ✅, (3) Regression tests - dashboard/kpis, stats/public, unlock-candidature all working ✅. Feature creates registrations with correct fields (status='a_confirmer', source='auto_repair_bulk', candidature_locked=false, edition_id='edition-2026'). No regressions detected. Feature is production-ready."
+  - agent: "testing"
+    message: "SESSION 28l testing completed successfully. All 3 tests passed (100%). Per-site submission and my-sites endpoint enrichment fully functional. Test 1: GET /api/exposant/my-sites?organization_id=org-3 returns 2 sites with validation_request (object or null) and can_submit (boolean) fields correctly populated. Test 2: POST /api/registrations/:id/request-validation creates validation request, sets candidature_locked=true, only affects the submitted site (other sites unchanged). Test 3: POST /api/admin/registrations/:id/unlock-candidature successfully unlocks candidature and cancels pending validation requests. Feature enables multi-site exposants to submit each site independently. Production-ready."
 
 frontend:
   - task: "SESSION 28 UI — Résumé Choix Forum + Débloquer candidature + Exposant portal flow"
