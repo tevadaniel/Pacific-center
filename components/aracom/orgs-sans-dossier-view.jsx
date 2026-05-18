@@ -78,20 +78,17 @@ export default function OrgsSansDossierView() {
     if (!window.confirm(msg)) return;
     setBusy(org.id);
     try {
-      const res = await fetch(`/api/admin/organizations/${org.id}/initialize-registration`, {
+      // 🔧 Utilise le helper api() qui injecte automatiquement les headers d'auth (session)
+      const j = await api(`/api/admin/organizations/${org.id}/initialize-registration`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': 'aracom_admin',
-          'x-user-id': 'u-admin',
-        },
         body: JSON.stringify({ venue_id }),
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || 'Erreur initialisation');
-      toast.success(`✅ Dossier créé pour ${org.name} — id : ${j.registration_id.slice(0, 12)}…`);
+      toast.success(`✅ Dossier créé pour ${org.name} — id : ${(j.registration_id || '').slice(0, 12)}…`);
       load();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) {
+      toast.error(`❌ ${org.name} : ${e.message}`);
+      console.error('[initialize]', e);
+    }
     finally { setBusy(null); }
   };
 
@@ -115,21 +112,15 @@ export default function OrgsSansDossierView() {
       const org = targets[i];
       const venue_id = venueByOrg[org.id] || bulkDefaultVenue || null;
       try {
-        const res = await fetch(`/api/admin/organizations/${org.id}/initialize-registration`, {
+        await api(`/api/admin/organizations/${org.id}/initialize-registration`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-role': 'aracom_admin',
-            'x-user-id': 'u-admin',
-          },
           body: JSON.stringify({ venue_id }),
         });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error || 'Erreur');
         ok++;
       } catch (e) {
         ko++;
         failed.push(`${org.name}: ${e.message}`);
+        console.error('[bulk init]', org.name, e);
       }
       setBulkProgress({ done: i + 1, total: targets.length, ok, ko });
     }
