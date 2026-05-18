@@ -1856,3 +1856,48 @@ agent_communication:
     - agent: "testing"
       message: "SESSION 28d BACKEND TESTS COMPLETED — 5/5 tests passed (100%). New admin endpoint POST /api/admin/organizations/:id/initialize-registration is fully functional. This endpoint allows ARACOM admins to initialize a registration (dossier 2026) for organizations that exist in the database but have no active registration yet. Key features tested: (1) Admin-only access with proper 403 error for non-admin roles. (2) 404 error for non-existent organizations. (3) Happy path creates registration with venue_id (wizard_step=2) or without venue_id (wizard_step=1). (4) Idempotency check prevents duplicate registrations for same organization. (5) All registration fields correctly set (status='a_confirmer', source='admin_manual', candidature_locked=false, edition_id='edition-2026'). (6) Registration visible via GET /api/exposant/my-sites endpoint. Use case: When an organization is manually inserted into the database (via import or direct DB insert), this endpoint creates the missing registration link to Forum 2026, allowing the exposant to access their portal. No regressions detected. Ready for production."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28d — NEW : Initialiser dossier 2026 pour orgs sans registration
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Endpoint POST /api/admin/organizations/:id/initialize-registration"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW BACKEND — Endpoint admin pour créer une registration 2026 manquante pour une organisation existante. Cas d'usage : admin insère une org en base sans dossier 2026 (par import Excel ou direct DB) → l'exposant voit 'Dossier non initialisé'. Cet endpoint crée la registration en un clic. Body optionnel : { venue_id, status, source }. Vérifie l'absence de registration active existante (idempotence). Logue dans activity_logs (action='initialize_registration'). Testé 5/5 (auth 403, 404 org inexistante, happy path avec/sans venue, idempotence)."
+
+  - task: "NEW — Vue admin 'Orgs sans dossier' (orgs-sans-dossier-view.jsx)"
+    implemented: true
+    working: true
+    file: "components/aracom/orgs-sans-dossier-view.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UI — Nouveau composant OrgsSansDossierView (~190l) qui liste toutes les organisations sans registration 2026 active (calcul côté client en croisant /api/organizations et /api/exposants). Pour chaque org : nom, discipline, priorité, email/téléphone/contact + dropdown 'Site (optionnel)' + bouton 'Initialiser dossier'. Confirmation native avant action. Bannière jaune explicative en haut. Nouvel onglet '⚠ Orgs sans dossier' ajouté dans le menu 'Exposants' (Aracom). Testé visuellement : compteur correct, message d'état clair quand vide ('✨ Toutes les organisations actives ont un dossier 2026')."
+
+  - task: "UX — Message d'erreur amélioré sur portail exposant sans dossier"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "UX FIX — Le message générique 'Votre dossier n'a pas encore été initialisé / L'équipe ARACOM va bientôt vous contacter' a été remplacé par 2 messages distincts selon le cas : (1) Si org liée mais pas de registration : indique le nom de l'org et explique qu'ARACOM va créer le dossier. (2) Si aucune org : suggère que le lien d'accès est peut-être à régénérer. Email de contact 'contact@aracom.pf' ajouté en pied. Plus informatif et permet à l'utilisateur de comprendre quoi faire."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28d — RÉSOUDRE LE 'DOSSIER NON INITIALISÉ'. L'utilisateur a inscrit une organisation directement en base sans créer la registration associée, l'exposant ne peut donc pas accéder à son portail. Solution livrée : (1) Endpoint POST /api/admin/organizations/:id/initialize-registration (admin only, idempotent, optionnel venue_id) — testé 5/5. (2) Nouvelle vue admin 'Orgs sans dossier' dans le menu Exposants — affiche en clair toutes les orgs orphelines avec bouton 'Initialiser dossier'. (3) Message d'erreur amélioré côté exposant pour mieux comprendre le problème. À déployer sur production via 'Save to Github'."
+

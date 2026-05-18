@@ -38,24 +38,24 @@ export default function OrgsSansDossierView() {
   const load = async () => {
     setLoading(true);
     try {
-      const [allOrgs, allExp, allVenues] = await Promise.all([
+      const [allOrgs, allRegs, allVenues] = await Promise.all([
         api('/api/organizations'),
-        api('/api/exposants'),
+        api('/api/registrations'),
         api('/api/venues'),
       ]);
       setOrgs(allOrgs || []);
-      setExposants(allExp || []);
+      setExposants(allRegs || []);
       setVenues(allVenues || []);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
-  // Calcule les orgs sans dossier 2026 actif
+  // Calcule les orgs sans dossier 2026 actif (croisement orgs / registrations)
   const orgsWithReg = new Set(
     (exposants || [])
-      .filter(e => e.registration && e.registration.status !== 'annule')
-      .map(e => e.organization?.id)
+      .filter(r => r.status !== 'annule' && !r.is_archived)
+      .map(r => r.organization_id)
       .filter(Boolean)
   );
   const orgsSansDossier = orgs.filter(o => !orgsWithReg.has(o.id) && !o.archived_at);
