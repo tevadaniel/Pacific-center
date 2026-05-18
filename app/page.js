@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,13 +20,43 @@ export default function HomePage() {
   const [fallbackOffered, setFallbackOffered] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const cleanEmail = email.trim().toLowerCase();
+  // 🛡️ Refs pour relire les inputs au moment du submit
+  //    Critique pour gérer l'autofill du navigateur qui ne déclenche pas onChange dans tous les cas
+  const emailRef = useRef(null);
+  const pwdRef = useRef(null);
+
+  // 🛡️ Sync state from refs after mount + on autofill animation (webkit hack)
+  //    Garantit que email/password reflètent toujours ce que voit l'utilisateur
+  useEffect(() => {
+    const syncFromInputs = () => {
+      const emailVal = emailRef.current?.value || '';
+      const pwdVal = pwdRef.current?.value || '';
+      if (emailVal && emailVal !== email) setEmail(emailVal);
+      if (pwdVal && pwdVal !== password) setPassword(pwdVal);
+    };
+    // Une fois au mount (capte les autofills navigateur instantanés)
+    const t1 = setTimeout(syncFromInputs, 100);
+    const t2 = setTimeout(syncFromInputs, 500);
+    const t3 = setTimeout(syncFromInputs, 1500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, []);
+
+  const cleanEmail = (emailRef.current?.value || email).trim().toLowerCase();
   const emailValid = /.+@.+\..+/.test(cleanEmail);
 
-  // 🔐 Tentative de login par mot de passe
-  const submitPassword = async () => {
-    if (!emailValid) { toast.error('Email invalide'); return; }
-    if (!password) { toast.error('Mot de passe requis'); return; }
+  // 🔐 Tentative de login par mot de passe — relit TOUJOURS depuis les refs (sécurité autofill)
+  const submitPassword = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    // 🛡️ Source de vérité = la valeur affichée dans le champ (ref), pas le state
+    const liveEmail = (emailRef.current?.value || email || '').trim().toLowerCase();
+    const livePwd = pwdRef.current?.value || password || '';
+    // Sync state si différent (pour l'UI suivante)
+    if (liveEmail !== email) setEmail(liveEmail);
+    if (livePwd !== password) setPassword(livePwd);
+
+    if (!liveEmail || !/.+@.+\..+/.test(liveEmail)) { toast.error('Email invalide'); return; }
+    if (!livePwd) { toast.error('Mot de passe requis'); return; }
+
     setSubmitting(true);
     setErrorMsg('');
     setFallbackOffered(false);
@@ -34,7 +64,7 @@ export default function HomePage() {
       const r = await fetch('/api/auth/password-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password }),
+        body: JSON.stringify({ email: liveEmail, password: livePwd }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -63,15 +93,16 @@ export default function HomePage() {
     }
   };
 
-  // 🪄 Envoi du magic link (fallback ou volontaire)
+  // 🪄 Envoi du magic link (fallback ou volontaire) — même bulletproof depuis ref
   const sendMagicLink = async () => {
-    if (!emailValid) { toast.error('Email invalide'); return; }
+    const liveEmail = (emailRef.current?.value || email || '').trim().toLowerCase();
+    if (!liveEmail || !/.+@.+\..+/.test(liveEmail)) { toast.error('Email invalide'); return; }
     setMagicSubmitting(true);
     try {
       const r = await fetch('/api/auth/request-magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail }),
+        body: JSON.stringify({ email: liveEmail }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Impossible d\'envoyer le lien');
@@ -95,6 +126,8 @@ export default function HomePage() {
     setPassword('');
     setErrorMsg('');
     setFallbackOffered(false);
+    if (emailRef.current) emailRef.current.value = '';
+    if (pwdRef.current) pwdRef.current.value = '';
   };
 
   return (
@@ -154,16 +187,19 @@ export default function HomePage() {
                   >Renvoyer à un autre email</button>
                 </div>
               ) : (
-                <>
+                <form onSubmit={submitPassword} className="space-y-4">
                   {/* Champ Email */}
                   <div className="space-y-1.5">
-                    <label className="text-[11px] tracking-wider uppercase text-aracom-gold/70">Email</label>
+                    <label htmlFor="email-input" className="text-[11px] tracking-wider uppercase text-aracom-gold/70">Email</label>
                     <Input
+                      id="email-input"
+                      ref={emailRef}
                       type="email"
+                      name="email"
                       autoComplete="email"
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && document.getElementById('pwd-input')?.focus()}
+                      onBlur={e => setEmail(e.target.value)}
                       placeholder="votre@email.com"
                       className="bg-aracom-black/60 border-aracom-gold/30 text-aracom-beige-pale placeholder:text-aracom-gold/40 focus-visible:ring-aracom-gold focus-visible:border-aracom-gold"
                       data-testid="email-input"
@@ -172,15 +208,17 @@ export default function HomePage() {
 
                   {/* Champ Mot de passe */}
                   <div className="space-y-1.5">
-                    <label className="text-[11px] tracking-wider uppercase text-aracom-gold/70">Mot de passe</label>
+                    <label htmlFor="pwd-input" className="text-[11px] tracking-wider uppercase text-aracom-gold/70">Mot de passe</label>
                     <div className="relative">
                       <Input
                         id="pwd-input"
+                        ref={pwdRef}
                         type={showPwd ? 'text' : 'password'}
+                        name="password"
                         autoComplete="current-password"
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && submitPassword()}
+                        onBlur={e => setPassword(e.target.value)}
                         placeholder="••••••••"
                         className="bg-aracom-black/60 border-aracom-gold/30 text-aracom-beige-pale placeholder:text-aracom-gold/40 focus-visible:ring-aracom-gold focus-visible:border-aracom-gold pr-10"
                         data-testid="password-input"
@@ -202,8 +240,9 @@ export default function HomePage() {
                       <div>⚠️ {errorMsg}</div>
                       {fallbackOffered && (
                         <Button
+                          type="button"
                           onClick={sendMagicLink}
-                          disabled={magicSubmitting || !emailValid}
+                          disabled={magicSubmitting}
                           size="sm"
                           className="w-full bg-aracom-gold/20 border border-aracom-gold/40 text-aracom-beige-pale hover:bg-aracom-gold hover:text-aracom-black"
                         >
@@ -214,16 +253,18 @@ export default function HomePage() {
                     </div>
                   )}
 
+                  {/* 🛡️ BOUTON DE CONNEXION — JAMAIS désactivé sauf en cours d'envoi
+                       (la validation se fait dans submitPassword pour gérer l'autofill navigateur) */}
                   <Button
-                    onClick={submitPassword}
-                    disabled={!emailValid || !password || submitting}
-                    className="w-full bg-aracom-gold text-aracom-black hover:bg-aracom-beige-clair font-medium tracking-wider"
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full bg-aracom-gold text-aracom-black hover:bg-aracom-beige-clair font-medium tracking-wider disabled:opacity-70"
                     data-testid="submit-login"
                   >
                     {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRight className="w-4 h-4 mr-2" />}
                     Se connecter
                   </Button>
-                </>
+                </form>
               )}
             </CardContent>
           </Card>
@@ -234,8 +275,9 @@ export default function HomePage() {
               <div>
                 Pas encore de mot de passe ?{' '}
                 <button
+                  type="button"
                   onClick={sendMagicLink}
-                  disabled={!emailValid || magicSubmitting}
+                  disabled={magicSubmitting}
                   className="text-aracom-gold underline-offset-4 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
                   data-testid="send-magic-link"
                 >
