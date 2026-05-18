@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Sparkles, Star, Users, AlertCircle, CheckCircle2, FileText, MessageCircle, ThumbsUp } from 'lucide-react';
+import { Sparkles, Star, Users, AlertCircle, CheckCircle2, FileText, MessageCircle, ThumbsUp, Calendar, Download, MapPin, RefreshCw, XCircle, Smile } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

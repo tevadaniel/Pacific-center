@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Send, Mail, Filter, Search, Phone, AlertCircle } from 'lucide-react';
+import { Send, Mail, Filter, Search, Phone, AlertCircle, Download } from 'lucide-react';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
 import { api } from '@/lib/auth-client';
 import { KpiCard } from '@/components/app-shell';
@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { ExposantLink } from './exposant-panel-context';
 
 /**

@@ -35,6 +35,8 @@ import StatusLegend from '@/components/status-legend';
 import BulkExportDialog from '@/components/bulk-export-dialog';
 import AdminOverridePanel from '@/components/aracom/admin-override-panel';
 import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
+import SendExposantMailDialog from '@/components/aracom/send-exposant-mail-dialog';
+import EditExposantChoicesDialog from '@/components/aracom/edit-exposant-choices-dialog';
 import CorbeilleView from '@/components/aracom/corbeille-view';
 import OrgsSansDossierView from '@/components/aracom/orgs-sans-dossier-view';
 import CautionAppointmentsAdminPanel from '@/components/aracom/caution-appointments-panel';
@@ -508,6 +510,8 @@ function PrioBadge({ p }) {
 function FicheExposant({ id, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showSendMailDialog, setShowSendMailDialog] = useState(false);
+  const [showEditChoicesDialog, setShowEditChoicesDialog] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -623,6 +627,39 @@ function FicheExposant({ id, onClose }) {
 
             {/* 🛠 ACTIONS ADMIN OVERRIDE — modifier/annuler/supprimer toute action de l'exposant */}
             <AdminOverridePanel data={data} onReload={load} onClose={onClose} />
+
+            {/* ✉️ COMMUNICATION & ÉDITION RAPIDE — Envoyer mail / Modifier choix */}
+            <div className="rounded-md border-2 border-blue-200 bg-blue-50/40 p-3">
+              <div className="font-bold text-blue-900 text-sm mb-2 flex items-center gap-2">
+                ✉️ Communication & édition rapide
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowSendMailDialog(true)}
+                  disabled={!data.organization?.main_email}
+                  className="bg-white border-blue-300 text-blue-700 hover:bg-blue-50 h-8 text-xs gap-1.5"
+                  data-testid="fiche-send-mail-btn"
+                >
+                  <Mail className="w-3 h-3" /> 📧 Envoyer un mail
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowEditChoicesDialog(true)}
+                  className="bg-white border-violet-300 text-violet-700 hover:bg-violet-50 h-8 text-xs gap-1.5"
+                  data-testid="fiche-edit-choices-btn"
+                >
+                  ✏️ Modifier les choix
+                </Button>
+              </div>
+              {!data.organization?.main_email && (
+                <div className="text-[11px] text-amber-700 mt-2 italic">
+                  ⚠ Aucun email renseigné pour cet exposant — l'envoi de mail est désactivé.
+                </div>
+              )}
+            </div>
 
             {data.registration?.status !== 'confirme' && (
               <div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 p-3">
@@ -999,6 +1036,27 @@ function FicheExposant({ id, onClose }) {
           </div>
         )}
       </SheetContent>
+
+      {/* 📧 DIALOG : Envoyer un mail à l'exposant */}
+      {showSendMailDialog && data && (
+        <SendExposantMailDialog
+          registration={data.registration}
+          organization={data.organization}
+          venue={data.venue}
+          onClose={() => setShowSendMailDialog(false)}
+        />
+      )}
+
+      {/* ✏️ DIALOG : Modifier les choix de l'exposant */}
+      {showEditChoicesDialog && data && (
+        <EditExposantChoicesDialog
+          registration={data.registration}
+          organization={data.organization}
+          venue={data.venue}
+          onClose={() => setShowEditChoicesDialog(false)}
+          onReload={load}
+        />
+      )}
     </Sheet>
   );
 }
