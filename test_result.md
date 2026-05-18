@@ -2120,3 +2120,36 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28j — Bug réel trouvé après 4 tests user. La cause : le filtre 'users-without-org' ne détectait QUE les users avec organization_id NULL/ABSENT. Les users avec organization_id pointant vers une org supprimée/archivée n'étaient pas listés → admin ne pouvait pas les lier. Fix : extension du filtre + UI avec badges explicites montrant la raison de l'orphelinage. En production le user gerosteva@gmail.com (id u-exp-org-53f28cd9-3c9f-4b56-ab21-fd25a7a7a0f7) devrait maintenant apparaître après le redéploiement."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28k — Multi-sites séquentiel + Capacité "Complet" auto
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Multi-sites séquentiel (bouton 'Ajouter un autre site' conditionnel)"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js (MultiSitesPanel)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UX — Demande explicite : l'exposant doit COMPLÉTER (stand + 2 animations) le site courant AVANT de pouvoir en ajouter un autre. Implémentation : `allCurrentSitesComplete` calcule si chaque site a stand_code + has_vendredi_animation + has_samedi_animation. Si false → bouton 'Ajouter un autre site' disabled + message orange explicatif listant les champs manquants ('Il manque : stand · animation vendredi · animation samedi'). Si true → bouton actif et flow d'ajout disponible."
+
+  - task: "NEW — Statut 'Complet' automatique sur sites pleins (capacité max atteinte)"
+    implemented: true
+    working: true
+    file: "app/exposant/page.js (MultiSitesPanel)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UX — Le dropdown 'Ajouter un autre site' charge maintenant l'occupation de chaque venue via /api/venues/:id/stands. Pour chaque site, compte les stands ayant une assignment active. Calcule isFull si used >= total. Affichage : '📍 Punaauia (X/Y stands libres) 🚫 COMPLET' avec item disabled. Testé E2E preview : Punaauia (0/13 libres) et Taravao (0/12 libres) affichés COMPLET et non sélectionnables."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28k — Flow multi-sites séquentiel + capacité 'Complet' auto. Demande utilisateur : (1) Bloquer l'ajout d'un nouveau site tant que le site courant n'est pas complet — IMPLÉMENTÉ : bouton désactivé + message explicite des champs manquants. (2) Status 'Complet' visible quand venue plein — IMPLÉMENTÉ : dropdown calcule occupation réelle via /api/venues/:id/stands et désactive les items pleins. Testé E2E preview avec Ecole Judo de Polynésie (2 sites complets) : bouton 'Ajouter' actif, dropdown montre Punaauia/Taravao avec '🚫 COMPLET' désactivé. Lint clean."
+

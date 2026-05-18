@@ -562,19 +562,42 @@ export default function ExposantPortal() {
 // 🆕 MULTI-SITES — Panneau de gestion des sites de l'exposant
 function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) {
   const [venues, setVenues] = useState([]);
+  const [venueOccupancy, setVenueOccupancy] = useState({}); // venue_id -> { used, total, isFull }
   const [maxSites, setMaxSites] = useState(3);
   const [showAdd, setShowAdd] = useState(false);
   const [addVenueId, setAddVenueId] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api('/api/venues').then(setVenues).catch(() => {});
+    api('/api/venues').then(async (vs) => {
+      setVenues(vs || []);
+      // 🆕 SESSION 28k — Charge l'occupation de chaque site pour afficher "Complet" si plein
+      const stats = {};
+      await Promise.all((vs || []).map(async (v) => {
+        try {
+          const stands = await api(`/api/venues/${v.id}/stands`);
+          const total = (stands || []).length;
+          // Un stand est occupé s'il a une assignment (réservation/pré-réservation active)
+          const used = (stands || []).filter(s => !!s.assignment).length;
+          stats[v.id] = { used, total, isFull: total > 0 && used >= total };
+        } catch { stats[v.id] = { used: 0, total: 0, isFull: false }; }
+      }));
+      setVenueOccupancy(stats);
+    }).catch(() => {});
     api('/api/admin/exposant-limits').then(d => setMaxSites(d?.max_sites_per_exposant || 3)).catch(() => {});
   }, []);
 
   const usedVenueIds = new Set(allSites.map(s => s.venue_id));
   const availableVenues = venues.filter(v => !usedVenueIds.has(v.id));
-  const canAddMore = allSites.length < maxSites && availableVenues.length > 0;
+
+  // 🆕 SESSION 28k — Vérifie que TOUS les sites existants sont complets (stand + animations)
+  // avant d'autoriser l'ajout d'un nouveau site. C'est la demande explicite de l'utilisateur :
+  // flow séquentiel = on complète le site courant AVANT d'en ajouter un nouveau.
+  const allCurrentSitesComplete = allSites.length === 0 || allSites.every(s =>
+    s.stand_code && s.has_vendredi_animation && s.has_samedi_animation
+  );
+  const incompleteSite = allSites.find(s => !s.stand_code || !s.has_vendredi_animation || !s.has_samedi_animation);
+  const canAddMore = allSites.length < maxSites && availableVenues.length > 0 && allCurrentSitesComplete;
 
   const switchTo = (regId) => {
     if (regId === currentRegId) return;
@@ -704,15 +727,35 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
           </Button>
         )}
 
+        {/* 🆕 SESSION 28k — Message si bouton bloqué car site courant incomplet */}
+        {!allCurrentSitesComplete && allSites.length < maxSites && availableVenues.length > 0 && incompleteSite && (
+          <div className="text-xs text-amber-900 bg-amber-50 border-2 border-amber-200 rounded-md px-3 py-2 flex items-start gap-2">
+            <span className="text-base">⏳</span>
+            <div>
+              <b>Complétez d&apos;abord le site « {incompleteSite.venue?.name || 'en cours'} »</b> avant d&apos;en ajouter un nouveau.<br />
+              Il manque : {!incompleteSite.stand_code && <span className="text-red-700 font-semibold">stand · </span>}
+              {!incompleteSite.has_vendredi_animation && <span className="text-red-700 font-semibold">animation vendredi · </span>}
+              {!incompleteSite.has_samedi_animation && <span className="text-red-700 font-semibold">animation samedi · </span>}
+            </div>
+          </div>
+        )}
+
         {showAdd && (
           <div className="rounded-md border-2 border-blue-400 bg-white p-3 space-y-2">
             <div className="text-sm font-semibold text-blue-900">Choisissez un nouveau site :</div>
             <Select value={addVenueId} onValueChange={setAddVenueId}>
               <SelectTrigger><SelectValue placeholder="Sélectionner un site disponible…" /></SelectTrigger>
               <SelectContent>
-                {availableVenues.map(v => (
-                  <SelectItem key={v.id} value={v.id}>📍 {v.name} ({v.capacity_stands} stands)</SelectItem>
-                ))}
+                {availableVenues.map(v => {
+                  const occ = venueOccupancy[v.id];
+                  const isFull = occ?.isFull;
+                  return (
+                    <SelectItem key={v.id} value={v.id} disabled={isFull}>
+                      📍 {v.name} {occ ? `(${occ.total - occ.used}/${occ.total} stands libres)` : `(${v.capacity_stands} stands)`}
+                      {isFull && ' 🚫 COMPLET'}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             <p className="text-xs text-slate-600">
