@@ -37,6 +37,7 @@ import AdminOverridePanel from '@/components/aracom/admin-override-panel';
 import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import SendExposantMailDialog from '@/components/aracom/send-exposant-mail-dialog';
 import EditExposantChoicesDialog from '@/components/aracom/edit-exposant-choices-dialog';
+import FicheExposantV2 from '@/components/aracom/fiche-exposant-v2';
 import CorbeilleView from '@/components/aracom/corbeille-view';
 import OrgsSansDossierView from '@/components/aracom/orgs-sans-dossier-view';
 import CautionAppointmentsAdminPanel from '@/components/aracom/caution-appointments-panel';
@@ -141,7 +142,7 @@ export default function AracomPage() {
   const tabs = TABS.map(t => ({ ...t, href: '#', onClick: () => setTab(t.key) }));
 
   return (
-    <ExposantPanelProvider renderPanel={(id, close) => <FicheExposant id={id} onClose={close} />}>
+    <ExposantPanelProvider renderPanel={(id, close) => <FicheExposantV2 id={id} onClose={close} />}>
       <Shell
       title="Cockpit ARACOM"
       subtitle={<AracomBriefing />}

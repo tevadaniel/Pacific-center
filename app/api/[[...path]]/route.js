@@ -7889,7 +7889,11 @@ export async function PUT(request, { params }) {
       const orgId = p[1];
       const oldOrg = await db.collection('organizations').findOne({ id: orgId });
       if (!oldOrg) return err('Organisation introuvable', 404);
-      const orgAllowed = ['name', 'discipline', 'main_email', 'main_phone', 'contact_name', 'notes', 'priority_level', 'status', 'is_mailing_only', 'aracom_private', 'participation_history', 'source_activity'];
+      const orgAllowed = ['name', 'discipline', 'main_email', 'main_phone', 'contact_name', 'notes', 'priority_level', 'status', 'is_mailing_only', 'aracom_private', 'participation_history', 'source_activity',
+        // 🆕 SESSION 28u — FicheExposantV2 (Entreprise/Association + champs étendus)
+        'entity_type', 'first_name', 'last_name', 'position', 'description', 'representants_count',
+        'president_name', 'members_count', 'website', 'facebook',
+        'siret', 'rna_number', 'tahiti_number', 'forme_juridique', 'secondary_sites'];
       const orgUpd = {};
       for (const k of orgAllowed) if (k in body) orgUpd[k] = body[k];
       orgUpd.updated_at = new Date();
@@ -7904,7 +7908,17 @@ export async function PUT(request, { params }) {
       const id = p[1];
       const old = await db.collection('registrations').findOne({ id });
       if (!old) return err('Introuvable', 404);
-      const allowed = ['status','animation_type','friday_slot_label','saturday_slot_label','stand_needed','is_convention_signed','is_deposit_required','is_deposit_received','is_insurance_uploaded','is_guide_sent','planned_arrival_time','planned_departure_time','post_event_status','post_event_summary','internal_notes','exposant_notes','venue_id','stand_code','completion_percent'];
+      const allowed = ['status','animation_type','friday_slot_label','saturday_slot_label','stand_needed','is_convention_signed','is_deposit_required','is_deposit_received','is_insurance_uploaded','is_guide_sent','planned_arrival_time','planned_departure_time','post_event_status','post_event_summary','internal_notes','exposant_notes','venue_id','stand_code','completion_percent',
+        // 🆕 SESSION 28u — FicheExposantV2 (champs étendus)
+        'stand_size', 'attending_days', 'mail_sent_status', 'reply_status',
+        'convention_status', 'assurance_status', 'dossier_pct',
+        'caution_amount_xpf', 'caution_mode', 'caution_received_date',
+        'caution_appointment_at', 'restitution_status', 'restitution_motif',
+        'restitution_planned_date', 'restitution_actual_date',
+        'incident_2023', 'incident_2024', 'incident_2025',
+        'bilan_presence', 'bilan_arrival_real', 'bilan_departure_real',
+        'bilan_animation_status', 'bilan_stand_status', 'bilan_anomaly',
+        'bilan_agent_comment', 'bilan_caution_reco'];
       const upd = {};
       for (const k of allowed) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();
