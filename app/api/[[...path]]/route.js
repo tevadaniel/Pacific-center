@@ -14,6 +14,8 @@ import { seedVisitSlots, getFullAvailability, bookVisitSlot, releaseVisitSlot, g
 import { generateBadgePdf } from '@/lib/badge-generator';
 import { restoreVenueLayoutsIfEmpty, restoreVenueLayoutsForce } from '@/lib/venue-layouts-restore';
 import { handleAdminDeleteResetPost } from '@/lib/api/handlers/admin-delete-reset';
+import { handleCautionAppointmentsPost } from '@/lib/api/handlers/caution-appointments';
+import { handleCautionReceiptsPost } from '@/lib/api/handlers/caution-receipts';
 
 // 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
 //    Lance la restauration du backup JSON embarqué si aucun stand n'a de position en DB.
@@ -2465,6 +2467,18 @@ export async function POST(request, { params }) {
     const adminDeleteResetResp = await handleAdminDeleteResetPost({ db, request, route, p, body });
     if (adminDeleteResetResp) return adminDeleteResetResp;
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🗓️ Handler caution-appointments (RDV restitution caution)
+    // ═══════════════════════════════════════════════════════════════════
+    const cautionApptResp = await handleCautionAppointmentsPost({ db, request, route, body, deps: { sendMail } });
+    if (cautionApptResp) return cautionApptResp;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 🏦 Handler caution-receipts (virement + attestation remboursement)
+    // ═══════════════════════════════════════════════════════════════════
+    const cautionReceiptsResp = await handleCautionReceiptsPost({ db, request, route, p, body, deps: { buildRefundAttestationHTML } });
+    if (cautionReceiptsResp) return cautionReceiptsResp;
+
     // ════════════════════════════════════════════════════════════════
     // 🎯 WIZARD — Tunnel de réservation exposant en 5 étapes
     // ════════════════════════════════════════════════════════════════
@@ -2728,200 +2742,6 @@ export async function POST(request, { params }) {
       return json({ ok: true, method: 'own_password' });
     }
 
-    // 🗓️ ADMIN — Confirmer/modifier/annuler un RDV caution + envoyer email à l'exposant
-    if (route === 'admin/caution-appointments/update') {
-      const ctx = getUserContext(request);
-      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
-      const { id, status, confirmed_date, confirmed_time, confirmed_place, confirmed_place_custom, admin_note } = body || {};
-      if (!id) return err('id requis', 400);
-      if (!['confirme', 'propose', 'restitue', 'annule', 'demande'].includes(status)) {
-        return err('status invalide', 400);
-      }
-      const appt = await db.collection('caution_appointments').findOne({ id });
-      if (!appt) return err('RDV introuvable', 404);
-
-      const updates = {
-        status,
-        updated_at: new Date(),
-        admin_note: admin_note || appt.admin_note || '',
-        confirmed_at: status === 'confirme' ? new Date() : (appt.confirmed_at || null),
-      };
-      if (confirmed_date) updates.confirmed_date = confirmed_date;
-      if (confirmed_time) updates.confirmed_time = confirmed_time;
-      if (confirmed_place) updates.confirmed_place = confirmed_place;
-      if (confirmed_place_custom !== undefined) updates.confirmed_place_custom = confirmed_place_custom;
-      if (status === 'restitue') updates.restituted_at = new Date();
-
-      await db.collection('caution_appointments').updateOne({ id }, { $set: updates });
-
-      // 📧 Notification email à l'exposant
-      const org = await db.collection('organizations').findOne({ id: appt.organization_id });
-      const finalDate = updates.confirmed_date || appt.requested_date;
-      const finalTime = updates.confirmed_time || appt.requested_time;
-      const finalPlaceKey = updates.confirmed_place || appt.confirmed_place || appt.requested_place || 'aracom_paea';
-      const finalPlaceCustom = updates.confirmed_place_custom !== undefined ? updates.confirmed_place_custom : (appt.confirmed_place_custom || appt.requested_place_custom || '');
-      const placeLabel = (() => {
-        if (finalPlaceKey === 'sur_site') return 'Sur site / à votre stand le jour J';
-        if (finalPlaceKey === 'autre') return finalPlaceCustom || 'Lieu à préciser';
-        return 'ARACOM Conseil — Paea, Polynésie française';
-      })();
-      const dateStr = new Date(finalDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-
-      const subjects = {
-        confirme: `✅ RDV confirmé pour la restitution de votre caution`,
-        propose: `📅 Nouveau créneau proposé pour votre caution`,
-        restitue: `🎉 Caution restituée — confirmation`,
-        annule: `❌ RDV de restitution caution annulé`,
-      };
-      const bodies = {
-        confirme: `<p>Bonjour ${org?.contact_name || ''},</p>
-          <p>Votre RDV pour récupérer votre caution de <b>20 000 XPF</b> est confirmé pour le <b>${dateStr} à ${finalTime}</b>.</p>
-          <p>📍 Lieu : <b>${placeLabel}</b></p>
-          <p>Munissez-vous d'une pièce d'identité. Nous vous remettrons l'<b>attestation de remboursement</b> à signer en 2 exemplaires (un pour ARACOM, un pour vous).</p>
-          ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
-          <p>À très bientôt,<br>L'équipe ARACOM</p>`,
-        propose: `<p>Bonjour ${org?.contact_name || ''},</p>
-          <p>Nous vous proposons un nouveau créneau pour récupérer votre caution :</p>
-          <p style="font-size:18px"><b>${dateStr} à ${finalTime}</b></p>
-          <p>📍 Lieu : <b>${placeLabel}</b></p>
-          ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
-          <p>Merci de nous confirmer votre venue par retour de mail.</p>
-          <p>L'équipe ARACOM</p>`,
-        restitue: `<p>Bonjour ${org?.contact_name || ''},</p>
-          <p>Nous confirmons la restitution de votre caution de <b>20 000 XPF</b> ce ${dateStr}${placeLabel ? ` (${placeLabel})` : ''}.</p>
-          <p>L'attestation de remboursement signée vous a été remise.</p>
-          <p>Merci pour votre participation au Forum de la Rentrée 2026 et à très bientôt pour la prochaine édition !</p>
-          <p>L'équipe ARACOM</p>`,
-        annule: `<p>Bonjour ${org?.contact_name || ''},</p>
-          <p>Votre RDV de restitution caution du ${dateStr} a été annulé.</p>
-          ${admin_note ? `<p><i>Motif : ${admin_note}</i></p>` : ''}
-          <p>Contactez-nous pour reprogrammer.</p>
-          <p>L'équipe ARACOM</p>`,
-      };
-
-      if (org?.main_email && subjects[status]) {
-        try {
-          await sendMail({
-            to: org.main_email,
-            subject: subjects[status],
-            html: bodies[status],
-          });
-        } catch (e) { /* best effort */ }
-      }
-
-      const updated = await db.collection('caution_appointments').findOne({ id });
-      delete updated._id;
-      return json({ ok: true, appointment: updated });
-    }
-
-    // 🗓️ ADMIN — Créer un RDV caution pour un exposant (initiative admin)
-    if (route === 'admin/caution-appointments/create') {
-      const ctx = getUserContext(request);
-      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
-      const { registration_id, organization_id, confirmed_date, confirmed_time, confirmed_place, confirmed_place_custom, admin_note } = body || {};
-      if (!registration_id || !confirmed_date || !confirmed_time) {
-        return err('Champs requis : registration_id, confirmed_date, confirmed_time', 400);
-      }
-      const existing = await db.collection('caution_appointments').findOne({ registration_id });
-      const appt = {
-        id: existing?.id || uuid(),
-        registration_id,
-        organization_id: organization_id || existing?.organization_id || null,
-        requested_date: existing?.requested_date || confirmed_date,
-        requested_time: existing?.requested_time || confirmed_time,
-        requested_place: existing?.requested_place || confirmed_place || 'aracom_paea',
-        requested_place_custom: existing?.requested_place_custom || '',
-        confirmed_date,
-        confirmed_time,
-        confirmed_place: confirmed_place || existing?.requested_place || 'aracom_paea',
-        confirmed_place_custom: confirmed_place_custom || existing?.requested_place_custom || '',
-        status: 'confirme',
-        admin_note: admin_note || '',
-        notes: existing?.notes || '',
-        created_at: existing?.created_at || new Date(),
-        updated_at: new Date(),
-        confirmed_at: new Date(),
-      };
-      await db.collection('caution_appointments').updateOne(
-        { registration_id },
-        { $set: appt },
-        { upsert: true }
-      );
-      // Email proactif
-      const org = await db.collection('organizations').findOne({ id: appt.organization_id });
-      const placeLabel = (() => {
-        if (appt.confirmed_place === 'sur_site') return 'Sur site / à votre stand le jour J';
-        if (appt.confirmed_place === 'autre') return appt.confirmed_place_custom || 'Lieu à préciser';
-        return 'ARACOM Conseil — Paea, Polynésie française';
-      })();
-      if (org?.main_email) {
-        const dateStr = new Date(confirmed_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-        try {
-          await sendMail({
-            to: org.main_email,
-            subject: `📅 RDV pour récupérer votre caution — Forum 2026`,
-            html: `<p>Bonjour ${org.contact_name || ''},</p>
-              <p>Nous vous donnons rendez-vous pour récupérer votre caution de <b>20 000 XPF</b> :</p>
-              <p style="font-size:18px"><b>${dateStr} à ${confirmed_time}</b></p>
-              <p>📍 Lieu : <b>${placeLabel}</b></p>
-              <p>Munissez-vous d'une pièce d'identité.</p>
-              ${admin_note ? `<p><i>Note : ${admin_note}</i></p>` : ''}
-              <p>Merci de confirmer votre venue par retour de mail.</p>
-              <p>L'équipe ARACOM</p>`,
-          });
-        } catch (e) { /* best effort */ }
-      }
-      delete appt._id;
-      return json({ ok: true, appointment: appt });
-    }
-
-    // 🗓️ EXPOSANT — Création d'une demande de RDV pour restitution caution
-    if (route === 'exposant/caution-appointment') {
-      const { registration_id, organization_id, requested_date, requested_time, requested_place, requested_place_custom, notes } = body || {};
-      if (!registration_id || !requested_date || !requested_time) {
-        return err('Champs requis : registration_id, requested_date, requested_time', 400);
-      }
-      // Upsert (un RDV par registration)
-      const existing = await db.collection('caution_appointments').findOne({ registration_id });
-      const appt = {
-        id: existing?.id || uuid(),
-        registration_id,
-        organization_id: organization_id || existing?.organization_id || null,
-        requested_date,
-        requested_time,
-        requested_place: requested_place || 'aracom_paea', // 'aracom_paea' | 'sur_site' | 'autre'
-        requested_place_custom: requested_place_custom || '',
-        notes: notes || '',
-        status: 'demande',
-        created_at: existing?.created_at || new Date(),
-        updated_at: new Date(),
-      };
-      await db.collection('caution_appointments').updateOne(
-        { registration_id },
-        { $set: appt },
-        { upsert: true }
-      );
-      delete appt._id;
-      // Notification admin (mail interne — best effort)
-      const placeLabel = (() => {
-        if (appt.requested_place === 'sur_site') return 'Sur site / à mon stand (jour J)';
-        if (appt.requested_place === 'autre') return appt.requested_place_custom || 'À préciser';
-        return 'ARACOM Conseil — Paea';
-      })();
-      try {
-        const org = await db.collection('organizations').findOne({ id: appt.organization_id });
-        await sendMail({
-          to: process.env.ARACOM_ADMIN_EMAIL || 'tevageros@me.com',
-          subject: `🗓️ Demande de RDV caution — ${org?.name || 'Exposant'}`,
-          html: `<p><b>${org?.name || 'Exposant'}</b> demande un RDV pour récupérer sa caution.</p>
-                 <p>Créneau souhaité : <b>${new Date(requested_date).toLocaleDateString('fr-FR')} à ${requested_time}</b></p>
-                 <p>Lieu souhaité : <b>${placeLabel}</b></p>
-                 ${notes ? `<p>Note : ${notes}</p>` : ''}
-                 <p>Validez ou proposez un autre créneau depuis le cockpit ARACOM.</p>`,
-        });
-      } catch (_e) { /* best effort */ }
-      return json({ ok: true, appointment: appt });
-    }
 
     // 📝 EXPOSANT — Soumettre les réponses du questionnaire de satisfaction
     if (route === 'exposant/satisfaction') {
@@ -5608,153 +5428,6 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true, message: 'Virement déclaré, ARACOM en a été notifié(e).' });
     }
 
-    // POST /api/admin/register-virement/:regId
-    //   → ARACOM confirme la réception du virement → marque deposit recue + reçu auto + lock
-    if (route.match(/^admin\/register-virement\/[^/]+$/)) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
-      const regId = p[2];
-      const reg = await db.collection('registrations').findOne({ id: regId });
-      if (!reg) return err('Inscription introuvable', 404);
-      const ref = (body?.virement_reference || '').trim();
-      const dateStr = (body?.virement_date || '').trim();
-      if (!ref) return err('Référence du virement requise', 400);
-      if (!dateStr) return err('Date du virement requise', 400);
-
-      // Met à jour le deposit
-      const existing = await db.collection('deposit_transactions').findOne({ registration_id: regId });
-      const dep = {
-        deposit_mode: 'virement',
-        virement_reference: ref,
-        virement_date: dateStr,
-        virement_validated_by: 'aracom',
-        virement_validated_at: new Date(),
-        status: 'recue',
-        received_at: new Date(),
-        updated_at: new Date(),
-      };
-      if (existing) {
-        await db.collection('deposit_transactions').updateOne({ id: existing.id }, { $set: dep });
-      } else {
-        await db.collection('deposit_transactions').insertOne({
-          id: uuid(),
-          registration_id: regId,
-          amount_xpf: 20000,
-          ...dep,
-          created_at: new Date(),
-        });
-      }
-      // Lock la registration
-      await db.collection('registrations').updateOne({ id: regId }, { $set: {
-        status: 'confirme',
-        is_pre_reserved: false,
-        is_deposit_received: true,
-        is_guide_sent: true,
-        is_locked: true,
-        confirmed_at: new Date(),
-        locked_at: new Date(),
-        updated_at: new Date(),
-      } });
-      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: 'pre_reserve' }, { $set: { status: 'confirme', updated_at: new Date() } });
-
-      // Génère le reçu de caution (incluant les détails virement)
-      try {
-        const existingDoc = await db.collection('registration_documents').findOne({ registration_id: regId, document_type: 'recu_caution' });
-        if (!existingDoc) {
-          const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-          const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-          const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
-          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937;padding:0 16px}h1{color:#1d4ed8;margin:0 0 4px}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#1d4ed8;color:#fff;border:0;cursor:pointer;font-weight:600}@media print{.print-btn{display:none}}</style></head><body><button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button><div style="display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #1d4ed8;padding-bottom:10px"><div><h1>REÇU DE CAUTION</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div style="background:#1d4ed8;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;letter-spacing:.05em">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émis le ${new Date().toLocaleDateString('fr-FR')}</div></div></div><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date d'émission</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode de paiement</span><b>🏦 Virement bancaire</b></div><div class="row"><span class="label">Référence virement</span><b style="font-family:monospace">${ref}</b></div><div class="row"><span class="label">Date du virement</span><b>${dateStr}</b></div></div><div style="text-align:center;padding:18px 0;background:#eff6ff;border-radius:8px"><div class="label">Montant reçu en garantie</div><div class="amount">20 000 XPF</div></div></body></html>`;
-          await db.collection('registration_documents').insertOne({
-            id: uuid(), registration_id: regId, document_type: 'recu_caution',
-            file_name: `Recu_caution_${(org?.name || 'exp').replace(/\s+/g, '_')}_${receiptNumber}.html`,
-            mime_type: 'text/html', file_size: html.length,
-            file_data: Buffer.from(html, 'utf-8').toString('base64'),
-            status: 'valide', uploaded_by: 'aracom-virement',
-            uploaded_at: new Date(), validated_at: new Date(),
-            receipt_number: receiptNumber,
-            created_at: new Date(), updated_at: new Date(),
-          });
-        }
-      } catch (e) { console.error('[register-virement receipt]', e?.message); }
-
-      // Ferme la validation_request si en attente
-      await db.collection('validation_requests').updateMany(
-        { registration_id: regId, status: { $in: ['en_attente', 'pending'] } },
-        { $set: { status: 'verrouille', validated_at: new Date(), updated_at: new Date() } }
-      ).catch(() => {});
-
-      return json({ ok: true, message: 'Virement enregistré. Caution validée, stand verrouillé.' });
-    }
-
-    // 🆕 POST /api/admin/refund-attestation/:regId/upload — ARACOM upload version signée
-    if (route.match(/^admin\/refund-attestation\/[^/]+\/upload$/)) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
-      const regId = p[2];
-      const { file_name, mime_type, file_base64 } = body || {};
-      if (!file_base64) return err('file_base64 requis', 400);
-      // Désactive l'ancienne attestation auto si présente
-      await db.collection('registration_documents').updateMany(
-        { registration_id: regId, document_type: 'attestation_remboursement' },
-        { $set: { status: 'remplace', updated_at: new Date() } }
-      );
-      const fileBuf = Buffer.from(file_base64, 'base64');
-      await db.collection('registration_documents').insertOne({
-        id: uuid(),
-        registration_id: regId,
-        document_type: 'attestation_remboursement',
-        file_name: file_name || `Attestation_remboursement_signee.pdf`,
-        mime_type: mime_type || 'application/pdf',
-        file_size: fileBuf.length,
-        file_data: file_base64,
-        status: 'valide',
-        is_signed: true,
-        uploaded_by: 'aracom',
-        uploaded_at: new Date(),
-        validated_at: new Date(),
-        created_at: new Date(),
-        updated_at: new Date(),
-      });
-      return json({ ok: true });
-    }
-
-    // 🆕 POST /api/admin/refund-attestation/:regId/generate — ARACOM (re)génère l'attestation auto
-    //   (force la création même si le questionnaire n'a pas été rempli)
-    if (route.match(/^admin\/refund-attestation\/[^/]+\/generate$/)) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
-      const regId = p[2];
-      const reg = await db.collection('registrations').findOne({ id: regId });
-      if (!reg) return err('Inscription introuvable', 404);
-      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-      const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
-      const today = new Date().toLocaleDateString('fr-FR');
-      const num = `ATT-2026-${String(regId).slice(0, 6).toUpperCase()}`;
-      // Désactive les anciennes attestations auto non signées
-      await db.collection('registration_documents').updateMany(
-        { registration_id: regId, document_type: 'attestation_remboursement', is_signed: { $ne: true } },
-        { $set: { status: 'remplace', updated_at: new Date() } }
-      );
-      const html = buildRefundAttestationHTML({ org, venue, reg, dep, num, today });
-      const docId = uuid();
-      await db.collection('registration_documents').insertOne({
-        id: docId,
-        registration_id: regId,
-        document_type: 'attestation_remboursement',
-        file_name: `Attestation_remboursement_${(org?.name || 'exp').replace(/\s+/g, '_')}_${num}.html`,
-        mime_type: 'text/html',
-        file_size: html.length,
-        file_data: Buffer.from(html, 'utf-8').toString('base64'),
-        status: 'valide',
-        is_signed: false,
-        attestation_number: num,
-        uploaded_by: 'aracom-manual',
-        uploaded_at: new Date(),
-        validated_at: new Date(),
-        created_at: new Date(),
-        updated_at: new Date(),
-      });
-      return json({ ok: true, document_id: docId, attestation_number: num });
-    }
 
     // One-time migration : set is_available_2026 + disable exposant/pacific passwords
     if (route === 'tools/migrate-2026') {

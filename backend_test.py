@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Backend Regression Test - Admin Delete/Archive/Reset Endpoints
-Session 23 - Refactoring verification
+Backend regression tests for 3 extracted handler modules (Session 23+):
+1. admin-delete-reset.js (10 endpoints)
+2. caution-appointments.js (3 endpoints)
+3. caution-receipts.js (3 endpoints)
 
-Tests all 10 admin endpoints that were refactored into admin-delete-reset.js
+Tests verify the dispatcher pattern correctly routes to extracted handlers.
 """
 
 import requests
 import json
 import sys
+from datetime import datetime
 
 BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
 
@@ -19,434 +22,427 @@ ADMIN_HEADERS = {
     "x-user-id": "u-admin"
 }
 
-# Non-admin headers (exposant)
+# Exposant headers
 EXPOSANT_HEADERS = {
     "Content-Type": "application/json",
     "x-user-role": "exposant",
-    "x-user-id": "u-exposant-test"
+    "x-user-id": "u-exp-1"
 }
 
-def print_test(name, passed, details=""):
+def log(msg, level="INFO"):
+    """Log with timestamp"""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] [{level}] {msg}")
+
+def test_result(name, passed, details=""):
+    """Print test result"""
     status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status} - {name}")
+    log(f"{status} - {name}")
     if details:
-        print(f"   {details}")
-    print()
+        print(f"    {details}")
+    return passed
 
-def test_smoke_404_endpoints():
-    """Test all 10 endpoints with non-existent IDs - should return 404"""
-    print("=" * 80)
-    print("SMOKE TESTS - Non-existent IDs (expecting 404)")
-    print("=" * 80)
-    
-    tests = [
-        {
-            "name": "POST /api/admin/organizations/non-existent-id/archive",
-            "url": f"{BASE_URL}/admin/organizations/non-existent-id/archive",
-            "method": "POST",
-            "body": {"reason": "refactor-test"},
-            "expected_status": 404,
-            "expected_message": "Organisation introuvable"
-        },
-        {
-            "name": "POST /api/admin/organizations/non-existent-id/restore",
-            "url": f"{BASE_URL}/admin/organizations/non-existent-id/restore",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Organisation introuvable"
-        },
-        {
-            "name": "POST /api/admin/organizations/non-existent-id/delete",
-            "url": f"{BASE_URL}/admin/organizations/non-existent-id/delete",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Organisation introuvable"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-caution",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-caution",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Inscription introuvable"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-virement",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-virement",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Inscription introuvable"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-convention",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-convention",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Inscription introuvable"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-attendance",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-attendance",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Aucune session à réinitialiser"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-caution-appointment",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-caution-appointment",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Aucun RDV à supprimer"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/reset-satisfaction",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/reset-satisfaction",
-            "method": "POST",
-            "body": {},
-            "expected_status": 404,
-            "expected_message": "Inscription introuvable"
-        },
-        {
-            "name": "POST /api/admin/registrations/non-existent-id/cancel-virement",
-            "url": f"{BASE_URL}/admin/registrations/non-existent-id/cancel-virement",
-            "method": "POST",
-            "body": {},
-            "expected_status": 200,
-            "expected_message": "virement_cancelled"
-        }
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test in tests:
-        try:
-            response = requests.post(test["url"], headers=ADMIN_HEADERS, json=test["body"], timeout=10)
-            
-            if response.status_code == test["expected_status"]:
-                data = response.json()
-                
-                # Special case for cancel-virement (returns 200 even for non-existent)
-                if test["expected_status"] == 200:
-                    if data.get("action") == test["expected_message"]:
-                        print_test(test["name"], True, f"Status: {response.status_code}, Action: {data.get('action')}")
-                        passed += 1
-                    else:
-                        print_test(test["name"], False, f"Expected action '{test['expected_message']}', got: {data}")
-                        failed += 1
-                else:
-                    # Check for French error message
-                    error_msg = data.get("error", "")
-                    if test["expected_message"] in error_msg:
-                        print_test(test["name"], True, f"Status: {response.status_code}, Message: {error_msg}")
-                        passed += 1
-                    else:
-                        print_test(test["name"], False, f"Expected message '{test['expected_message']}', got: {error_msg}")
-                        failed += 1
-            else:
-                print_test(test["name"], False, f"Expected status {test['expected_status']}, got {response.status_code}: {response.text[:200]}")
-                failed += 1
-                
-        except Exception as e:
-            print_test(test["name"], False, f"Exception: {str(e)}")
-            failed += 1
-    
-    print(f"Smoke Tests Summary: {passed} passed, {failed} failed\n")
-    return passed, failed
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 1: admin-delete-reset.js (10 endpoints)
+# ═══════════════════════════════════════════════════════════════════
 
-def test_permission_403_endpoints():
-    """Test all 10 endpoints without admin role - should return 403"""
-    print("=" * 80)
-    print("PERMISSION TESTS - Non-admin role (expecting 403)")
-    print("=" * 80)
+def test_module1_smoke():
+    """Module 1 - admin-delete-reset smoke tests (already tested, just confirm routing)"""
+    log("=" * 70)
+    log("MODULE 1: admin-delete-reset.js (10 endpoints) - SMOKE TESTS")
+    log("=" * 70)
     
-    tests = [
-        {
-            "name": "POST /api/admin/organizations/test-id/archive (exposant)",
-            "url": f"{BASE_URL}/admin/organizations/test-id/archive",
-            "body": {"reason": "test"}
-        },
-        {
-            "name": "POST /api/admin/organizations/test-id/restore (exposant)",
-            "url": f"{BASE_URL}/admin/organizations/test-id/restore",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/organizations/test-id/delete (exposant)",
-            "url": f"{BASE_URL}/admin/organizations/test-id/delete",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-caution (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-caution",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-virement (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-virement",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-convention (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-convention",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-attendance (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-attendance",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-caution-appointment (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-caution-appointment",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/reset-satisfaction (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/reset-satisfaction",
-            "body": {}
-        },
-        {
-            "name": "POST /api/admin/registrations/test-id/cancel-virement (exposant)",
-            "url": f"{BASE_URL}/admin/registrations/test-id/cancel-virement",
-            "body": {}
-        }
-    ]
+    results = []
     
-    passed = 0
-    failed = 0
-    
-    for test in tests:
-        try:
-            response = requests.post(test["url"], headers=EXPOSANT_HEADERS, json=test["body"], timeout=10)
-            
-            if response.status_code == 403:
-                data = response.json()
-                error_msg = data.get("error", "")
-                if "admin" in error_msg.lower() or "accès" in error_msg.lower():
-                    print_test(test["name"], True, f"Status: 403, Message: {error_msg}")
-                    passed += 1
-                else:
-                    print_test(test["name"], False, f"Got 403 but unexpected message: {error_msg}")
-                    failed += 1
-            else:
-                print_test(test["name"], False, f"Expected 403, got {response.status_code}: {response.text[:200]}")
-                failed += 1
-                
-        except Exception as e:
-            print_test(test["name"], False, f"Exception: {str(e)}")
-            failed += 1
-    
-    print(f"Permission Tests Summary: {passed} passed, {failed} failed\n")
-    return passed, failed
-
-def test_functional_archive_restore():
-    """Test functional flow: archive and restore an organization"""
-    print("=" * 80)
-    print("FUNCTIONAL TEST - Archive & Restore Flow")
-    print("=" * 80)
-    
-    passed = 0
-    failed = 0
-    
-    # First, get a non-protected organization to test with
+    # Test 1: Archive non-existent organization → 404
     try:
-        response = requests.get(f"{BASE_URL}/organizations", headers=ADMIN_HEADERS, timeout=10)
-        if response.status_code != 200:
-            print_test("Get organizations for testing", False, f"Failed to get organizations: {response.status_code}")
-            return 0, 1
+        r = requests.post(f"{BASE_URL}/admin/organizations/non-existent/archive", 
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 404 and "introuvable" in r.text.lower()
+        results.append(test_result("Archive non-existent org → 404", passed, 
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Archive non-existent org → 404", False, str(e)))
+    
+    # Test 2: Reset caution non-existent registration → 404
+    try:
+        r = requests.post(f"{BASE_URL}/admin/registrations/non-existent/reset-caution",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 404 and "introuvable" in r.text.lower()
+        results.append(test_result("Reset caution non-existent reg → 404", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Reset caution non-existent reg → 404", False, str(e)))
+    
+    return all(results)
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 2: caution-appointments.js (3 endpoints) - NEW EXTRACTION
+# ═══════════════════════════════════════════════════════════════════
+
+def test_module2_smoke():
+    """Module 2 - caution-appointments smoke tests"""
+    log("=" * 70)
+    log("MODULE 2: caution-appointments.js (3 endpoints) - SMOKE TESTS")
+    log("=" * 70)
+    
+    results = []
+    
+    # Test 1: POST /api/exposant/caution-appointment WITHOUT body → 400
+    try:
+        r = requests.post(f"{BASE_URL}/exposant/caution-appointment",
+                         headers=EXPOSANT_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 400 and "requis" in r.text.lower()
+        results.append(test_result("Exposant caution-appointment no body → 400", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:150]}"))
+    except Exception as e:
+        results.append(test_result("Exposant caution-appointment no body → 400", False, str(e)))
+    
+    # Test 2: POST /api/admin/caution-appointments/update WITHOUT body → 400
+    try:
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/update",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 400 and "id requis" in r.text.lower()
+        results.append(test_result("Admin update appointment no id → 400", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Admin update appointment no id → 400", False, str(e)))
+    
+    # Test 3: POST /api/admin/caution-appointments/update invalid status → 400
+    try:
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/update",
+                         headers=ADMIN_HEADERS, 
+                         json={"id": "x", "status": "foo"}, timeout=10)
+        passed = r.status_code == 400 and "invalide" in r.text.lower()
+        results.append(test_result("Admin update appointment invalid status → 400", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Admin update appointment invalid status → 400", False, str(e)))
+    
+    # Test 4: POST /api/admin/caution-appointments/update non-existent → 404
+    try:
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/update",
+                         headers=ADMIN_HEADERS,
+                         json={"id": "non-existent", "status": "confirme"}, timeout=10)
+        passed = r.status_code == 404 and "introuvable" in r.text.lower()
+        results.append(test_result("Admin update non-existent appointment → 404", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Admin update non-existent appointment → 404", False, str(e)))
+    
+    # Test 5: POST /api/admin/caution-appointments/create WITHOUT body → 400
+    try:
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/create",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 400 and "requis" in r.text.lower()
+        results.append(test_result("Admin create appointment no body → 400", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:150]}"))
+    except Exception as e:
+        results.append(test_result("Admin create appointment no body → 400", False, str(e)))
+    
+    # Test 6: Without admin role on /admin/caution-appointments/update → 403
+    try:
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/update",
+                         headers=EXPOSANT_HEADERS,
+                         json={"id": "x", "status": "confirme"}, timeout=10)
+        passed = r.status_code == 403 and "admin" in r.text.lower()
+        results.append(test_result("Non-admin update appointment → 403", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Non-admin update appointment → 403", False, str(e)))
+    
+    return all(results)
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 3: caution-receipts.js (3 endpoints) - NEW EXTRACTION
+# ═══════════════════════════════════════════════════════════════════
+
+def test_module3_smoke():
+    """Module 3 - caution-receipts smoke tests"""
+    log("=" * 70)
+    log("MODULE 3: caution-receipts.js (3 endpoints) - SMOKE TESTS")
+    log("=" * 70)
+    
+    results = []
+    
+    # Test 1: POST /api/admin/register-virement/non-existent with admin → 404
+    try:
+        r = requests.post(f"{BASE_URL}/admin/register-virement/non-existent",
+                         headers=ADMIN_HEADERS,
+                         json={"virement_reference": "TEST123", "virement_date": "2026-01-15"},
+                         timeout=10)
+        passed = r.status_code == 404 and "introuvable" in r.text.lower()
+        results.append(test_result("Register virement non-existent → 404", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Register virement non-existent → 404", False, str(e)))
+    
+    # Test 2: POST /api/admin/register-virement/non-existent without admin → 403
+    try:
+        r = requests.post(f"{BASE_URL}/admin/register-virement/non-existent",
+                         headers=EXPOSANT_HEADERS,
+                         json={"virement_reference": "TEST123", "virement_date": "2026-01-15"},
+                         timeout=10)
+        passed = r.status_code == 403 and "admin" in r.text.lower()
+        results.append(test_result("Register virement without admin → 403", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Register virement without admin → 403", False, str(e)))
+    
+    # Test 3: POST /api/admin/refund-attestation/non-existent/upload body {} → 400
+    try:
+        r = requests.post(f"{BASE_URL}/admin/refund-attestation/non-existent/upload",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 400 and "file_base64" in r.text.lower()
+        results.append(test_result("Upload attestation no file → 400", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Upload attestation no file → 400", False, str(e)))
+    
+    # Test 4: POST /api/admin/refund-attestation/non-existent/generate with admin → 404
+    try:
+        r = requests.post(f"{BASE_URL}/admin/refund-attestation/non-existent/generate",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        passed = r.status_code == 404 and "introuvable" in r.text.lower()
+        results.append(test_result("Generate attestation non-existent → 404", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Generate attestation non-existent → 404", False, str(e)))
+    
+    # Test 5: POST /api/admin/register-virement/some-id with body {} (no virement_reference) → 400
+    try:
+        r = requests.post(f"{BASE_URL}/admin/register-virement/some-fake-id-12345",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        # Should return 400 for missing virement_reference OR 404 if reg doesn't exist
+        passed = r.status_code in [400, 404]
+        results.append(test_result("Register virement no reference → 400/404", passed,
+                                   f"Status: {r.status_code}, Body: {r.text[:100]}"))
+    except Exception as e:
+        results.append(test_result("Register virement no reference → 400/404", False, str(e)))
+    
+    return all(results)
+
+# ═══════════════════════════════════════════════════════════════════
+# FUNCTIONAL END-TO-END TEST (caution appointments workflow)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_functional_e2e():
+    """Functional end-to-end test for caution appointments workflow"""
+    log("=" * 70)
+    log("FUNCTIONAL END-TO-END TEST: Caution Appointments Workflow")
+    log("=" * 70)
+    
+    results = []
+    
+    # Step 0: Find an existing non-protected test registration
+    try:
+        log("Step 0: Finding a test registration...")
+        r = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=10)
+        if r.status_code != 200:
+            log(f"Failed to get registrations: {r.status_code}", "ERROR")
+            return False
         
-        orgs = response.json()
-        # Find a non-protected org (not in the protected list)
-        PROTECTED = ['I Mua Papeete', 'Dream Lab', 'ACE Arue', 'Budokan Judo Pirae', 'Lotus Bleu']
-        test_org = None
-        for org in orgs:
-            if org.get("name") not in PROTECTED and not org.get("archived_at"):
-                test_org = org
+        regs = r.json()
+        if not regs or len(regs) == 0:
+            log("No registrations found in database", "ERROR")
+            return False
+        
+        # Find a registration that's not protected (avoid I Mua Papeete, etc.)
+        test_reg = None
+        for reg in regs[:10]:  # Check first 10
+            if reg.get('status') in ['a_confirmer', 'a_relancer']:
+                test_reg = reg
                 break
         
-        if not test_org:
-            print_test("Find test organization", False, "No non-protected organization found for testing")
-            return 0, 1
+        if not test_reg:
+            test_reg = regs[0]  # Fallback to first one
         
-        org_id = test_org.get("id")
-        org_name = test_org.get("name")
-        print(f"Using test organization: {org_name} (ID: {org_id})\n")
-        
-        # Test 1: Archive the organization
-        archive_response = requests.post(
-            f"{BASE_URL}/admin/organizations/{org_id}/archive",
-            headers=ADMIN_HEADERS,
-            json={"reason": "refactor-test"},
-            timeout=10
-        )
-        
-        if archive_response.status_code == 200:
-            data = archive_response.json()
-            if data.get("ok") and data.get("action") == "archived":
-                print_test(f"Archive organization {org_name}", True, f"Successfully archived: {data}")
-                passed += 1
-            else:
-                print_test(f"Archive organization {org_name}", False, f"Unexpected response: {data}")
-                failed += 1
-                return passed, failed
-        else:
-            print_test(f"Archive organization {org_name}", False, f"Status {archive_response.status_code}: {archive_response.text[:200]}")
-            failed += 1
-            return passed, failed
-        
-        # Test 2: Verify organization is archived (should not appear in default list)
-        orgs_response = requests.get(f"{BASE_URL}/organizations", headers=ADMIN_HEADERS, timeout=10)
-        if orgs_response.status_code == 200:
-            orgs = orgs_response.json()
-            archived_org = next((o for o in orgs if o.get("id") == org_id), None)
-            if archived_org is None:
-                print_test("Verify archived org not in default list", True, "Archived org correctly filtered out")
-                passed += 1
-            else:
-                print_test("Verify archived org not in default list", False, f"Archived org still appears: {archived_org}")
-                failed += 1
-        else:
-            print_test("Verify archived org not in default list", False, f"Failed to get organizations: {orgs_response.status_code}")
-            failed += 1
-        
-        # Test 3: Restore the organization
-        restore_response = requests.post(
-            f"{BASE_URL}/admin/organizations/{org_id}/restore",
-            headers=ADMIN_HEADERS,
-            json={},
-            timeout=10
-        )
-        
-        if restore_response.status_code == 200:
-            data = restore_response.json()
-            if data.get("ok") and data.get("action") == "restored":
-                print_test(f"Restore organization {org_name}", True, f"Successfully restored: {data}")
-                passed += 1
-            else:
-                print_test(f"Restore organization {org_name}", False, f"Unexpected response: {data}")
-                failed += 1
-                return passed, failed
-        else:
-            print_test(f"Restore organization {org_name}", False, f"Status {restore_response.status_code}: {restore_response.text[:200]}")
-            failed += 1
-            return passed, failed
-        
-        # Test 4: Verify organization is restored (should appear in default list)
-        orgs_response = requests.get(f"{BASE_URL}/organizations", headers=ADMIN_HEADERS, timeout=10)
-        if orgs_response.status_code == 200:
-            orgs = orgs_response.json()
-            restored_org = next((o for o in orgs if o.get("id") == org_id), None)
-            if restored_org and not restored_org.get("archived_at"):
-                print_test("Verify restored org in default list", True, "Restored org correctly appears in active list")
-                passed += 1
-            else:
-                print_test("Verify restored org in default list", False, f"Restored org not found or still archived: {restored_org}")
-                failed += 1
-        else:
-            print_test("Verify restored org in default list", False, f"Failed to get organizations: {orgs_response.status_code}")
-            failed += 1
+        reg_id = test_reg['id']
+        log(f"Using registration: {reg_id} (status: {test_reg.get('status')})")
         
     except Exception as e:
-        print_test("Functional archive/restore test", False, f"Exception: {str(e)}")
-        failed += 1
+        log(f"Step 0 failed: {str(e)}", "ERROR")
+        return False
     
-    print(f"Functional Tests Summary: {passed} passed, {failed} failed\n")
-    return passed, failed
-
-def test_filter_regression():
-    """Test filter regression: GET /api/organizations with and without only_archived"""
-    print("=" * 80)
-    print("FILTER REGRESSION TEST - only_archived parameter")
-    print("=" * 80)
-    
-    passed = 0
-    failed = 0
-    
+    # Step 1: Submit a caution appointment via POST /api/exposant/caution-appointment
     try:
-        # Test 1: GET /api/organizations (default - should not include archived)
-        response = requests.get(f"{BASE_URL}/organizations", headers=ADMIN_HEADERS, timeout=10)
-        if response.status_code == 200:
-            orgs = response.json()
-            has_archived = any(org.get("archived_at") for org in orgs)
-            if not has_archived:
-                print_test("GET /api/organizations (default)", True, f"No archived orgs in default list ({len(orgs)} orgs)")
-                passed += 1
-            else:
-                archived_count = sum(1 for org in orgs if org.get("archived_at"))
-                print_test("GET /api/organizations (default)", False, f"Found {archived_count} archived orgs in default list")
-                failed += 1
-        else:
-            print_test("GET /api/organizations (default)", False, f"Status {response.status_code}: {response.text[:200]}")
-            failed += 1
+        log("Step 1: Submitting caution appointment request...")
+        payload = {
+            "registration_id": reg_id,
+            "organization_id": test_reg.get('organization_id'),
+            "requested_date": "2026-09-15",
+            "requested_time": "14:00",
+            "requested_place": "aracom_paea",
+            "notes": "Test appointment request"
+        }
+        r = requests.post(f"{BASE_URL}/exposant/caution-appointment",
+                         headers=EXPOSANT_HEADERS, json=payload, timeout=10)
         
-        # Test 2: GET /api/organizations?only_archived=true (should return only archived)
-        response = requests.get(f"{BASE_URL}/organizations?only_archived=true", headers=ADMIN_HEADERS, timeout=10)
-        if response.status_code == 200:
-            orgs = response.json()
-            all_archived = all(org.get("archived_at") for org in orgs) if orgs else True
-            if all_archived:
-                print_test("GET /api/organizations?only_archived=true", True, f"All {len(orgs)} orgs are archived")
-                passed += 1
-            else:
-                non_archived_count = sum(1 for org in orgs if not org.get("archived_at"))
-                print_test("GET /api/organizations?only_archived=true", False, f"Found {non_archived_count} non-archived orgs")
-                failed += 1
-        else:
-            print_test("GET /api/organizations?only_archived=true", False, f"Status {response.status_code}: {response.text[:200]}")
-            failed += 1
+        if r.status_code != 200:
+            results.append(test_result("Step 1: Submit appointment", False,
+                                      f"Status: {r.status_code}, Body: {r.text[:200]}"))
+            return False
+        
+        data = r.json()
+        if not data.get('ok') or not data.get('appointment'):
+            results.append(test_result("Step 1: Submit appointment", False,
+                                      f"Missing ok/appointment in response: {data}"))
+            return False
+        
+        appt = data['appointment']
+        appt_id = appt.get('id')
+        
+        # Verify requested_place field is present
+        has_place = 'requested_place' in appt
+        results.append(test_result("Step 1: Submit appointment → 200 with requested_place", 
+                                  has_place and appt_id is not None,
+                                  f"Appointment ID: {appt_id}, requested_place: {appt.get('requested_place')}"))
+        
+        if not appt_id:
+            return False
+            
+    except Exception as e:
+        results.append(test_result("Step 1: Submit appointment", False, str(e)))
+        return False
+    
+    # Step 2: Validate it via POST /api/admin/caution-appointments/update
+    try:
+        log("Step 2: Validating appointment (admin)...")
+        payload = {
+            "id": appt_id,
+            "status": "confirme",
+            "confirmed_place": "sur_site",
+            "confirmed_date": "2026-09-15",
+            "confirmed_time": "15:00",
+            "admin_note": "Confirmé par test automatique"
+        }
+        r = requests.post(f"{BASE_URL}/admin/caution-appointments/update",
+                         headers=ADMIN_HEADERS, json=payload, timeout=10)
+        
+        if r.status_code != 200:
+            results.append(test_result("Step 2: Validate appointment", False,
+                                      f"Status: {r.status_code}, Body: {r.text[:200]}"))
+            return False
+        
+        data = r.json()
+        if not data.get('ok') or not data.get('appointment'):
+            results.append(test_result("Step 2: Validate appointment", False,
+                                      f"Missing ok/appointment in response: {data}"))
+            return False
+        
+        appt = data['appointment']
+        has_confirmed_place = 'confirmed_place' in appt and appt['confirmed_place'] == 'sur_site'
+        results.append(test_result("Step 2: Validate appointment → 200 with confirmed_place",
+                                  has_confirmed_place,
+                                  f"Status: {appt.get('status')}, confirmed_place: {appt.get('confirmed_place')}"))
         
     except Exception as e:
-        print_test("Filter regression test", False, f"Exception: {str(e)}")
-        failed += 1
+        results.append(test_result("Step 2: Validate appointment", False, str(e)))
+        return False
     
-    print(f"Filter Regression Tests Summary: {passed} passed, {failed} failed\n")
-    return passed, failed
+    # Step 3: Reset it via POST /api/admin/registrations/{regId}/reset-caution-appointment
+    try:
+        log("Step 3: Resetting caution appointment...")
+        r = requests.post(f"{BASE_URL}/admin/registrations/{reg_id}/reset-caution-appointment",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        
+        if r.status_code != 200:
+            results.append(test_result("Step 3: Reset appointment", False,
+                                      f"Status: {r.status_code}, Body: {r.text[:200]}"))
+            return False
+        
+        data = r.json()
+        has_action = data.get('action') == 'caution_appointment_deleted'
+        results.append(test_result("Step 3: Reset appointment → 200 action=caution_appointment_deleted",
+                                  has_action,
+                                  f"Response: {data}"))
+        
+    except Exception as e:
+        results.append(test_result("Step 3: Reset appointment", False, str(e)))
+        return False
+    
+    # Step 4: Re-call reset → should return 404
+    try:
+        log("Step 4: Re-calling reset (should fail)...")
+        r = requests.post(f"{BASE_URL}/admin/registrations/{reg_id}/reset-caution-appointment",
+                         headers=ADMIN_HEADERS, json={}, timeout=10)
+        
+        is_404 = r.status_code == 404 and "aucun" in r.text.lower()
+        results.append(test_result("Step 4: Re-call reset → 404 'Aucun RDV'",
+                                  is_404,
+                                  f"Status: {r.status_code}, Body: {r.text[:100]}"))
+        
+    except Exception as e:
+        results.append(test_result("Step 4: Re-call reset", False, str(e)))
+        return False
+    
+    return all(results)
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN TEST RUNNER
+# ═══════════════════════════════════════════════════════════════════
 
 def main():
-    print("\n" + "=" * 80)
-    print("BACKEND REGRESSION TEST - Admin Delete/Archive/Reset Endpoints")
-    print("Session 23 - Refactoring Verification")
-    print("=" * 80 + "\n")
+    """Run all regression tests"""
+    log("=" * 70)
+    log("BACKEND REGRESSION TESTS - 3 EXTRACTED HANDLER MODULES")
+    log("Backend URL: " + BASE_URL)
+    log("=" * 70)
+    print()
     
-    total_passed = 0
-    total_failed = 0
+    all_passed = True
     
-    # Run all test suites
-    p, f = test_smoke_404_endpoints()
-    total_passed += p
-    total_failed += f
+    # Module 1: admin-delete-reset (smoke tests only, already fully tested)
+    try:
+        passed = test_module1_smoke()
+        all_passed = all_passed and passed
+        log(f"Module 1 Result: {'✅ PASS' if passed else '❌ FAIL'}")
+    except Exception as e:
+        log(f"Module 1 crashed: {str(e)}", "ERROR")
+        all_passed = False
     
-    p, f = test_permission_403_endpoints()
-    total_passed += p
-    total_failed += f
+    print()
     
-    p, f = test_functional_archive_restore()
-    total_passed += p
-    total_failed += f
+    # Module 2: caution-appointments (NEW EXTRACTION)
+    try:
+        passed = test_module2_smoke()
+        all_passed = all_passed and passed
+        log(f"Module 2 Result: {'✅ PASS' if passed else '❌ FAIL'}")
+    except Exception as e:
+        log(f"Module 2 crashed: {str(e)}", "ERROR")
+        all_passed = False
     
-    p, f = test_filter_regression()
-    total_passed += p
-    total_failed += f
+    print()
     
-    # Final summary
-    print("\n" + "=" * 80)
-    print("FINAL SUMMARY")
-    print("=" * 80)
-    print(f"Total Tests: {total_passed + total_failed}")
-    print(f"✅ Passed: {total_passed}")
-    print(f"❌ Failed: {total_failed}")
-    print(f"Success Rate: {(total_passed / (total_passed + total_failed) * 100):.1f}%")
-    print("=" * 80 + "\n")
+    # Module 3: caution-receipts (NEW EXTRACTION)
+    try:
+        passed = test_module3_smoke()
+        all_passed = all_passed and passed
+        log(f"Module 3 Result: {'✅ PASS' if passed else '❌ FAIL'}")
+    except Exception as e:
+        log(f"Module 3 crashed: {str(e)}", "ERROR")
+        all_passed = False
     
-    # Exit with appropriate code
-    sys.exit(0 if total_failed == 0 else 1)
+    print()
+    
+    # Functional end-to-end test
+    try:
+        passed = test_functional_e2e()
+        all_passed = all_passed and passed
+        log(f"Functional E2E Result: {'✅ PASS' if passed else '❌ FAIL'}")
+    except Exception as e:
+        log(f"Functional E2E crashed: {str(e)}", "ERROR")
+        all_passed = False
+    
+    print()
+    log("=" * 70)
+    if all_passed:
+        log("🎉 ALL TESTS PASSED - NO REGRESSION DETECTED", "SUCCESS")
+        log("=" * 70)
+        return 0
+    else:
+        log("❌ SOME TESTS FAILED - REGRESSION DETECTED", "ERROR")
+        log("=" * 70)
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
