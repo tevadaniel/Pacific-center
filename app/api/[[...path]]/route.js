@@ -2538,11 +2538,18 @@ export async function POST(request, { params }) {
       // Génère le PDF
       const pdfGen = await import('@/lib/pdf-generators');
       let buf;
+      // URL portail pour le QR code du badge
+      let portalUrl = null;
+      try {
+        if (doc_type === 'badge_exposant' && org?.id) {
+          portalUrl = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request);
+        }
+      } catch {}
       try {
         if (doc_type === 'convention') buf = await pdfGen.generateConventionPDF({ org, reg, venue });
         else if (doc_type === 'recu_caution') buf = await pdfGen.generateRecuCautionPDF({ org, reg, venue, deposit });
         else if (doc_type === 'attestation_remboursement') buf = await pdfGen.generateAttestationRemboursementPDF({ org, reg, venue, deposit });
-        else if (doc_type === 'badge_exposant') buf = await pdfGen.generateBadgePDF({ org, reg, venue });
+        else if (doc_type === 'badge_exposant') buf = await pdfGen.generateBadgePDF({ org, reg, venue, portalUrl });
       } catch (e) {
         console.error('[pdf-generate]', e);
         return err(`Erreur génération PDF: ${e.message}`, 500);

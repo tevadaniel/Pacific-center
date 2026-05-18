@@ -75,9 +75,25 @@ export default function ExposantPortal() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const sync = () => {
-      const t = new URLSearchParams(window.location.search).get('tab');
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get('tab');
       const valid = ['parcours', 'profil', 'infos', 'jourj', 'bilan'];
       if (t && valid.includes(t)) setActiveTab(t);
+      // 🆕 SESSION 29 — support ?section=convention|recu|remboursement|documents
+      const section = params.get('section');
+      if (section) {
+        // section → tab mapping : tous documents vont sur 'parcours' (étape 3 Documents)
+        setActiveTab('parcours');
+        // Scroll vers la section après render
+        setTimeout(() => {
+          const el = document.querySelector(`[data-portal-section="${section}"]`) || document.getElementById(`section-${section}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2', 'rounded-lg');
+            setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2', 'rounded-lg'), 3000);
+          }
+        }, 800);
+      }
     };
     sync();
     window.addEventListener('popstate', sync);
@@ -255,6 +271,8 @@ export default function ExposantPortal() {
                   href={`/api/exposant/documents/convention/${r.id}`}
                   target="_blank"
                   rel="noreferrer"
+                  data-portal-section="convention"
+                  id="section-convention"
                   className="group flex items-center gap-3 p-3 rounded-lg bg-aracom-black text-aracom-beige-pale hover:bg-aracom-black/90 transition shadow-sm"
                   data-testid="download-convention"
                 >
@@ -291,6 +309,8 @@ export default function ExposantPortal() {
                     href={`/api/documents/${cautionReceiptDoc.id}/download`}
                     target="_blank"
                     rel="noreferrer"
+                    data-portal-section="recu"
+                    id="section-recu"
                     className="group flex items-center gap-3 p-3 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition shadow-sm"
                     data-testid="download-receipt"
                   >
@@ -483,7 +503,8 @@ export default function ExposantPortal() {
                     </div>
                   )}
                   {refundAttestationDoc && (
-                    <a href={`/api/documents/${refundAttestationDoc.id}/download`} target="_blank" rel="noreferrer">
+                    <a href={`/api/documents/${refundAttestationDoc.id}/download`} target="_blank" rel="noreferrer"
+                       data-portal-section="remboursement" id="section-remboursement">
                       <Button size="sm" variant="outline" className="w-full gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                         <Download className="w-4 h-4" /> Attestation de remboursement de caution
                         {refundAttestationDoc.is_signed && <Badge className="bg-emerald-600 text-white text-[10px] ml-1">Signée</Badge>}
