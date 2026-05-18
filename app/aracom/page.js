@@ -36,6 +36,7 @@ import BulkExportDialog from '@/components/bulk-export-dialog';
 import AdminOverridePanel from '@/components/aracom/admin-override-panel';
 import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import CorbeilleView from '@/components/aracom/corbeille-view';
+import OrgsSansDossierView from '@/components/aracom/orgs-sans-dossier-view';
 import CautionAppointmentsAdminPanel from '@/components/aracom/caution-appointments-panel';
 import { ExposantPanelProvider, useExposantPanel, ExposantLink } from '@/components/aracom/exposant-panel-context';
 import AnomaliesView from '@/components/aracom/anomalies-view';
@@ -70,6 +71,7 @@ const TABS = [
   { key: 'animations', label: '🎭 Animations', href: '/aracom?tab=animations' },
   { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
   { key: 'corbeille', label: '🗑 Corbeille', href: '/aracom?tab=corbeille' },
+  { key: 'orgs-sans-dossier', label: '⚠ Orgs sans dossier', href: '/aracom?tab=orgs-sans-dossier' },
   { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
 ];
 
@@ -86,7 +88,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: '👥',
-    items: ['exposants', 'cautions', 'relances', 'prospection', 'corbeille'],
+    items: ['exposants', 'cautions', 'relances', 'prospection', 'corbeille', 'orgs-sans-dossier'],
   },
   {
     key: 'communication',
@@ -183,6 +185,7 @@ export default function AracomPage() {
       {activeTab === 'animations' && <AnimationsView />}
       {activeTab === 'import' && <ImportExcelView />}
       {activeTab === 'corbeille' && <CorbeilleView />}
+      {activeTab === 'orgs-sans-dossier' && <OrgsSansDossierView />}
       <ChatbotFloating role="aracom_admin" />
     </Shell>
     </ExposantPanelProvider>

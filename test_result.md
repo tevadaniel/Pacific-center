@@ -1835,3 +1835,24 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28c — REFACTORING BACKEND PHASE 6. Extraction de 9 endpoints GET (5 dashboard + 4 PDF) vers 2 nouveaux handlers modulaires. route.js réduit de 8235 → 8036 lignes (-199 lignes, -2.4%). 12/12 tests backend OK. UI testé visuellement : dashboard charge correctement avec briefing temps réel, 6 sites/67 exposants/KPIs corrects. EDITION_ID extrait en helper partagé. Strucutre handlers actuelle : admin-delete-reset.js (315l), caution-appointments.js (214l), caution-receipts.js (170l), dashboard.js (149l), exposant-documents.js (126l). Future tâches possibles : extraire encore attendance, auth, registration handlers."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28d — Admin endpoint: Initialize registration for organizations
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "Admin endpoint: POST /api/admin/organizations/:id/initialize-registration"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 5/5 TESTS PASSÉS (100%). Endpoint POST /api/admin/organizations/:id/initialize-registration 100% fonctionnel. TEST 1 (Permission check): POST sans x-user-role admin (avec role=exposant) → 403 'Accès admin requis' ✅. TEST 2 (404 non-existent org): POST /api/admin/organizations/non-existent-org-xyz-12345/initialize-registration avec admin headers → 404 'Organisation introuvable' ✅. TEST 3 (Happy path): Création org test via DB insert → vérification org absente de GET /api/registrations → POST initialize-registration avec body {venue_id:'venue-aru'} → 200 OK avec {ok:true, action:'registration_initialized', registration_id:<uuid>, organization_id:<uuid>} → GET /api/registrations/:id confirme status='a_confirmer', venue_id='venue-aru', edition_id='edition-2026', source='admin_manual', candidature_locked=false, wizard_step=2 → GET /api/exposant/my-sites?organization_id=<orgId> retourne array de 1 registration ✅. TEST 4 (Idempotency): Premier appel initialize-registration → 200 OK, deuxième appel sur même org → 400 'Cette organisation a déjà un dossier 2026...' ✅. TEST 5 (Initialize without venue): POST initialize-registration avec body {} (sans venue_id) → 200 OK → GET /api/registrations/:id confirme venue_id=null, wizard_step=1 ✅. Cleanup: 3 test organizations et registrations supprimés après tests. Endpoint prêt pour production."
+
+agent_communication:
+    - agent: "testing"
+      message: "SESSION 28d BACKEND TESTS COMPLETED — 5/5 tests passed (100%). New admin endpoint POST /api/admin/organizations/:id/initialize-registration is fully functional. This endpoint allows ARACOM admins to initialize a registration (dossier 2026) for organizations that exist in the database but have no active registration yet. Key features tested: (1) Admin-only access with proper 403 error for non-admin roles. (2) 404 error for non-existent organizations. (3) Happy path creates registration with venue_id (wizard_step=2) or without venue_id (wizard_step=1). (4) Idempotency check prevents duplicate registrations for same organization. (5) All registration fields correctly set (status='a_confirmer', source='admin_manual', candidature_locked=false, edition_id='edition-2026'). (6) Registration visible via GET /api/exposant/my-sites endpoint. Use case: When an organization is manually inserted into the database (via import or direct DB insert), this endpoint creates the missing registration link to Forum 2026, allowing the exposant to access their portal. No regressions detected. Ready for production."
+

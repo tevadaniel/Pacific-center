@@ -125,10 +125,31 @@ export default function ExposantPortal() {
 
   if (loading) return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><div className="py-20 text-center text-slate-500">Chargement…</div></Shell>;
   if (!data?.registration) {
+    // 🆕 Distinguer les 2 causes possibles pour mieux orienter l'utilisateur
+    const hasOrg = !!data?.me?.organization;
     return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><Card><CardContent className="py-12 text-center">
       <Info className="w-12 h-12 mx-auto text-slate-400" />
       <p className="mt-3 font-medium">Votre dossier n&apos;a pas encore été initialisé</p>
-      <p className="text-slate-500 text-sm">L&apos;équipe ARACOM va bientôt vous contacter.</p>
+      {hasOrg ? (
+        <>
+          <p className="text-slate-500 text-sm mt-2">
+            Votre compte est lié à <b>{data.me.organization.name}</b>, mais aucune inscription au Forum 2026 n&apos;est encore enregistrée.
+          </p>
+          <p className="text-slate-500 text-xs mt-2">L&apos;équipe ARACOM va bientôt créer votre inscription. Vous recevrez un email quand votre dossier sera prêt.</p>
+        </>
+      ) : (
+        <>
+          <p className="text-slate-500 text-sm mt-2">
+            Aucune organisation n&apos;est liée à votre compte.
+          </p>
+          <p className="text-slate-500 text-xs mt-2">
+            Contactez ARACOM si vous pensez qu&apos;il s&apos;agit d&apos;une erreur — votre lien d&apos;accès est peut-être à régénérer.
+          </p>
+        </>
+      )}
+      <p className="text-xs text-slate-400 mt-4">
+        📧 contact@aracom.pf
+      </p>
     </CardContent></Card></Shell>;
   }
 
