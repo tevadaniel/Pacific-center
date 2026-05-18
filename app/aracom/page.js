@@ -334,6 +334,10 @@ function ExposantsView() {
   const [showBulkExport, setShowBulkExport] = useState(false);
   const { open: openExposant, refreshTrigger } = useExposantPanel();
 
+  // 🛡️ SESSION 28r — Compteur de requêtes pour ignorer les réponses obsolètes
+  //     (sinon, en cas de filter rapide, l'ancienne réponse écrase la nouvelle → exposants qui clignotent)
+  const loadSeqRef = useRef(0);
+
   // 🔗 Ouvre directement la fiche si un registration_id est passé dans l'URL (?open=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -348,18 +352,38 @@ function ExposantsView() {
   }, []);
 
   const load = async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const qs = new URLSearchParams();
       Object.entries(filters).forEach(([k, v]) => { if (v) qs.set(k, v); });
+      // 🛡️ Cache-buster pour les navigateurs récalcitrants (Safari iOS notamment)
+      qs.set('_t', Date.now().toString());
       const [r, v] = await Promise.all([api('/api/registrations?' + qs.toString()), api('/api/venues')]);
+      // 🛡️ Si une requête plus récente est partie entretemps, on ignore cette réponse
+      if (seq !== loadSeqRef.current) return;
       setRows(r); setVenues(v);
-    } catch (e) { toast.error(e.message); }
-    setLoading(false);
+    } catch (e) {
+      if (seq === loadSeqRef.current) toast.error(e.message);
+    }
+    if (seq === loadSeqRef.current) setLoading(false);
   };
   useEffect(() => { load(); }, [filters]);
   // Recharge après fermeture d'une fiche pour répercuter les modifications
   useEffect(() => { if (refreshTrigger) load(); }, [refreshTrigger]);
+
+  // 🆕 SESSION 28r — Après création d'un nouvel exposant, on reset les filtres ET on attend
+  //     que le DB soit bien committé avant de recharger (évite les exposants qui clignotent)
+  const handleCreated = async () => {
+    setShowNew(false);
+    // Reset filtres pour s'assurer que le nouvel exposant est bien visible
+    // (status par défaut = 'contacte', donc si l'utilisateur filtre par confirmé, il ne le verrait pas)
+    setFilters({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
+    // Petit delay pour laisser le temps au backend de commit + au state de se mettre à jour
+    await new Promise((r) => setTimeout(r, 250));
+    await load();
+    toast.info('✅ Liste rafraîchie — le nouvel exposant doit apparaître maintenant');
+  };
 
   return (
     <div className="space-y-4">
@@ -430,7 +454,7 @@ function ExposantsView() {
           </div>
         </CardContent>
       </Card>
-      {showNew && <NewExposantDialog venues={venues} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
+      {showNew && <NewExposantDialog venues={venues} onClose={() => setShowNew(false)} onCreated={handleCreated} />}
 
       <BulkExportDialog
         open={showBulkExport}

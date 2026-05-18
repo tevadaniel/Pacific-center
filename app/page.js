@@ -187,7 +187,12 @@ export default function HomePage() {
                   >Renvoyer à un autre email</button>
                 </div>
               ) : (
-                <form onSubmit={submitPassword} className="space-y-4">
+                <form
+                  onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); submitPassword(e); return false; }}
+                  action="javascript:void(0);"
+                  noValidate
+                  className="space-y-4"
+                >
                   {/* Champ Email */}
                   <div className="space-y-1.5">
                     <label htmlFor="email-input" className="text-[11px] tracking-wider uppercase text-aracom-gold/70">Email</label>

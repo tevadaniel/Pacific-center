@@ -145,9 +145,14 @@ export default function SendExposantMailDialog({ registration, organization, ven
   };
 
   return (!mounted || typeof document === 'undefined') ? null : createPortal(
-    <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"
+      style={{ pointerEvents: 'auto' }}
+      onClick={onClose}
+    >
       <div
         className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        style={{ pointerEvents: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
