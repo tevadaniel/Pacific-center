@@ -2042,3 +2042,60 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28g — RÉSOLUTION COMPLÈTE 'Aucune organisation liée'. L'utilisateur a montré une capture montrant que le compte ARACOM 1 voit 'Aucune organisation n'est liée à votre compte' en production. Diagnostic : c'est un user qui existe mais sans organization_id. Solution livrée : (1) Endpoint GET /api/admin/users-without-org pour lister ces users orphelins (admin only, security). (2) Endpoint POST /api/admin/users/:id/link-organization pour les lier à une org existante. (3) Nouvelle section UI rouge dans l'onglet '⚠ Comptes & Dossiers' avec dropdown des 66 orgs + bouton 'Lier' + match email automatique. (4) Fix auth des boutons Initialiser via passage à api() helper. Backend testé 8/8. Frontend testé visuellement E2E avec succès. Prêt pour Save to Github → déploiement production."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28i — Auto-création dossier à l'import + Auto-réparation bulk
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Auto-création dossier 2026 lors de l'import Excel"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (ligne ~5477)"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "FIX SOURCE PROBLÈME — L'import Excel des prospects historiques créait des organisations SANS registration 2026 → l'exposant voyait 'Dossier non initialisé'. Désormais, après chaque insertion d'organisation, une registration 2026 vierge (id=reg-{orgId}, status=prospect, source=import_excel, wizard_step=1) est créée automatiquement. SAUF pour les contacts mailing-only (isContactOnly=true) qui ne sont pas des exposants à proprement parler."
+
+  - task: "NEW — Helper ensureRegistrationForOrg dans lib/api/helpers.js"
+    implemented: true
+    working: true
+    file: "lib/api/helpers.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW — Fonction utilitaire ensureRegistrationForOrg(db, orgId, options) : vérifie si une org a une registration 2026 active (status != annule), sinon en crée une minimale. Skip les orgs archivées et mailing_only (sauf options.force). Génère un id unique avec uuid suffix si reg-{orgId} existe déjà. À utiliser dans tout flow qui crée des organisations."
+
+  - task: "NEW — Endpoint POST /api/admin/auto-repair/initialize-all-missing-registrations"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW BACKEND — Auto-réparation en lot : parcourt toutes les organisations non archivées + non mailing-only, et crée une registration pour celles qui n'en ont pas. Admin only (403). Idempotent (already_ok counter). Retourne {created, already_ok, errors}. Logué dans activity_logs. Testé 3/3 incluant test E2E avec 4 orgs (1 sans reg, 1 avec reg, 1 archived, 1 mailing) + appel idempotent. Aucune régression sur dashboard/stats/unlock-candidature."
+
+  - task: "NEW UI — Bouton '⚡ Auto-réparer tout'"
+    implemented: true
+    working: true
+    file: "components/aracom/orgs-sans-dossier-view.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UI — Bouton orange '⚡ Auto-réparer tout' intégré dans la bannière de la section 'Organisations sans dossier'. Confirmation native. Appel /api/admin/auto-repair/initialize-all-missing-registrations. Toast récapitulatif avec compteurs. Testé E2E preview : 13 orgs sans dossier → clic → toast '⚡ 13 dossier(s) créé(s) (67 déjà OK)' → liste vide → '✨ Toutes les organisations actives ont un dossier 2026'."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28i — AUTOMATISATION COMPLÈTE. User demande : 'des qu'on crée un exposant, on crée automatiquement un dossier'. Solution : (1) Investigation des 8 flows de création d'organisation → un seul (import Excel ligne 5477) créait sans registration. Corrigé. (2) Helper ensureRegistrationForOrg ajouté dans helpers.js pour usage futur dans nouveaux flows. (3) Endpoint admin auto-repair pour fixer en masse les orgs héritées qui n'ont pas de dossier. (4) Bouton UI '⚡ Auto-réparer tout' dans la section 'Comptes & Dossiers'. Backend testé 3/3 incluant idempotence, skip archivées, skip mailing-only, régressions. Frontend testé E2E : 13 orgs → clic → 0 org. Prêt Save to Github."
+
