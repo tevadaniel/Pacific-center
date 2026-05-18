@@ -1802,3 +1802,36 @@ agent_communication:
     - agent: "testing"
       message: "SESSION 28 UI TESTS COMPLETED — 100% FONCTIONNEL. Tous les tests de la review_request passés avec succès. (A) ARACOM Dashboard: charge sans erreur, 'Demandes de validation à traiter' card présente. (B) Fiche Exposant: 'Résumé Choix Forum' visible avec stand A-C01 + Arue + 2 animations détaillées (Ven/Sam), badge 'Candidature verrouillée' présent, bouton '🔓 Débloquer candidature' visible et fonctionnel, déblocage réussi avec toast + badge change vers 'Modifiable' + bouton disparaît. (C) Exposant Portal: charge correctement avec header ACE Arue, documents officiels présents, sites participation visible, pas de modal automatique. (D) Multi-site: bouton 'Ajouter un autre site' présent. (E) Navigation ARACOM: 14/14 tabs testés sans crash (Dashboard, Exposants, Validations, Cautions, Mailing, Relances, Anomalies, Bilans, Satisfaction, Documents officiels, Deadlines, Sauvegarde, Corbeille, Import Excel). Points mineurs: 8 warnings React hydration (non bloquant), section confirmation exposant non visible dans test (peut nécessiter scroll ou dossier incomplet). Toutes les features SESSION 28 sont opérationnelles et prêtes pour production."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28c — Refactoring backend Phase 6 (extraction handlers GET)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "REFACTOR — Extract dashboard GET endpoints (kpis, by-site, jour-j-live, alerts, stats/public)"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/dashboard.js + app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "REFACTORING — Extraction des 5 endpoints dashboard GET vers /app/lib/api/handlers/dashboard.js (149 lignes). Inclut les helpers internes computeKpis et computeBySite (réexportés pour compat). Une constante EDITION_ID partagée a été ajoutée dans /app/lib/api/helpers.js. Backend testé 12/12 sans régression. route.js réduit de 8235 → 8036 lignes (-199)."
+
+  - task: "REFACTOR — Extract PDF document endpoints (convention, guide, questionnaire)"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/exposant-documents.js + app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "REFACTORING — Extraction des 4 endpoints PDF GET vers /app/lib/api/handlers/exposant-documents.js (126 lignes). Convention, Guide, Questionnaire-blank, Questionnaire-filled. Imports dynamiques de document-generator conservés pour optimiser le bundle initial. Testés 3/3 sans régression (Content-Type=application/pdf, body ≥ 6KB)."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28c — REFACTORING BACKEND PHASE 6. Extraction de 9 endpoints GET (5 dashboard + 4 PDF) vers 2 nouveaux handlers modulaires. route.js réduit de 8235 → 8036 lignes (-199 lignes, -2.4%). 12/12 tests backend OK. UI testé visuellement : dashboard charge correctement avec briefing temps réel, 6 sites/67 exposants/KPIs corrects. EDITION_ID extrait en helper partagé. Strucutre handlers actuelle : admin-delete-reset.js (315l), caution-appointments.js (214l), caution-receipts.js (170l), dashboard.js (149l), exposant-documents.js (126l). Future tâches possibles : extraire encore attendance, auth, registration handlers."
+
