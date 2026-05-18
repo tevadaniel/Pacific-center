@@ -57,56 +57,64 @@ import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 
+// 🎨 SESSION 28w — Menus harmonisés avec icônes Lucide cohérentes
+//    Chaque tab a son icône (icon: lucide component name). Plus d'emojis aléatoires.
+//    Items "admin" séparés visuellement par adminTool: true (dans le dropdown, un divider apparaît avant).
 const TABS = [
-  { key: 'dashboard', label: 'Dashboard', href: '/aracom' },
-  { key: 'exposants', label: 'Exposants', href: '/aracom?tab=exposants' },
-  { key: 'sites', label: 'Sites & stands', href: '/aracom?tab=sites' },
-  { key: 'validations', label: 'Validations', href: '/aracom?tab=validations' },
-  { key: 'access', label: 'Liens d\'accès', href: '/aracom?tab=access' },
-  { key: 'cautions', label: 'Cautions', href: '/aracom?tab=cautions' },
-  { key: 'mailing', label: 'Mailing', href: '/aracom?tab=mailing' },
-  { key: 'relances', label: 'Relances', href: '/aracom?tab=relances' },
-  { key: 'prospection', label: 'Prospection', href: '/aracom?tab=prospection' },
-  { key: 'anomalies', label: 'Anomalies', href: '/aracom?tab=anomalies' },
-  { key: 'bilans', label: 'Bilans', href: '/aracom?tab=bilans' },
-  { key: 'satisfaction', label: 'Satisfaction', href: '/aracom?tab=satisfaction' },
-  { key: 'documents-officiels', label: 'Docs officiels', href: '/aracom?tab=documents-officiels' },
-  { key: 'deadlines', label: '⏰ Deadlines', href: '/aracom?tab=deadlines' },
-  { key: 'animations', label: '🎭 Animations', href: '/aracom?tab=animations' },
-  { key: 'backup', label: 'Sauvegarde', href: '/aracom?tab=backup' },
-  { key: 'corbeille', label: '🗑 Corbeille', href: '/aracom?tab=corbeille' },
-  { key: 'orgs-sans-dossier', label: '⚠ Comptes & Dossiers', href: '/aracom?tab=orgs-sans-dossier' },
-  { key: 'import', label: 'Import Excel', href: '/aracom?tab=import' },
+  { key: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', href: '/aracom' },
+  // Pilotage
+  { key: 'anomalies', label: 'Anomalies', icon: 'AlertCircle', href: '/aracom?tab=anomalies' },
+  { key: 'validations', label: 'Validations', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
+  { key: 'bilans', label: 'Bilans', icon: 'BarChart3', href: '/aracom?tab=bilans' },
+  // Exposants
+  { key: 'exposants', label: 'Liste exposants', icon: 'Users', href: '/aracom?tab=exposants' },
+  { key: 'cautions', label: 'Cautions', icon: 'Wallet', href: '/aracom?tab=cautions' },
+  { key: 'relances', label: 'Relances', icon: 'Bell', href: '/aracom?tab=relances' },
+  { key: 'prospection', label: 'Prospection', icon: 'Target', href: '/aracom?tab=prospection' },
+  { key: 'corbeille', label: 'Corbeille', icon: 'Trash2', href: '/aracom?tab=corbeille', adminTool: true },
+  { key: 'orgs-sans-dossier', label: 'Comptes & dossiers', icon: 'AlertTriangle', href: '/aracom?tab=orgs-sans-dossier', adminTool: true },
+  // Communication
+  { key: 'mailing', label: 'Mailing', icon: 'Mail', href: '/aracom?tab=mailing' },
+  { key: 'documents-officiels', label: 'Docs officiels', icon: 'FileText', href: '/aracom?tab=documents-officiels' },
+  { key: 'access', label: "Liens d'accès", icon: 'Link2', href: '/aracom?tab=access' },
+  // Configuration
+  { key: 'sites', label: 'Sites & stands', icon: 'MapPin', href: '/aracom?tab=sites' },
+  { key: 'animations', label: 'Animations', icon: 'Sparkles', href: '/aracom?tab=animations' },
+  { key: 'deadlines', label: 'Deadlines', icon: 'Clock', href: '/aracom?tab=deadlines' },
+  { key: 'backup', label: 'Sauvegarde', icon: 'Database', href: '/aracom?tab=backup', adminTool: true },
+  { key: 'import', label: 'Import Excel', icon: 'Upload', href: '/aracom?tab=import', adminTool: true },
+  // Post-événement
+  { key: 'satisfaction', label: 'Satisfaction', icon: 'Star', href: '/aracom?tab=satisfaction' },
 ];
 
-// Regroupement intelligent des onglets en menus déroulants
+// 🎯 Regroupement intelligent : 6 catégories, chaque catégorie son icône principale
 const TAB_GROUPS = [
-  { key: 'dashboard', label: 'Dashboard', icon: '📊', single: true }, // Direct
+  { key: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard', single: true },
   {
     key: 'pilotage',
     label: 'Pilotage',
-    icon: '🎯',
+    icon: 'Compass',
     items: ['anomalies', 'validations', 'bilans'],
   },
   {
     key: 'exposants_grp',
     label: 'Exposants',
-    icon: '👥',
+    icon: 'Users',
     items: ['exposants', 'cautions', 'relances', 'prospection', 'corbeille', 'orgs-sans-dossier'],
   },
   {
     key: 'communication',
     label: 'Communication',
-    icon: '✉️',
+    icon: 'Mail',
     items: ['mailing', 'documents-officiels', 'access'],
   },
   {
     key: 'configuration',
     label: 'Configuration',
-    icon: '⚙️',
+    icon: 'Settings',
     items: ['sites', 'animations', 'deadlines', 'backup', 'import'],
   },
-  { key: 'satisfaction', label: 'Post-événement', icon: '⭐', single: true, redirectTo: 'satisfaction' },
+  { key: 'satisfaction', label: 'Post-événement', icon: 'Star', single: true, redirectTo: 'satisfaction' },
 ];
 
 // ============================================================

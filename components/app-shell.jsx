@@ -7,7 +7,21 @@ import Image from 'next/image';
 import { getSession, clearSession, api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { LogOut, MapPin, ChevronDown } from 'lucide-react';
+import { LogOut, MapPin, ChevronDown,
+  LayoutDashboard, Compass, Users, Mail, Settings, Star,
+  AlertCircle, ClipboardCheck, BarChart3,
+  Wallet, Bell, Target, Trash2, AlertTriangle,
+  FileText, Link2, Sparkles, Clock, Database, Upload,
+} from 'lucide-react';
+
+// 🎨 SESSION 28w — Map icônes string → composant Lucide pour les menus
+const ICONS = {
+  LayoutDashboard, Compass, Users, Mail, Settings, Star,
+  AlertCircle, ClipboardCheck, BarChart3,
+  Wallet, Bell, Target, Trash2, AlertTriangle,
+  FileText, Link2, Sparkles, Clock, Database, Upload, MapPin,
+};
+const getIcon = (name) => (name && ICONS[name]) ? ICONS[name] : null;
 
 export function Shell({ children, title, subtitle, right, allowedRoles, activeTab, tabs = [], tabGroups = null, onTabClick }) {
   const router = useRouter();
@@ -164,11 +178,12 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
         {tabGroups.map(group => {
           const active = isGroupActive(group);
           const cls = `flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-md whitespace-nowrap transition ${active ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`;
+          const Icon = getIcon(group.icon);
 
           if (group.single) {
             return (
               <button key={group.key} onClick={() => handleClick(group.redirectTo || group.key)} className={cls}>
-                <span className="text-base">{group.icon}</span>
+                {Icon ? <Icon className="w-4 h-4" /> : <span className="text-base">{group.icon}</span>}
                 <span>{group.label}</span>
               </button>
             );
@@ -184,9 +199,9 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
               aria-haspopup="menu"
               aria-expanded={openMenu === group.key}
             >
-              <span className="text-base">{group.icon}</span>
+              {Icon ? <Icon className="w-4 h-4" /> : <span className="text-base">{group.icon}</span>}
               <span>{group.label}</span>
-              {subLabel && <span className="text-xs text-blue-500 font-normal">· {subLabel}</span>}
+              {subLabel && <span className="text-xs text-blue-500 font-normal hidden sm:inline">· {subLabel}</span>}
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openMenu === group.key ? 'rotate-180' : ''}`} />
             </button>
           );
@@ -195,26 +210,43 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
       {openMenu && activeGroup && !activeGroup.single && (
         <div
           id="app-shell-dropdown-menu"
-          className="fixed z-[1000] w-56 bg-white rounded-md border border-slate-200 shadow-2xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-100"
+          className="fixed z-[1000] w-64 bg-white rounded-lg border border-slate-200 shadow-2xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-100"
           style={{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }}
           role="menu"
         >
-          {activeGroup.items.map(itemKey => {
-            const t = tabsByKey[itemKey];
-            if (!t) return null;
-            const itemActive = activeTab === itemKey;
+          {(() => {
+            const items = activeGroup.items.map((k) => tabsByKey[k]).filter(Boolean);
+            const normalItems = items.filter((t) => !t.adminTool);
+            const adminItems = items.filter((t) => t.adminTool);
+            const renderItem = (t) => {
+              const itemActive = activeTab === t.key;
+              const ItemIcon = getIcon(t.icon);
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => handleClick(t.key)}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                  role="menuitem"
+                >
+                  {ItemIcon ? <ItemIcon className={`w-4 h-4 shrink-0 ${itemActive ? 'text-blue-600' : 'text-slate-400'}`} /> : <span className="w-4 h-4 inline-block" />}
+                  <span className="flex-1">{t.label}</span>
+                  {itemActive && <span className="text-blue-500 text-xs">●</span>}
+                </button>
+              );
+            };
             return (
-              <button
-                key={itemKey}
-                onClick={() => handleClick(itemKey)}
-                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
-                role="menuitem"
-              >
-                {t.label}
-                {itemActive && <span className="ml-auto text-blue-500">●</span>}
-              </button>
+              <>
+                {normalItems.map(renderItem)}
+                {adminItems.length > 0 && (
+                  <>
+                    <div className="my-1 mx-2 border-t border-slate-200" />
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Outils admin</div>
+                    {adminItems.map(renderItem)}
+                  </>
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
       )}
     </>
