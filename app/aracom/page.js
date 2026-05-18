@@ -38,6 +38,7 @@ import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import SendExposantMailDialog from '@/components/aracom/send-exposant-mail-dialog';
 import EditExposantChoicesDialog from '@/components/aracom/edit-exposant-choices-dialog';
 import FicheExposantV2 from '@/components/aracom/fiche-exposant-v2';
+import ExposantsListView from '@/components/aracom/exposants-list-view';
 import CorbeilleView from '@/components/aracom/corbeille-view';
 import OrgsSansDossierView from '@/components/aracom/orgs-sans-dossier-view';
 import CautionAppointmentsAdminPanel from '@/components/aracom/caution-appointments-panel';
@@ -174,7 +175,7 @@ export default function AracomPage() {
       {activeTab === 'prospection' && <ProspectionAracomView />}
       {activeTab === 'documents-officiels' && <OfficialDocumentsView />}
       {activeTab === 'deadlines' && <DeadlinesView />}
-      {activeTab === 'exposants' && <ExposantsView />}
+      {activeTab === 'exposants' && <ExposantsListView />}
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'validations' && <ValidationsView />}
       {activeTab === 'access' && <AccessTokensView />}
