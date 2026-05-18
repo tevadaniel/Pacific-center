@@ -275,9 +275,23 @@ function sanitizeEmailHtml(html) {
  * Get-or-create a permanent access magic link for an exposant.
  * Returns the full URL (https://.../access/TOKEN).
  * Reuses the most recent non-revoked token if it exists, otherwise creates one.
+ *
+ * 🛡️ SESSION 29 — Garantit la cohérence avant de retourner le lien :
+ *   • S'assure que l'org a un user passwordless (auto-création si manquant)
+ *   • S'assure que le token a un user_id valide (sinon le relie au bon user)
+ *   • Vérifie que le token n'est pas expiré ou révoqué
  */
 async function getOrCreateExposantAccessUrl(db, organizationId, email, request) {
   if (!organizationId && !email) return null;
+
+  // 🛡️ 1️⃣ Préflight : garantir qu'un user existe pour l'org
+  if (organizationId) {
+    try {
+      const { ensureOrgHasUser } = await import('@/lib/data-integrity');
+      await ensureOrgHasUser(db, organizationId);
+    } catch (e) { console.warn('[access-url] preflight user-check failed:', e?.message); }
+  }
+
   const query = organizationId
     ? { organization_id: organizationId, purpose: 'exposant', revoked_at: null }
     : { email: String(email || '').toLowerCase().trim(), purpose: 'exposant', revoked_at: null };
@@ -285,11 +299,21 @@ async function getOrCreateExposantAccessUrl(db, organizationId, email, request) 
   if (!tk) {
     const tokenStr = uuid().replace(/-/g, '') + uuid().replace(/-/g, '').slice(0, 16);
     const tokenId = uuid();
+    // 🛡️ 2️⃣ On retrouve le user pour stocker user_id directement dans le token (pas de 404 plus tard)
+    let userId = null;
+    if (organizationId) {
+      const u = await db.collection('users').findOne({ organization_id: organizationId, role_code: 'exposant' });
+      userId = u?.id || null;
+    } else if (email) {
+      const u = await db.collection('users').findOne({ email: String(email).toLowerCase().trim() });
+      userId = u?.id || null;
+    }
     await db.collection('access_tokens').insertOne({
       id: tokenId,
       token: tokenStr,
       purpose: 'exposant',
       organization_id: organizationId || null,
+      user_id: userId,
       email: email || null,
       label: 'Espace exposant (auto, mailing)',
       expires_at: null,
@@ -301,7 +325,13 @@ async function getOrCreateExposantAccessUrl(db, organizationId, email, request) 
       updated_at: new Date(),
       created_by: 'mailing_auto',
     });
-    tk = { token: tokenStr };
+    tk = { token: tokenStr, id: tokenId, user_id: userId };
+  } else if (!tk.user_id && organizationId) {
+    // 🛡️ 3️⃣ Token existant mais sans user_id → auto-fix
+    const u = await db.collection('users').findOne({ organization_id: organizationId, role_code: 'exposant' });
+    if (u?.id) {
+      await db.collection('access_tokens').updateOne({ id: tk.id }, { $set: { user_id: u.id, updated_at: new Date() } });
+    }
   }
   return `${getPublicBaseUrl(request)}/access/${tk.token}`;
 }
