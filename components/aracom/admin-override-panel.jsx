@@ -113,61 +113,74 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
 
   return (
     <>
-    <div className="rounded-md border-2 border-red-200 bg-red-50/40 p-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <div className="font-bold text-red-900 text-sm">🛠️ Zone admin — Override & Reset</div>
-          {hasArchive && <Badge className="bg-amber-100 text-amber-900 border-amber-300">📦 Archivé</Badge>}
-          {reg.candidature_locked && <Badge className="bg-violet-100 text-violet-900 border-violet-300">🔒 Candidature verrouillée</Badge>}
+    {/* 🛠️ ZONE ADMIN — Collapsée par défaut pour alléger l'UX
+        Tous les actions sont accessibles en 1 clic via "▼ Toutes les actions". */}
+    <div className="rounded-md border border-red-200 bg-red-50/30 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="font-semibold text-red-900 text-xs flex items-center gap-1.5 hover:underline"
+          >
+            <span className="text-base leading-none">🛠️</span>
+            Zone admin — Override & Reset
+            <span className="text-red-600">{expanded ? '▲' : '▼'}</span>
+          </button>
+          {hasArchive && <Badge className="bg-amber-100 text-amber-900 border-amber-300 text-[10px]">📦 Archivé</Badge>}
+          {reg.candidature_locked && <Badge className="bg-violet-100 text-violet-900 border-violet-300 text-[10px]">🔒 Verrouillée</Badge>}
+          {reg.status === 'annule' && <Badge className="bg-slate-200 text-slate-700 border-slate-300 text-[10px]">⛔ Annulée</Badge>}
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)} className="h-7 text-xs">
-          {expanded ? '▲ Masquer' : '▼ Toutes les actions'}
-        </Button>
-      </div>
-
-      {/* Actions essentielles (toujours visibles) */}
-      <div className="flex flex-wrap gap-2">
-        {/* 🔓 Débloquer la candidature — bouton prioritaire si verrouillée */}
+        {/* 🔓 Bouton prioritaire toujours visible si candidature verrouillée */}
         {reg.candidature_locked && (
-          <Button size="sm" variant="outline" onClick={unlockCandidature} disabled={busy === 'Candidature débloquée'} className="bg-violet-600 text-white hover:bg-violet-700 border-violet-700 h-8 text-xs">
+          <Button size="sm" variant="outline" onClick={unlockCandidature} disabled={busy === 'Candidature débloquée'} className="bg-violet-600 text-white hover:bg-violet-700 border-violet-700 h-7 text-[11px]">
             {busy === 'Candidature débloquée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            🔓 Débloquer candidature
+            🔓 Débloquer
           </Button>
         )}
-        {reg.stand_code && (
-          <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs">
-            {busy === 'Stand libéré' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            🪧 Libérer stand {reg.stand_code}
-          </Button>
-        )}
-        {data.slots?.length > 0 && (
-          <Button size="sm" variant="outline" onClick={clearAnimation} disabled={busy === 'Animations supprimées'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs">
-            {busy === 'Animations supprimées' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            🎭 Suppr. animations ({data.slots.length})
-          </Button>
-        )}
-        {reg.status !== 'annule' && (
-          <Button size="sm" variant="outline" onClick={cancelReg} disabled={busy === 'Inscription annulée'} className="bg-red-600 text-white hover:bg-red-700 border-red-700 h-8 text-xs">
-            {busy === 'Inscription annulée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            ⛔ Annuler inscription
-          </Button>
-        )}
-        {reg.status === 'annule' && (
-          <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 h-8 px-3 flex items-center">⛔ Inscription annulée</Badge>
-        )}
-        {/* 🆕 Suppression définitive de l'inscription (delete-full) — disponible quel que soit le statut */}
-        <Button size="sm" variant="outline" onClick={deleteReg} disabled={busy === 'delete-reg'} className="bg-zinc-900 text-white hover:bg-black border-black h-8 text-xs gap-1">
-          {busy === 'delete-reg' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-          💥 Supprimer inscription
-        </Button>
       </div>
 
-      {/* Actions avancées (déroulées sur demande) */}
+      {/* Actions complètes — affichées uniquement si "Toutes les actions" est ouvert */}
       {expanded && (
-        <div className="mt-3 space-y-3 pt-3 border-t border-red-200">
-          {/* Reset granulaires */}
+        <div className="mt-3 pt-3 border-t border-red-200 space-y-3">
+          {/* ━━━ ACTIONS COURANTES (réversibles) ━━━ */}
           <div>
-            <div className="font-semibold text-xs text-red-900 mb-1.5">↩️ Annuler une action de l&apos;exposant</div>
+            <div className="font-semibold text-[10px] uppercase tracking-wider text-slate-600 mb-1.5">↩️ Actions réversibles</div>
+            <div className="flex flex-wrap gap-1.5">
+              {reg.stand_code && (
+                <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-7 text-[11px]">
+                  {busy === 'Stand libéré' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  🪧 Libérer stand {reg.stand_code}
+                </Button>
+              )}
+              {data.slots?.length > 0 && (
+                <Button size="sm" variant="outline" onClick={clearAnimation} disabled={busy === 'Animations supprimées'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-7 text-[11px]">
+                  {busy === 'Animations supprimées' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  🎭 Suppr. animations ({data.slots.length})
+                </Button>
+              )}
+              {reg.status !== 'annule' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={cancelReg}
+                  disabled={busy === 'Inscription annulée'}
+                  title="Change le statut à 'annulée' (réversible — on peut remettre un autre statut)"
+                  className="bg-orange-500 text-white hover:bg-orange-600 border-orange-600 h-7 text-[11px]"
+                >
+                  {busy === 'Inscription annulée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  ⛔ Marquer annulée
+                </Button>
+              )}
+            </div>
+            <div className="text-[10px] text-slate-500 italic mt-1.5">
+              💡 Ces actions modifient l&apos;état mais conservent les données. L&apos;exposant peut reprendre son dossier.
+            </div>
+          </div>
+
+          {/* Reset granulaires (ouverts au sein du bloc expanded) */}
+          <div>
+            <div className="font-semibold text-[10px] uppercase tracking-wider text-slate-600 mb-1.5">↩️ Annuler une action de l&apos;exposant</div>
             <div className="flex flex-wrap gap-1.5">
               {dep && dep.status !== 'en_attente' && (
                 <Button size="sm" variant="outline" onClick={resetCaution} disabled={busy} className="bg-white border-amber-300 text-amber-800 hover:bg-amber-50 h-7 text-[11px]">
@@ -227,12 +240,19 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
             </div>
           )}
 
-          {/* Archive / Suppression définitive */}
+          {/* ━━━ ACTIONS IRRÉVERSIBLES ━━━ */}
           <div className="pt-2 border-t border-red-200">
-            <div className="font-semibold text-xs text-red-900 mb-1.5">🗑️ Suppression / Archivage</div>
+            <div className="font-semibold text-[10px] uppercase tracking-wider text-red-900 mb-1.5">⚠️ Actions IRRÉVERSIBLES — perte de données</div>
             <div className="flex flex-wrap gap-1.5">
               {!hasArchive ? (
-                <Button size="sm" variant="outline" onClick={archiveOrg} disabled={busy === 'archive'} className="bg-white border-amber-400 text-amber-900 hover:bg-amber-50 h-7 text-[11px]">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={archiveOrg}
+                  disabled={busy === 'archive'}
+                  title="Met l'organisation à la corbeille — restaurable plus tard"
+                  className="bg-white border-amber-400 text-amber-900 hover:bg-amber-50 h-7 text-[11px]"
+                >
                   {busy === 'archive' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
                   📦 Archiver (corbeille)
                 </Button>
@@ -242,12 +262,32 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
                   ♻️ Restaurer depuis corbeille
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={deleteOrgDefinitive} disabled={busy === 'delete-org'} className="bg-zinc-900 text-white hover:bg-black border-black h-7 text-[11px]">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={deleteReg}
+                disabled={busy === 'delete-reg'}
+                title="Supprime DÉFINITIVEMENT l'inscription 2026 (l'organisation reste, peut être ré-inscrite)"
+                className="bg-red-700 text-white hover:bg-red-800 border-red-800 h-7 text-[11px] gap-1"
+              >
+                {busy === 'delete-reg' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                🗑️ Supprimer inscription
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={deleteOrgDefinitive}
+                disabled={busy === 'delete-org'}
+                title="Supprime l'organisation ET toutes ses inscriptions — TOUT est perdu"
+                className="bg-zinc-900 text-white hover:bg-black border-black h-7 text-[11px]"
+              >
                 {busy === 'delete-org' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
-                💥 Suppression définitive (org)
+                💥 Suppr. organisation
               </Button>
             </div>
-            <p className="text-[10px] text-red-700 mt-1.5 italic">📦 Archive = soft delete (réversible) · 💥 Suppression définitive = irréversible, supprime l&apos;organisation + toutes ses inscriptions + données associées.</p>
+            <p className="text-[10px] text-red-700 mt-1.5 italic">
+              📦 Archive = soft delete (réversible) · 🗑️ Suppr. inscription = supprime seulement le dossier 2026 (org reste) · 💥 Suppr. organisation = TOUT supprimé (irréversible)
+            </p>
           </div>
         </div>
       )}
