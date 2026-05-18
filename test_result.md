@@ -2099,3 +2099,24 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28i — AUTOMATISATION COMPLÈTE. User demande : 'des qu'on crée un exposant, on crée automatiquement un dossier'. Solution : (1) Investigation des 8 flows de création d'organisation → un seul (import Excel ligne 5477) créait sans registration. Corrigé. (2) Helper ensureRegistrationForOrg ajouté dans helpers.js pour usage futur dans nouveaux flows. (3) Endpoint admin auto-repair pour fixer en masse les orgs héritées qui n'ont pas de dossier. (4) Bouton UI '⚡ Auto-réparer tout' dans la section 'Comptes & Dossiers'. Backend testé 3/3 incluant idempotence, skip archivées, skip mailing-only, régressions. Frontend testé E2E : 13 orgs → clic → 0 org. Prêt Save to Github."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28j — FIX BUG : users avec org_id orphelin (ne ressortaient pas)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "FIX CRITIQUE — users-without-org incluait pas les users org_id orphelin"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js + components/aracom/orgs-sans-dossier-view.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "USER FRUSTRATION : 4 tests sans succès. La capture montre user ARACOM 1 (gerosteva@gmail.com, id u-exp-org-53f28cd9...) qui voit 'Aucune organisation liée' MAIS qui n'apparaît PAS dans 'Comptes à lier' parce que son organization_id n'est pas null — il pointe vers une org supprimée/archivée. Mon filtre cherchait seulement organization_id null/absent. FIX : endpoint /api/admin/users-without-org cherche désormais (1) org_id null OU (2) org_id pointant vers org inexistante OU (3) org_id pointant vers org archivée. Retourne orphan_reason ('no_org' / 'org_deleted' / 'org_archived'), orphan_org_id, orphan_org_name. UI affiche badge coloré (rose/orange/jaune) + raison + id orphelin lisible. Testé E2E preview : user test avec org_id='org-deleted-doesnt-exist' → apparaît avec badge '⚠️ Org supprimée'. Cleanup OK."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28j — Bug réel trouvé après 4 tests user. La cause : le filtre 'users-without-org' ne détectait QUE les users avec organization_id NULL/ABSENT. Les users avec organization_id pointant vers une org supprimée/archivée n'étaient pas listés → admin ne pouvait pas les lier. Fix : extension du filtre + UI avec badges explicites montrant la raison de l'orphelinage. En production le user gerosteva@gmail.com (id u-exp-org-53f28cd9-3c9f-4b56-ab21-fd25a7a7a0f7) devrait maintenant apparaître après le redéploiement."
+

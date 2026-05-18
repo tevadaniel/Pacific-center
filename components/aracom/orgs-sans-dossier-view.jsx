@@ -192,6 +192,14 @@ export default function OrgsSansDossierView() {
             <CardContent>
               <div className="space-y-2">
                 {usersWithoutOrg.map(user => {
+                  const reason = user.orphan_reason || 'no_org';
+                  const reasonLabel = reason === 'no_org' ? '🚫 Aucune org'
+                    : reason === 'org_deleted' ? '⚠️ Org supprimée'
+                    : reason === 'org_archived' ? '📦 Org archivée'
+                    : '❓ Inconnu';
+                  const reasonClass = reason === 'no_org' ? 'bg-rose-100 text-rose-700 border-rose-200'
+                    : reason === 'org_deleted' ? 'bg-orange-100 text-orange-700 border-orange-200'
+                    : 'bg-amber-100 text-amber-700 border-amber-200';
                   const matchByEmail = (user.email
                     ? orgs.find(o => (o.main_email || '').toLowerCase() === user.email.toLowerCase())
                     : null);
@@ -206,11 +214,18 @@ export default function OrgsSansDossierView() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-slate-900">{user.full_name || user.email || <i className="text-slate-400">— Sans nom —</i>}</span>
                           <Badge variant="outline" className="text-[10px]">{user.role_code || 'exposant'}</Badge>
+                          <Badge variant="outline" className={`text-[10px] ${reasonClass}`}>{reasonLabel}</Badge>
                           {matchByEmail && <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">✨ Match email auto</Badge>}
                         </div>
                         <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-3">
                           {user.email && <span>📧 {user.email}</span>}
-                          <span className="font-mono text-slate-400">id: {user.id?.slice(0, 16)}…</span>
+                          <span className="font-mono text-slate-400">id: {user.id?.slice(0, 20)}…</span>
+                          {user.orphan_org_id && (
+                            <span className="text-orange-600">
+                              Org orpheline: <span className="font-mono">{user.orphan_org_id.slice(0, 14)}…</span>
+                              {user.orphan_org_name && <> ({user.orphan_org_name})</>}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 sm:flex-shrink-0">

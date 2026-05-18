@@ -1372,21 +1372,40 @@ export async function GET(request, { params }) {
 
     // 🆕 SESSION 28g — GET /api/admin/users-without-org
     // Liste les comptes utilisateurs sans organisation liée (ne peuvent pas accéder au portail exposant)
+    // 🆕 SESSION 28j — Inclut aussi les users avec organization_id ORPHELIN (org supprimée/archivée)
     if (route === 'admin/users-without-org') {
       const userRole = request.headers.get('x-user-role');
       if (userRole !== 'aracom_admin') return err('Accès admin requis', 403);
-      const users = await db.collection('users').find({
-        $or: [{ organization_id: null }, { organization_id: { $exists: false } }],
-      }).toArray();
-      // Exclut les admins et les comptes système
-      const filtered = users.filter(u =>
-        u.role_code !== 'aracom_admin' &&
-        u.role_code !== 'pacific_centers_readonly' &&
-        u.is_active !== false
-      );
+      const allUsers = await db.collection('users').find({}).toArray();
+      const allOrgs = await db.collection('organizations').find({}).toArray();
+      const orgsById = {};
+      allOrgs.forEach(o => { orgsById[o.id] = o; });
+      // Sélectionne les users orphelins :
+      // (1) organization_id null/absent OU
+      // (2) organization_id pointe vers une org qui n'existe plus OU
+      // (3) organization_id pointe vers une org archivée
+      const filtered = allUsers.filter(u => {
+        if (u.role_code === 'aracom_admin' || u.role_code === 'pacific_centers_readonly') return false;
+        if (u.is_active === false) return false;
+        if (!u.organization_id) return true; // pas d'org du tout
+        const org = orgsById[u.organization_id];
+        if (!org) return true; // org_id pointe vers le vide
+        if (org.archived_at) return true; // org archivée
+        return false;
+      });
       return json(filtered.map(u => {
         delete u._id; delete u.password;
-        return u;
+        const linkedOrg = u.organization_id ? orgsById[u.organization_id] : null;
+        return {
+          ...u,
+          // 🆕 Diagnostic : informe l'admin du type de problème
+          orphan_reason: !u.organization_id
+            ? 'no_org'
+            : (!linkedOrg ? 'org_deleted' : 'org_archived'),
+          orphan_org_id: u.organization_id || null,
+          orphan_org_name: linkedOrg ? linkedOrg.name : null,
+          orphan_org_archived: linkedOrg ? !!linkedOrg.archived_at : false,
+        };
       }));
     }
 
