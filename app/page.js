@@ -189,7 +189,6 @@ export default function HomePage() {
               ) : (
                 <form
                   onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); submitPassword(e); return false; }}
-                  action="javascript:void(0);"
                   noValidate
                   className="space-y-4"
                 >

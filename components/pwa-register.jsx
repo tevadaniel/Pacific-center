@@ -3,6 +3,50 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, X } from 'lucide-react';
 
+// 🛡️ SESSION 28s — DÉFINITIVE pour le bug "mises à jour qui ne s'affichent pas"
+//     On poll /api/version toutes les 60s. Si la version change (= redéploiement détecté) :
+//     1. Tous les caches du SW sont supprimés (postMessage CLEAR_CACHES)
+//     2. Le SW est désinscrit (forceUnregister)
+//     3. La page est rechargée pour servir le HTML+JS le plus récent
+//     → L'utilisateur voit AUTOMATIQUEMENT la dernière version max 60s après déploiement.
+const VERSION_KEY = 'fr26_build_version';
+const VERSION_POLL_INTERVAL_MS = 60 * 1000;
+
+async function checkBuildVersion() {
+  try {
+    const r = await fetch('/api/version', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const currentVersion = data?.version;
+    if (!currentVersion) return;
+    const knownVersion = localStorage.getItem(VERSION_KEY);
+    if (!knownVersion) {
+      // Première visite — on enregistre la version actuelle, pas besoin de reload
+      localStorage.setItem(VERSION_KEY, currentVersion);
+      return;
+    }
+    if (knownVersion !== currentVersion) {
+      // 🚨 Nouvelle version détectée — on clear tout et on reload
+      console.info('[pwa] Nouvelle version détectée :', knownVersion, '→', currentVersion);
+      localStorage.setItem(VERSION_KEY, currentVersion);
+      // 1) Clear caches du SW
+      try {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHES' });
+        }
+        if (typeof caches !== 'undefined') {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch {}
+      // 2) Force reload de la page sans cache navigateur
+      setTimeout(() => {
+        try { window.location.reload(); } catch { window.location.href = window.location.href; }
+      }, 300);
+    }
+  } catch {/* network down or boot — ignore */}
+}
+
 export default function PwaRegister() {
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showBanner, setShowBanner] = useState(false);
@@ -46,6 +90,14 @@ export default function PwaRegister() {
       });
     }
 
+    // 🛡️ SESSION 28s — Polling de /api/version (cache-busting définitif)
+    //    Au mount + toutes les 60s + à chaque retour de focus (utile mobile).
+    checkBuildVersion();
+    const pollId = setInterval(checkBuildVersion, VERSION_POLL_INTERVAL_MS);
+    const onFocus = () => checkBuildVersion();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
+
     // Capture install prompt for later use
     const handler = (e) => {
       e.preventDefault();
@@ -55,7 +107,12 @@ export default function PwaRegister() {
       if (!dismissed) setShowBanner(true);
     };
     window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
+      clearInterval(pollId);
+    };
   }, []);
 
   const install = async () => {

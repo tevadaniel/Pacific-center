@@ -19,6 +19,14 @@ import { handleCautionReceiptsPost } from '@/lib/api/handlers/caution-receipts';
 import { handleExposantDocumentsGet } from '@/lib/api/handlers/exposant-documents';
 import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handlers/dashboard';
 
+// 🛡️ SESSION 28s — Build version unique pour cache-busting PWA
+//     Calculée une fois au boot du module Next.js → différente à chaque redéploiement.
+//     Exposée via GET /api/version (utilisée par le client PWA pour détecter une nouvelle version
+//     et clear le cache + recharger automatiquement).
+const BUILD_VERSION = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const BUILD_BOOT_ISO = new Date().toISOString();
+console.log(`[boot] 🆔 BUILD_VERSION=${BUILD_VERSION} at ${BUILD_BOOT_ISO}`);
+
 // 🛟 Auto-restauration des plans de salles au tout premier démarrage (idempotent).
 //    Lance la restauration du backup JSON embarqué si aucun stand n'a de position en DB.
 let __layoutRestoreRan = false;
@@ -654,6 +662,29 @@ export async function GET(request, { params }) {
     const ctx = getUserContext(request);
 
     if (route === '' || route === 'health') return json({ ok: true, service: 'Forum Rentrée 2026' });
+
+    // 🛡️ SESSION 28s — Endpoint /api/version pour le cache-busting PWA
+    //     Retourne un identifiant unique du build serveur (timestamp de boot Next.js).
+    //     Le service worker poll cet endpoint et clear ses caches si la version change.
+    //     C'est LE mécanisme définitif pour éviter "mes mises à jour ne s'affichent pas".
+    if (route === 'version') {
+      return new NextResponse(
+        JSON.stringify({
+          version: BUILD_VERSION,
+          boot_at: BUILD_BOOT_ISO,
+          sw_cache: 'v16',
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+          },
+        }
+      );
+    }
 
     // 📊 DASHBOARD GET — dispatcher modulaire (stats/public, kpis, by-site, jour-j-live, alerts)
     // (extraits dans /app/lib/api/handlers/dashboard.js)
