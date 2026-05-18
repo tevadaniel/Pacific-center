@@ -38,6 +38,11 @@ async function tryAutoRestoreVenueLayouts() {
     const r = await restoreVenueLayoutsIfEmpty(db);
     if (r?.ok) console.log('[boot] venue layouts auto-restored:', r);
     else console.log('[boot] venue layouts restore skipped:', r);
+    // 🛡️ Audit d'intégrité automatique au démarrage (silencieux si rien à corriger)
+    try {
+      const { runDataIntegrityCheck } = await import('@/lib/data-integrity');
+      await runDataIntegrityCheck(db, { heal: true });
+    } catch (e) { console.error('[boot] integrity check error:', e?.message); }
   } catch (e) { console.error('[boot] venue layouts restore error:', e?.message); }
 }
 
@@ -2486,6 +2491,19 @@ export async function POST(request, { params }) {
     // ════════════════════════════════════════════════════════════════
     // 🆕 SESSION 29 — Endpoints FicheExposant V2 (Documents + Portail)
     // ════════════════════════════════════════════════════════════════
+
+    // ─── POST /api/maintenance/audit — Audit complet de l'intégrité des données + self-heal
+    if (route === 'maintenance/audit') {
+      try {
+        const { runDataIntegrityCheck } = await import('@/lib/data-integrity');
+        const heal = body?.heal !== false; // par défaut: heal=true
+        const report = await runDataIntegrityCheck(db, { heal });
+        return json(report);
+      } catch (e) {
+        console.error('[maintenance/audit]', e);
+        return err('Erreur audit: ' + e.message, 500);
+      }
+    }
 
     // ─── POST /api/registration-documents — Upload un document depuis la fiche (cockpit ou portail)
     if (route === 'registration-documents') {

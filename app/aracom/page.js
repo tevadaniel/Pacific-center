@@ -34,6 +34,7 @@ import MultiSiteCockpit from '@/components/multi-site-cockpit';
 import StatusLegend from '@/components/status-legend';
 import BulkExportDialog from '@/components/bulk-export-dialog';
 import AdminOverridePanel from '@/components/aracom/admin-override-panel';
+import IntegrityAuditButton from '@/components/aracom/integrity-audit-button';
 import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import SendExposantMailDialog from '@/components/aracom/send-exposant-mail-dialog';
 import EditExposantChoicesDialog from '@/components/aracom/edit-exposant-choices-dialog';
@@ -224,6 +225,7 @@ export default function AracomPage() {
           <PortalSwitcher />
           <PushToggle />
           <AlertsBadge onGoto={setTab} />
+          <IntegrityAuditButton />
           <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
         </div>
       }
