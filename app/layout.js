@@ -41,7 +41,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v22-2026-05-18-final';
+                var APP_VERSION = 'v23-2026-05-18-no-toggle';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif

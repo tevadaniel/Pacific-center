@@ -294,32 +294,6 @@ export default function FicheExposantV2({ id, onClose }) {
 
   return (
     <div className="space-y-3 max-w-3xl mx-auto pb-8">
-      {/* ═══════════════════ TOGGLE ENTREPRISE / ASSOCIATION ═══════════════════ */}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => toggleEntityType('entreprise')}
-          className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition flex items-center justify-center gap-1.5 ${
-            !isAssoc
-              ? 'bg-blue-600 text-white border-blue-700 shadow'
-              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
-        >
-          <Building2 className="w-3.5 h-3.5" /> Entreprise
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleEntityType('association')}
-          className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition flex items-center justify-center gap-1.5 ${
-            isAssoc
-              ? 'bg-teal-600 text-white border-teal-700 shadow'
-              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
-        >
-          <UsersIcon className="w-3.5 h-3.5" /> Association
-        </button>
-      </div>
-
       {/* ═══════════════════ HEADER ═══════════════════ */}
       <div className="rounded-xl border border-slate-200 bg-white p-3.5">
         <div className="flex items-start gap-3">
@@ -439,7 +413,7 @@ export default function FicheExposantV2({ id, onClose }) {
       <CollapsibleSection icon={User} title="Identité" defaultOpen>
         <EditableField label="Prénom" value={org.first_name} onSave={(v) => saveOrg({ first_name: v })} />
         <EditableField label="Nom" value={org.last_name} onSave={(v) => saveOrg({ last_name: v })} />
-        <EditableField label={isAssoc ? 'Association' : 'Société'} value={org.name} onSave={(v) => saveOrg({ name: v })} />
+        <EditableField label="Raison sociale" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
         <EditableField label="Poste / Fonction" value={org.position} onSave={(v) => saveOrg({ position: v })} />
         <EditableField label="Secteur / Discipline" value={org.discipline} placeholder="ex: Sport, Artisanat, Santé..." onSave={(v) => saveOrg({ discipline: v })} />
         <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
@@ -451,12 +425,8 @@ export default function FicheExposantV2({ id, onClose }) {
           onSave={(v) => saveOrg({ representants_count: v ? Number(v) : null })}
           format={(v) => `${v} (max 2)`}
         />
-        {isAssoc && (
-          <>
-            <EditableField label="Président(e)" value={org.president_name} onSave={(v) => saveOrg({ president_name: v })} />
-            <EditableField label="Nb membres" type="number" value={org.members_count} onSave={(v) => saveOrg({ members_count: v ? Number(v) : null })} />
-          </>
-        )}
+        <EditableField label="Président(e)" value={org.president_name} placeholder="Si association — laisser vide sinon" onSave={(v) => saveOrg({ president_name: v })} />
+        <EditableField label="Nb membres" type="number" value={org.members_count} placeholder="Si association" onSave={(v) => saveOrg({ members_count: v ? Number(v) : null })} />
       </CollapsibleSection>
 
       {/* ═══════════════════ SECTION 2 : CONTACT ═══════════════════ */}
@@ -475,19 +445,28 @@ export default function FicheExposantV2({ id, onClose }) {
 
       {/* ═══════════════════ SECTION 3 : IMMATRICULATION ═══════════════════ */}
       <CollapsibleSection icon={FileText} title="Immatriculation">
-        {!isAssoc && (
-          <EditableField label="SIRET" value={org.siret} placeholder="14 chiffres" onSave={(v) => saveOrg({ siret: v })} />
-        )}
-        {isAssoc && (
-          <>
-            <EditableField label="N° RNA" value={org.rna_number} placeholder="W..." onSave={(v) => saveOrg({ rna_number: v })} />
-            <EditableField label="N° Tahiti" value={org.tahiti_number} onSave={(v) => saveOrg({ tahiti_number: v })} />
-          </>
-        )}
+        <EditableField label="N° Tahiti" value={org.tahiti_number} placeholder="N° Tahiti (obligatoire en PF)" onSave={(v) => saveOrg({ tahiti_number: v })} />
+        <EditableField label="SIRET" value={org.siret} placeholder="14 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siret: v })} />
+        <EditableField label="SIREN" value={org.siren} placeholder="9 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siren: v })} />
+        <EditableField label="N° RNA" value={org.rna_number} placeholder="W... (associations uniquement)" onSave={(v) => saveOrg({ rna_number: v })} />
         <EditableField
           label="Forme juridique"
           type="select"
-          options={['SARL', 'SAS', 'EI', 'Association Loi 1901', 'Association Loi 1887 PF', 'GIE', 'Coopérative', 'Autre']}
+          options={[
+            'SARL',
+            'PATENTE',
+            'Association',
+            'SAS',
+            'EI (Entreprise individuelle)',
+            'EURL',
+            'Association Loi 1901',
+            'Association Loi 1887 PF',
+            'GIE',
+            'Coopérative',
+            'Société Civile',
+            'Profession libérale',
+            'Autre',
+          ]}
           value={org.forme_juridique}
           onSave={(v) => saveOrg({ forme_juridique: v })}
         />

@@ -8144,7 +8144,7 @@ export async function PUT(request, { params }) {
       const orgAllowed = ['name', 'discipline', 'main_email', 'main_phone', 'contact_name', 'notes', 'priority_level', 'status', 'is_mailing_only', 'aracom_private', 'participation_history', 'source_activity',
         // 🆕 SESSION 28u — FicheExposantV2 (Entreprise/Association + champs étendus)
         'entity_type', 'first_name', 'last_name', 'position', 'description', 'representants_count',
-        'president_name', 'members_count', 'website', 'facebook',
+        'president_name', 'members_count', 'website', 'facebook', 'siren',
         'siret', 'rna_number', 'tahiti_number', 'forme_juridique', 'secondary_sites'];
       const orgUpd = {};
       for (const k of orgAllowed) if (k in body) orgUpd[k] = body[k];
