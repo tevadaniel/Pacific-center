@@ -6,7 +6,7 @@ const nextConfig = {
   },
   experimental: {
     // Remove if not using Server Components
-    serverComponentsExternalPackages: ['mongodb'],
+    serverComponentsExternalPackages: ['mongodb', 'pdfkit'],
     // Allow large request bodies on Server Actions / API routes (heavy doc uploads up to 150 MB)
     serverActions: {
       bodySizeLimit: '150mb',

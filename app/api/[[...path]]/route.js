@@ -1266,6 +1266,23 @@ export async function GET(request, { params }) {
 
     if (route.startsWith('registrations/')) {
       const id = p[1];
+      // 🆕 Sous-routes spécifiques : pas la fiche complète
+      if (p[2] === 'access-link') {
+        const reg = await db.collection('registrations').findOne({ id });
+        if (!reg) return err('Inscription introuvable', 404);
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        if (!org) return err('Organisation introuvable', 404);
+        const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request);
+        const token = await db.collection('access_tokens').findOne({ organization_id: org.id }, { sort: { created_at: -1 } });
+        return json({
+          ok: true,
+          url: access_url,
+          link: access_url,
+          expires_at: token?.expires_at || null,
+          last_access_at: token?.last_used_at || null,
+          organization_name: org.name,
+        });
+      }
       const reg = await db.collection('registrations').findOne({ id });
       if (!reg) return err('Inscription introuvable', 404);
       const ctx = getUserContext(request);
@@ -1711,6 +1728,29 @@ export async function GET(request, { params }) {
         console.error('[menu-badges] error', e?.message);
         return json({ validations: 0, relances: 0, a_confirmer: 0, cautions: 0, orphans: 0, anomalies: 0, satisfaction: 0 });
       }
+    }
+
+
+
+    // ============================================================
+    // 🆕 GET /api/registrations/:id/access-link — Lien magique exposant
+    // ============================================================
+    if (route.match(/^registrations\/[^/]+\/access-link$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (!org) return err('Organisation introuvable', 404);
+      const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request);
+      const token = await db.collection('access_tokens').findOne({ organization_id: org.id }, { sort: { created_at: -1 } });
+      return json({
+        ok: true,
+        url: access_url,
+        link: access_url,
+        expires_at: token?.expires_at || null,
+        last_access_at: token?.last_used_at || null,
+        organization_name: org.name,
+      });
     }
 
 
@@ -2442,6 +2482,176 @@ export async function POST(request, { params }) {
     // ═══════════════════════════════════════════════════════════════════
     const cautionReceiptsResp = await handleCautionReceiptsPost({ db, request, route, p, body, deps: { buildRefundAttestationHTML } });
     if (cautionReceiptsResp) return cautionReceiptsResp;
+
+    // ════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 29 — Endpoints FicheExposant V2 (Documents + Portail)
+    // ════════════════════════════════════════════════════════════════
+
+    // ─── POST /api/registration-documents — Upload un document depuis la fiche (cockpit ou portail)
+    if (route === 'registration-documents') {
+      const { registration_id, document_type, category, file_name, mime_type, file_data, status } = body;
+      if (!registration_id || !file_data) return err('registration_id et file_data requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      const docId = uuid();
+      const docRow = {
+        id: docId,
+        registration_id,
+        organization_id: reg.organization_id,
+        document_type: document_type || 'autre',
+        category: category || document_type || 'autre',
+        file_name: file_name || 'document',
+        mime_type: mime_type || 'application/octet-stream',
+        file_data, // base64
+        size_bytes: Math.floor((file_data.length * 3) / 4),
+        status: status || 'recu',
+        validation_status: 'pending',
+        uploaded_at: new Date(),
+        uploaded_by: ctx.userId || 'anon',
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      await db.collection('registration_documents').insertOne(docRow);
+      // Sync flag exposant si applicable
+      const flagMap = { assurance: 'is_insurance_uploaded', identite: 'identity_received', convention: 'is_convention_signed' };
+      const flag = flagMap[document_type];
+      if (flag) {
+        await db.collection('registrations').updateOne({ id: registration_id }, { $set: { [flag]: true, updated_at: new Date() } });
+      }
+      const out = { ...docRow, file_data: undefined };
+      return json(out);
+    }
+
+    // ─── POST /api/documents/generate — Génère un PDF depuis les données du dossier
+    if (route === 'documents/generate') {
+      const { registration_id, doc_type } = body;
+      if (!registration_id || !doc_type) return err('registration_id et doc_type requis', 400);
+      const validTypes = ['convention', 'recu_caution', 'attestation_remboursement', 'badge_exposant'];
+      if (!validTypes.includes(doc_type)) return err(`doc_type doit être l'un de ${validTypes.join(', ')}`, 400);
+
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const deposit = await db.collection('deposit_transactions').findOne({ registration_id, type: 'caution_received' });
+
+      // Génère le PDF
+      const pdfGen = await import('@/lib/pdf-generators');
+      let buf;
+      try {
+        if (doc_type === 'convention') buf = await pdfGen.generateConventionPDF({ org, reg, venue });
+        else if (doc_type === 'recu_caution') buf = await pdfGen.generateRecuCautionPDF({ org, reg, venue, deposit });
+        else if (doc_type === 'attestation_remboursement') buf = await pdfGen.generateAttestationRemboursementPDF({ org, reg, venue, deposit });
+        else if (doc_type === 'badge_exposant') buf = await pdfGen.generateBadgePDF({ org, reg, venue });
+      } catch (e) {
+        console.error('[pdf-generate]', e);
+        return err(`Erreur génération PDF: ${e.message}`, 500);
+      }
+
+      // Sauve en base (remplace l'existant pour ce type+registration)
+      const existing = await db.collection('registration_documents').findOne({ registration_id, document_type: doc_type });
+      const fileName = `${doc_type}_${(org?.name || 'exp').replace(/[^a-z0-9]/gi, '_')}.pdf`;
+      const docRow = {
+        id: existing?.id || uuid(),
+        registration_id,
+        organization_id: reg.organization_id,
+        document_type: doc_type,
+        category: doc_type,
+        file_name: fileName,
+        mime_type: 'application/pdf',
+        file_data: buf.toString('base64'),
+        size_bytes: buf.length,
+        status: 'generated',
+        validation_status: 'pending',
+        uploaded_at: new Date(),
+        uploaded_by: ctx.userId || 'system',
+        generated_at: new Date(),
+        auto_generated: true,
+        updated_at: new Date(),
+      };
+      if (existing) {
+        await db.collection('registration_documents').updateOne({ id: existing.id }, { $set: docRow });
+      } else {
+        docRow.created_at = new Date();
+        await db.collection('registration_documents').insertOne(docRow);
+      }
+      const out = { ...docRow, file_data: undefined };
+      return json(out);
+    }
+
+    // ─── POST /api/documents/send — Envoie un document par email à l'exposant
+    if (route === 'documents/send') {
+      const { registration_id, doc_id, doc_type } = body;
+      if (!registration_id || !doc_id) return err('registration_id et doc_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      const org = reg ? await db.collection('organizations').findOne({ id: reg.organization_id }) : null;
+      if (!org?.main_email) return err('Email exposant manquant', 400);
+      const doc = await db.collection('registration_documents').findOne({ id: doc_id });
+      if (!doc) return err('Document introuvable', 404);
+
+      const docLabels = {
+        convention: 'Convention de participation',
+        recu_caution: 'Reçu de caution',
+        attestation_remboursement: 'Attestation de remboursement',
+        badge_exposant: 'Badge exposant',
+      };
+      const docLabel = docLabels[doc_type] || doc.file_name;
+
+      try {
+        const attachment = doc.file_data
+          ? { filename: doc.file_name, content: Buffer.from(doc.file_data, 'base64'), contentType: doc.mime_type || 'application/pdf' }
+          : null;
+        await sendMail({
+          to: org.main_email,
+          subject: `[Forum 2026] ${docLabel}`,
+          html: `<p>Bonjour ${org.first_name || org.contact_name || ''},</p><p>Veuillez trouver ci-joint <b>${docLabel}</b> pour le Forum de la Rentrée 2026.</p><p>Cordialement,<br>L'équipe ARACOM</p>`,
+          attachments: attachment ? [attachment] : [],
+        });
+      } catch (e) {
+        console.error('[documents/send]', e);
+        return err('Envoi mail échoué: ' + e.message, 500);
+      }
+      return json({ ok: true, sent_to: org.main_email });
+    }
+
+    // ─── POST /api/registrations/:id/send-access-link — Envoie le lien magique par mail
+    if (route.match(/^registrations\/[^/]+\/send-access-link$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (!org?.main_email) return err('Email exposant manquant', 400);
+      const access_url = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request);
+      try {
+        await sendMail({
+          to: org.main_email,
+          subject: `[Forum 2026] Votre espace exposant`,
+          html: `<p>Bonjour ${org.first_name || org.contact_name || ''},</p><p>Voici votre lien d'accès personnel à votre espace exposant pour le Forum de la Rentrée 2026 :</p><p><a href="${access_url}" style="display:inline-block;padding:10px 20px;background:#E8500A;color:white;text-decoration:none;border-radius:6px;">Accéder à mon espace</a></p><p style="font-size:11px;color:#888">Ce lien est personnel et confidentiel.</p><p>Cordialement,<br>L'équipe ARACOM</p>`,
+        });
+      } catch (e) {
+        console.error('[send-access-link]', e);
+        return err('Envoi mail échoué: ' + e.message, 500);
+      }
+      return json({ ok: true, sent_to: org.main_email, url: access_url });
+    }
+
+    // ─── POST /api/registrations/:id/regenerate-token — Régénère le token magique
+    if (route.match(/^registrations\/[^/]+\/regenerate-token$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Révoque tous les anciens tokens
+      await db.collection('access_tokens').updateMany(
+        { organization_id: reg.organization_id, revoked: { $ne: true } },
+        { $set: { revoked: true, revoked_at: new Date(), revoked_by: ctx.userId || 'admin' } }
+      );
+      // Re-crée un nouveau
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const new_url = await getOrCreateExposantAccessUrl(db, reg.organization_id, org?.main_email, request);
+      return json({ ok: true, url: new_url, regenerated_at: new Date() });
+    }
+
+
 
     // ════════════════════════════════════════════════════════════════
     // 🎯 WIZARD — Tunnel de réservation exposant en 5 étapes
@@ -8133,6 +8343,21 @@ export async function DELETE(request, { params }) {
       await db.collection('field_media').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
+    // 🆕 DELETE /api/registration-documents/:id — Suppression d'un document
+    if (route.startsWith('registration-documents/')) {
+      const docId = p[1];
+      const doc = await db.collection('registration_documents').findOne({ id: docId });
+      if (!doc) return err('Document introuvable', 404);
+      await db.collection('registration_documents').deleteOne({ id: docId });
+      // Désactive le flag exposant si applicable
+      const flagMap = { assurance: 'is_insurance_uploaded', identite: 'identity_received', convention: 'is_convention_signed' };
+      const flag = flagMap[doc.document_type];
+      if (flag && doc.registration_id) {
+        await db.collection('registrations').updateOne({ id: doc.registration_id }, { $set: { [flag]: false, updated_at: new Date() } });
+      }
+      return json({ ok: true });
+    }
+
     // 🗑️ DELETE bilan / rapport (admin only)
     if (route.startsWith('reports/')) {
       const userRole = request.headers.get('x-user-role');

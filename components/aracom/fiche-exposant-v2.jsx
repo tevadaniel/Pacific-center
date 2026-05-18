@@ -26,8 +26,11 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DeleteOrgDialog from './delete-org-dialog';
 import SendExposantMailDialog from './send-exposant-mail-dialog';
+import DocumentsTab from './documents-tab';
+import PortalTab from './portal-tab';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
 
 // =======================================================
@@ -418,6 +421,20 @@ export default function FicheExposantV2({ id, onClose }) {
         </div>
       </div>
 
+      {/* ═══════════════════ TABS NAVIGATION ═══════════════════ */}
+      <Tabs defaultValue="profil" className="w-full">
+        <TabsList className="grid grid-cols-6 w-full bg-slate-100 h-9 p-0.5">
+          <TabsTrigger value="profil" className="text-[11px] gap-1 data-[state=active]:bg-white"><User className="w-3 h-3" /> Profil</TabsTrigger>
+          <TabsTrigger value="statut" className="text-[11px] gap-1 data-[state=active]:bg-white"><ListChecks className="w-3 h-3" /> Statut</TabsTrigger>
+          <TabsTrigger value="documents" className="text-[11px] gap-1 data-[state=active]:bg-white"><FileBox className="w-3 h-3" /> Documents</TabsTrigger>
+          <TabsTrigger value="animations" className="text-[11px] gap-1 data-[state=active]:bg-white"><Sparkles className="w-3 h-3" /> Animations</TabsTrigger>
+          <TabsTrigger value="bilan" className="text-[11px] gap-1 data-[state=active]:bg-white"><Activity className="w-3 h-3" /> Bilan&nbsp;J</TabsTrigger>
+          <TabsTrigger value="portail" className="text-[11px] gap-1 data-[state=active]:bg-white"><ExternalLink className="w-3 h-3" /> Portail</TabsTrigger>
+        </TabsList>
+
+        {/* ═══════════════════ ONGLET PROFIL ═══════════════════ */}
+        <TabsContent value="profil" className="space-y-3 mt-3">
+
       {/* ═══════════════════ SECTION 1 : IDENTITÉ ═══════════════════ */}
       <CollapsibleSection icon={User} title="Identité" defaultOpen>
         <EditableField label="Prénom" value={org.first_name} onSave={(v) => saveOrg({ first_name: v })} />
@@ -557,6 +574,17 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Incident 2025" value={reg.incident_2025} type="textarea" onSave={(v) => saveReg({ incident_2025: v })} />
       </CollapsibleSection>
 
+      {/* ═══════════════════ SECTION 11 : NOTES INTERNES (profil tab) ═══════════════════ */}
+      <CollapsibleSection icon={StickyNote} title="Notes internes ARACOM">
+        <EditableField label="Notes" type="textarea" value={reg.internal_notes} onSave={(v) => saveReg({ internal_notes: v })} />
+        <div className="text-[10px] italic text-slate-400 mt-1">🔒 Non visible par l&apos;exposant</div>
+      </CollapsibleSection>
+
+        </TabsContent>
+
+        {/* ═══════════════════ ONGLET STATUT ═══════════════════ */}
+        <TabsContent value="statut" className="space-y-3 mt-3">
+
       {/* ═══════════════════ SECTION 6 : STATUT & DOSSIER ═══════════════════ */}
       <CollapsibleSection icon={ListChecks} title="Statut & Dossier" defaultOpen>
         <div className="text-xs text-slate-500 mb-1.5">Statut d&apos;inscription</div>
@@ -601,35 +629,21 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Date restit. effective" type="date" value={reg.restitution_actual_date} onSave={(v) => saveReg({ restitution_actual_date: v })} />
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 8 : DOCUMENTS ═══════════════════ */}
-      <CollapsibleSection icon={FileBox} title="Documents">
-        <div className="space-y-1.5">
-          {[
-            { key: 'convention', label: 'Convention signée', required: true, isOk: isConventionOk },
-            { key: 'assurance', label: 'Attestation d\'assurance', required: true, isOk: isAssuranceOk },
-            { key: 'identite', label: 'Pièce d\'identité du référent', required: true, isOk: !!reg.identity_received },
-            { key: 'immat', label: 'Justificatif d\'immatriculation', required: false, isOk: docs.some((d) => d.document_type === 'immatriculation') },
-            { key: 'visuels', label: 'Visuels / Photos du stand', required: false, isOk: docs.some((d) => d.document_type === 'visuel') },
-          ].map((d) => (
-            <div key={d.key} className="flex items-center gap-2 py-1.5 border-b border-slate-100 last:border-b-0">
-              <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span className="text-xs text-slate-700 flex-1 truncate">{d.label}</span>
-              <Badge className={`text-[9px] ${d.required ? 'bg-red-100 text-red-700 border-red-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{d.required ? 'Obligatoire' : 'Optionnel'}</Badge>
-              <Badge className={`text-[10px] ${d.isOk ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-700 border-red-200'}`}>{d.isOk ? '✓ Reçu' : (d.required ? 'Manquant' : 'Non fourni')}</Badge>
-              {d.required && !d.isOk && (
-                <Button size="sm" variant="outline" onClick={() => toggleDocReceived(d.key, true)} className="h-6 px-2 text-[10px]">
-                  Marquer reçu
-                </Button>
-              )}
-              {d.required && d.isOk && (
-                <Button size="sm" variant="ghost" onClick={() => toggleDocReceived(d.key, false)} className="h-6 px-2 text-[10px] text-slate-500">
-                  Annuler
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      </CollapsibleSection>
+        </TabsContent>
+
+        {/* ═══════════════════ ONGLET DOCUMENTS ═══════════════════ */}
+        <TabsContent value="documents" className="space-y-3 mt-3">
+          <DocumentsTab
+            registration={reg}
+            organization={org}
+            deposit={dep}
+            documents={docs}
+            onReload={load}
+          />
+        </TabsContent>
+
+        {/* ═══════════════════ ONGLET ANIMATIONS ═══════════════════ */}
+        <TabsContent value="animations" className="space-y-3 mt-3">
 
       {/* ═══════════════════ SECTION 9 : ANIMATIONS DÉCLARÉES ═══════════════════ */}
       <CollapsibleSection icon={Sparkles} title="Animations déclarées" badge={<Badge className="text-[10px] ml-1">{slots.length}</Badge>}>
@@ -655,6 +669,11 @@ export default function FicheExposantV2({ id, onClose }) {
         </Button>
       </CollapsibleSection>
 
+        </TabsContent>
+
+        {/* ═══════════════════ ONGLET BILAN JOUR J ═══════════════════ */}
+        <TabsContent value="bilan" className="space-y-3 mt-3">
+
       {/* ═══════════════════ SECTION 10 : BILAN JOUR J ═══════════════════ */}
       <CollapsibleSection icon={Activity} title="Bilan Jour J">
         <EditableField label="Présence constatée" type="select" options={[{ value: 'present', label: 'Présent' }, { value: 'absent', label: 'Absent' }, { value: 'retard', label: 'Retard' }, { value: 'depart_anticipe', label: 'Départ anticipé' }]} value={reg.bilan_presence} onSave={(v) => saveReg({ bilan_presence: v })} />
@@ -667,11 +686,13 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Reco caution" type="select" options={[{ value: 'integrale', label: 'Restitution intégrale' }, { value: 'partielle', label: 'Retenue partielle' }, { value: 'totale', label: 'Retenue totale' }, { value: 'a_verifier', label: 'À vérifier' }]} value={reg.bilan_caution_reco} onSave={(v) => saveReg({ bilan_caution_reco: v })} />
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 11 : NOTES INTERNES ═══════════════════ */}
-      <CollapsibleSection icon={StickyNote} title="Notes internes ARACOM">
-        <EditableField label="Notes" type="textarea" value={reg.internal_notes} onSave={(v) => saveReg({ internal_notes: v })} />
-        <div className="text-[10px] italic text-slate-400 mt-1">🔒 Non visible par l&apos;exposant</div>
-      </CollapsibleSection>
+        </TabsContent>
+
+        {/* ═══════════════════ ONGLET PORTAIL ═══════════════════ */}
+        <TabsContent value="portail" className="space-y-3 mt-3">
+          <PortalTab registration={reg} organization={org} documents={docs} />
+        </TabsContent>
+      </Tabs>
 
       {/* ═══════════════════ ZONE DE SUPPRESSION ═══════════════════ */}
       <div className="rounded-xl border-2 border-red-300 bg-red-50/50 p-3.5 mt-6">
