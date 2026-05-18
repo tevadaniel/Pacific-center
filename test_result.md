@@ -1901,3 +1901,24 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28d — RÉSOUDRE LE 'DOSSIER NON INITIALISÉ'. L'utilisateur a inscrit une organisation directement en base sans créer la registration associée, l'exposant ne peut donc pas accéder à son portail. Solution livrée : (1) Endpoint POST /api/admin/organizations/:id/initialize-registration (admin only, idempotent, optionnel venue_id) — testé 5/5. (2) Nouvelle vue admin 'Orgs sans dossier' dans le menu Exposants — affiche en clair toutes les orgs orphelines avec bouton 'Initialiser dossier'. (3) Message d'erreur amélioré côté exposant pour mieux comprendre le problème. À déployer sur production via 'Save to Github'."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28e — NEW : Action en lot "Tout initialiser"
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Bulk action 'Tout initialiser' dans Orgs sans dossier"
+    implemented: true
+    working: true
+    file: "components/aracom/orgs-sans-dossier-view.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UI — Ajout d'une barre 'Action en lot' au-dessus de la liste des orgs sans dossier. Permet d'initialiser TOUTES les organisations filtrées en un seul clic. Composants : (1) Dropdown 'Site par défaut (optionnel)' appliqué à toutes les orgs sans site individuellement sélectionné. (2) Bouton 'Tout initialiser (X)' qui appelle séquentiellement POST /api/admin/organizations/:id/initialize-registration pour chaque org. (3) Barre de progression visuelle avec compteur 'X/Y traité(s) — ✅ ok · ❌ ko'. (4) Toasts récapitulatifs (succès + détail des échecs, max 3 affichés). Logique de priorité : site individuel > site par défaut > aucun site. Compatible avec le filtre de recherche : si recherche active, ne traite que les orgs filtrées. Testé visuellement : 1 dossier initialisé avec succès en mode filtré, toast vert affiché, ligne disparaît de la liste."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28e — Bouton 'Tout initialiser' ajouté pour traiter plusieurs orgs en lot. UX : la barre verte apparaît dès qu'il y a 1+ org sans dossier. Permet de choisir un site par défaut pour toutes, tout en respectant les choix individuels. Compatible avec le filtre de recherche pour cibler un sous-ensemble. Barre de progression + toasts détaillés. Testé sur preview : 1 dossier initialisé en mode filtré (recherche '3TBC') avec toast '✅ 1 dossier(s) initialisé(s)' et disparition de la ligne. Aucun changement backend nécessaire — utilise l'endpoint existant POST /api/admin/organizations/:id/initialize-registration."
+

@@ -34,6 +34,9 @@ export default function OrgsSansDossierView() {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(null);
   const [venueByOrg, setVenueByOrg] = useState({}); // org_id -> venue_id sélectionné
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0, ok: 0, ko: 0 });
+  const [bulkDefaultVenue, setBulkDefaultVenue] = useState(''); // site par défaut pour le bulk
 
   const load = async () => {
     setLoading(true);
@@ -92,6 +95,51 @@ export default function OrgsSansDossierView() {
     finally { setBusy(null); }
   };
 
+  // 🆕 Initialisation en lot — traite toutes les orgs filtrées affichées
+  const bulkInitialize = async () => {
+    const targets = filtered;
+    if (targets.length === 0) return;
+    const venueName = bulkDefaultVenue ? venues.find(v => v.id === bulkDefaultVenue)?.name : null;
+    const sitePart = bulkDefaultVenue
+      ? `sur le site « ${venueName} »`
+      : `sans site présélectionné (chaque exposant choisira le sien)`;
+    const msg = `Initialiser ${targets.length} dossier(s) 2026 en lot ${sitePart} ?\n\nLes sites individuellement sélectionnés ci-dessous seront utilisés en priorité, sinon le site par défaut ci-dessus s'applique.`;
+    if (!window.confirm(msg)) return;
+
+    setBulkBusy(true);
+    setBulkProgress({ done: 0, total: targets.length, ok: 0, ko: 0 });
+    let ok = 0, ko = 0;
+    const failed = [];
+
+    for (let i = 0; i < targets.length; i++) {
+      const org = targets[i];
+      const venue_id = venueByOrg[org.id] || bulkDefaultVenue || null;
+      try {
+        const res = await fetch(`/api/admin/organizations/${org.id}/initialize-registration`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-role': 'aracom_admin',
+            'x-user-id': 'u-admin',
+          },
+          body: JSON.stringify({ venue_id }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || 'Erreur');
+        ok++;
+      } catch (e) {
+        ko++;
+        failed.push(`${org.name}: ${e.message}`);
+      }
+      setBulkProgress({ done: i + 1, total: targets.length, ok, ko });
+    }
+
+    setBulkBusy(false);
+    if (ok > 0) toast.success(`✅ ${ok} dossier(s) initialisé(s)${ko ? ` · ${ko} échec(s)` : ''}`);
+    if (ko > 0) toast.error(`${ko} échec(s) :\n${failed.slice(0, 3).join('\n')}${ko > 3 ? `\n+ ${ko - 3} autre(s)…` : ''}`);
+    load();
+  };
+
   if (loading) {
     return (
       <div className="py-16 text-center text-slate-500">
@@ -136,6 +184,56 @@ export default function OrgsSansDossierView() {
               />
             </div>
           </div>
+
+          {/* 🚀 BARRE BULK — initialiser toutes les orgs filtrées en un clic */}
+          {filtered.length > 0 && (
+            <div className="mt-3 p-3 rounded-md border-2 border-emerald-200 bg-emerald-50 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1 text-sm text-emerald-900">
+                <b>⚡ Action en lot :</b> initialiser les <b>{filtered.length}</b> dossier(s) listé(s) en un seul clic.
+                {' '}Les sites sélectionnés individuellement ci-dessous ont priorité, sinon le site par défaut ci-contre est utilisé.
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Select
+                  value={bulkDefaultVenue || ''}
+                  onValueChange={(v) => setBulkDefaultVenue(v === '__none__' ? '' : v)}
+                >
+                  <SelectTrigger className="w-48 h-9 text-xs bg-white">
+                    <SelectValue placeholder="Site par défaut (optionnel)…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Aucun site (l&apos;exposant choisit) —</SelectItem>
+                    {venues.map(v => (
+                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  onClick={bulkInitialize}
+                  disabled={bulkBusy || filtered.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 gap-1.5"
+                >
+                  {bulkBusy
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {bulkProgress.done}/{bulkProgress.total}…</>
+                    : <><Plus className="w-3.5 h-3.5" /> Tout initialiser ({filtered.length})</>
+                  }
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Barre de progression pendant le bulk */}
+          {bulkBusy && (
+            <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md text-xs">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-blue-900 font-semibold">Initialisation en cours…</span>
+                <span className="text-blue-700">{bulkProgress.done}/{bulkProgress.total} traité(s) — ✅ {bulkProgress.ok} · ❌ {bulkProgress.ko}</span>
+              </div>
+              <div className="h-1.5 bg-blue-200 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-600 transition-all" style={{ width: `${bulkProgress.total > 0 ? (bulkProgress.done / bulkProgress.total) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
