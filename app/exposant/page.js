@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import BusinessCard from '@/components/exposant/business-card';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
@@ -429,15 +430,22 @@ export default function ExposantPortal() {
         }} />}
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="w-full grid grid-cols-2 md:grid-cols-5">
-            <TabsTrigger value="parcours" className="font-bold">🎯 Mon parcours</TabsTrigger>
-            <TabsTrigger value="profil">👤 Mon profil</TabsTrigger>
-            <TabsTrigger value="infos">📦 Infos pratiques</TabsTrigger>
-            <TabsTrigger value="jourj">📅 Jour J</TabsTrigger>
+          {/* 🆕 SESSION 29 — Mon profil mis en valeur (orange) séparé visuellement des autres onglets */}
+          <TabsList className="w-full flex flex-wrap gap-1 bg-transparent p-0 h-auto justify-start">
+            <TabsTrigger
+              value="profil"
+              className="bg-white border-2 border-orange-200 data-[state=active]:border-orange-500 data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700 font-bold shadow-sm hover:bg-orange-50 transition px-4 py-2 mr-2"
+            >
+              👤 Mon profil
+            </TabsTrigger>
+            <span className="hidden md:inline-block w-px bg-slate-300 mx-1 my-1" aria-hidden></span>
+            <TabsTrigger value="parcours" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">🎯 Mon parcours</TabsTrigger>
+            <TabsTrigger value="infos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">📦 Infos pratiques</TabsTrigger>
+            <TabsTrigger value="jourj" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">📅 Jour J</TabsTrigger>
             <TabsTrigger
               value="bilan"
               disabled={!postEvent.unlocked && user?.role !== 'aracom_admin'}
-              className={!postEvent.unlocked ? (user?.role === 'aracom_admin' ? 'border-2 border-dashed border-amber-400' : 'opacity-40 cursor-not-allowed') : ''}
+              className={`data-[state=active]:bg-white data-[state=active]:shadow-sm ${!postEvent.unlocked ? (user?.role === 'aracom_admin' ? 'border-2 border-dashed border-amber-400' : 'opacity-40 cursor-not-allowed') : ''}`}
               title={!postEvent.unlocked ? (user?.role === 'aracom_admin' ? '⚠️ Verrouillé pour les exposants — accès admin uniquement' : "Activé après l'événement par ARACOM") : ''}
             >
               ⭐ Satisfaction & Caution {!postEvent.unlocked && <span className="text-[10px] ml-1">🔒</span>}
@@ -465,6 +473,17 @@ export default function ExposantPortal() {
           </TabsContent>
 
           <TabsContent value="profil" className="space-y-4">
+            {/* 🆕 SESSION 29 — Carte de visite : aperçu rapide avec mini-badges */}
+            <BusinessCard
+              organization={o}
+              registration={r}
+              venue={v}
+              slots={slotsArr}
+              animationsCount={animationsCount}
+              checks={checks}
+              deposit={d}
+              progress={completion}
+            />
             <ProfilBlock organization={o} registration={r} onRefresh={load} />
             <div className="grid md:grid-cols-2 gap-4">
               <Card>
