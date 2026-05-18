@@ -5475,6 +5475,28 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
               updated_at: new Date(),
             };
             await db.collection('organizations').insertOne(newOrg);
+            // 🆕 SESSION 28i — Crée AUTOMATIQUEMENT un dossier 2026 vierge sauf
+            // pour les contacts mailing-only (qui ne sont pas des exposants à proprement parler).
+            if (!isContactOnly) {
+              await db.collection('registrations').insertOne({
+                id: `reg-${newOrg.id}`,
+                edition_id: EDITION_ID,
+                organization_id: newOrg.id,
+                venue_id: null,
+                stand_code: null,
+                status: 'prospect',
+                completion_percent: 5,
+                wizard_step: 1,
+                source: 'import_excel',
+                is_locked: false,
+                is_deposit_received: false,
+                is_convention_signed: false,
+                is_insurance_uploaded: false,
+                candidature_locked: false,
+                created_at: new Date(),
+                updated_at: new Date(),
+              });
+            }
             created++;
             if (isContactOnly) mailingOnly++;
             else prospects++;

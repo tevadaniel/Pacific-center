@@ -253,17 +253,39 @@ export default function OrgsSansDossierView() {
 
       {/* 🆕 SECTION 2 : ORGANISATIONS SANS DOSSIER */}
       <Card className="border-amber-300 bg-amber-50">
-        <CardContent className="p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-amber-900">
-            <p className="font-semibold mb-1">Organisations sans dossier d&apos;inscription au Forum 2026</p>
-            <p className="text-amber-800">
-              Ces organisations existent en base mais n&apos;ont <b>aucune inscription active</b> pour l&apos;édition 2026.
-              Tant que le dossier n&apos;est pas initialisé, l&apos;exposant voit le message <i>&quot;Votre dossier n&apos;a pas encore été initialisé&quot;</i> dans son portail.
-            </p>
-            <p className="text-amber-800 mt-1.5">
-              💡 <b>Initialisez le dossier</b> pour permettre à l&apos;exposant de se connecter et compléter son inscription (site, stand, animations, documents).
-            </p>
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900 flex-1">
+              <p className="font-semibold mb-1">Organisations sans dossier d&apos;inscription au Forum 2026</p>
+              <p className="text-amber-800">
+                Ces organisations existent en base mais n&apos;ont <b>aucune inscription active</b> pour l&apos;édition 2026.
+                Tant que le dossier n&apos;est pas initialisé, l&apos;exposant voit le message <i>&quot;Votre dossier n&apos;a pas encore été initialisé&quot;</i> dans son portail.
+              </p>
+              <p className="text-amber-800 mt-1.5">
+                💡 <b>Initialisez le dossier</b> pour permettre à l&apos;exposant de se connecter et compléter son inscription (site, stand, animations, documents).
+              </p>
+            </div>
+            {/* 🆕 SESSION 28i — Auto-réparation en un clic depuis l'admin */}
+            {filtered.length > 0 && (
+              <Button
+                size="sm"
+                onClick={async () => {
+                  if (!window.confirm(`Auto-réparer toutes les organisations sans dossier ?\n\nCela créera un dossier 2026 pour chaque organisation qui n'en a pas (sauf archivées + mailing-only).`)) return;
+                  setBulkBusy(true);
+                  try {
+                    const res = await api('/api/admin/auto-repair/initialize-all-missing-registrations', { method: 'POST' });
+                    toast.success(`⚡ ${res.created} dossier(s) créé(s) (${res.already_ok} déjà OK)`);
+                    load();
+                  } catch (e) { toast.error(e.message); }
+                  finally { setBulkBusy(false); }
+                }}
+                disabled={bulkBusy}
+                className="bg-amber-600 hover:bg-amber-700 gap-1.5 shrink-0"
+              >
+                {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '⚡'} Auto-réparer tout
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

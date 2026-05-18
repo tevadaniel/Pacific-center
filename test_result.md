@@ -616,11 +616,23 @@ frontend:
         agent: "testing"
         comment: "✅ TESTÉ EXHAUSTIVEMENT - 8/8 TESTS PASSÉS (100%). SESSION 28g endpoints pour lier des utilisateurs à des organisations testés avec succès. TEST 1 (GET sans admin): GET /api/admin/users-without-org avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 2 (GET avec admin): GET /api/admin/users-without-org avec x-user-role=aracom_admin → 200 avec array de 1 utilisateur, test user présent avec tous les champs requis (id, email, role_code, is_active), organization_id=null, pas de champ password (sécurité OK), aucun admin dans la liste (correctement exclus), aucun utilisateur inactif (correctement exclus) ✅. TEST 3 (POST 404 user): POST /api/admin/users/non-existent-user-12345/link-organization avec body {organization_id:'org-19'} → 404 'Utilisateur introuvable' ✅. TEST 4 (POST sans org_id): POST /api/admin/users/:userId/link-organization avec body {} → 400 'organization_id requis dans le body' ✅. TEST 5 (POST org invalide): POST avec body {organization_id:'non-existent-org-12345'} → 404 'Organisation introuvable' ✅. TEST 6 (POST sans admin): POST avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 7 (HAPPY PATH): POST /api/admin/users/u-test-link-xxx/link-organization avec admin + body {organization_id:'org-19'} → 200 {ok:true, action:'user_linked', user_id:'u-test-link-xxx', organization_id:'org-19'}. Vérification DB: user.organization_id='org-19', user.linked_at défini, user.linked_by='u-admin'. Vérification liste: utilisateur n'apparaît plus dans GET /api/admin/users-without-org ✅. TEST 8 (Re-link): POST avec body {organization_id:'org-31'} → 200 OK, re-linking autorisé. Vérification DB: user.organization_id='org-31' ✅. CONCLUSION: Tous les endpoints SESSION 28g fonctionnent parfaitement. Permissions (403), validations (400/404), happy path et re-linking opérationnels. Feature 100% fonctionnelle."
 
+  - task: "SESSION 28i — Auto-Repair Missing Registrations (POST /api/admin/auto-repair/initialize-all-missing-registrations)"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 3/3 TESTS PASSÉS (100%). SESSION 28i auto-repair endpoint pour créer en masse les dossiers manquants testé avec succès. TEST 1 (Sans admin): POST /api/admin/auto-repair/initialize-all-missing-registrations avec x-user-role=exposant → 403 'Accès admin requis' ✅. TEST 2 (HAPPY PATH): Setup: 4 orgs de test créées (org-test-r1 sans registration, org-test-r2 avec registration existante, org-test-r3 archivée, org-test-r4 mailing_only). Step A: POST avec admin → 200 {ok:true, action:'auto_repair_done', created:1, already_ok:67, errors:[]} ✅. Step B: Vérification DB - org-test-r1: 1 registration créée ✅, org-test-r2: 1 registration (pas de duplication) ✅, org-test-r3: 0 registration (archivée → skippée) ✅, org-test-r4: 0 registration (mailing_only → skippée) ✅. Step C: Vérification détails registration org-test-r1 - status='a_confirmer' ✅, source='auto_repair_bulk' ✅, candidature_locked=false ✅, edition_id='edition-2026' ✅. Step D: Idempotence - Second appel → 200 {created:0, already_ok:68} ✅, aucune duplication ✅. TEST 3 (Régression): GET /api/dashboard/kpis → 200 OK ✅, GET /api/stats/public → 200 OK ✅, POST /api/admin/registrations/:id/unlock-candidature → 200 OK ✅. CONCLUSION: Endpoint auto-repair 100% fonctionnel. Crée correctement les registrations manquantes, skip les orgs archivées/mailing_only, idempotent, aucune régression détectée."
+
 
 metadata:
   created_by: "main_agent"
-  version: "2.6"
-  test_sequence: 7
+  version: "2.7"
+  test_sequence: 8
   run_ui: false
 
 test_plan:
@@ -632,6 +644,8 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: "SESSION 28g testing completed successfully. All 8 tests passed (100%). Both endpoints (GET /api/admin/users-without-org and POST /api/admin/users/:userId/link-organization) are fully functional. Permissions, validations, happy path, and re-linking all working correctly. Feature is production-ready."
+  - agent: "testing"
+    message: "SESSION 28i testing completed successfully. All 3 tests passed (100%). POST /api/admin/auto-repair/initialize-all-missing-registrations endpoint is fully functional. Tested: (1) Permission check (403 without admin) ✅, (2) Happy path with 4 test orgs - creates missing registrations, skips archived/mailing_only orgs, idempotent ✅, (3) Regression tests - dashboard/kpis, stats/public, unlock-candidature all working ✅. Feature creates registrations with correct fields (status='a_confirmer', source='auto_repair_bulk', candidature_locked=false, edition_id='edition-2026'). No regressions detected. Feature is production-ready."
 
 frontend:
   - task: "SESSION 28 UI — Résumé Choix Forum + Débloquer candidature + Exposant portal flow"
