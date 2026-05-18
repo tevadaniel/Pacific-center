@@ -34,6 +34,7 @@ import MultiSiteCockpit from '@/components/multi-site-cockpit';
 import StatusLegend from '@/components/status-legend';
 import BulkExportDialog from '@/components/bulk-export-dialog';
 import AdminOverridePanel from '@/components/aracom/admin-override-panel';
+import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import CorbeilleView from '@/components/aracom/corbeille-view';
 import CautionAppointmentsAdminPanel from '@/components/aracom/caution-appointments-panel';
 import { ExposantPanelProvider, useExposantPanel, ExposantLink } from '@/components/aracom/exposant-panel-context';
@@ -613,6 +614,9 @@ function FicheExposant({ id, onClose }) {
               <SheetTitle className="text-xl">{data.organization?.name}</SheetTitle>
               <SheetDescription>{data.organization?.discipline} • <PrioBadge p={data.organization?.priority_level} /> • <span className="font-mono">{data.registration?.stand_code}</span> • {data.venue?.name}</SheetDescription>
             </SheetHeader>
+
+            {/* 🆕 RÉSUMÉ CHOIX FORUM — Stand + Animations en un coup d'œil */}
+            <ChoixForumSummary data={data} />
 
             {/* 🛠 ACTIONS ADMIN OVERRIDE — modifier/annuler/supprimer toute action de l'exposant */}
             <AdminOverridePanel data={data} onReload={load} onClose={onClose} />

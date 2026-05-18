@@ -579,6 +579,19 @@ frontend:
         agent: "testing"
         comment: "✅ TESTÉ EXHAUSTIVEMENT - 26/26 TESTS PASSÉS (100%). Refactoring des 10 endpoints admin vers /app/lib/api/handlers/admin-delete-reset.js vérifié avec succès. SMOKE TESTS (10/10): Tous les endpoints retournent correctement 404 avec messages français pour IDs inexistants (archive/restore/delete organizations, reset-caution/reset-virement/reset-convention/reset-attendance/reset-caution-appointment/reset-satisfaction/cancel-virement registrations). cancel-virement retourne 200 avec action=virement_cancelled même pour ID inexistant (comportement attendu). PERMISSION TESTS (10/10): Tous les endpoints retournent 403 'Accès admin requis' pour rôle non-admin (exposant). FUNCTIONAL TEST (4/4): Archive organization '3TBC' (org-19) → 200 ok action=archived. Vérification filtre: org archivée absente de GET /api/organizations. Restore organization → 200 ok action=restored. Vérification: org restaurée présente dans liste active sans archived_at. FILTER REGRESSION (2/2): GET /api/organizations (défaut) ne contient aucune org archivée (66 orgs actives). GET /api/organizations?only_archived=true retourne uniquement orgs archivées (0 dans ce test). Refactoring 100% réussi, aucune régression détectée."
 
+
+  - task: "SESSION 28 — request-validation sets candidature_locked + unlock-candidature endpoint + stand_assignment field"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 3/3 TESTS PASSÉS (100%). SESSION 28 nouvelles features backend testées avec succès. TEST 1 (request-validation sets candidature_locked): POST /api/registrations/:id/request-validation avec body {preferred_payment:'cheque', rdv_proposal:'', notes:''} → 200 OK avec {ok:true, validation_request_id:<uuid>}. Vérification GET /api/registrations/:id confirme registration.candidature_locked=true ET registration.candidature_locked_at est défini (2026-05-18T02:47:09.213Z). TEST 2 (unlock-candidature endpoint): 2.1) Permission check: POST sans x-user-role admin (avec role=exposant) → 403 'Accès admin requis' ✅. 2.2) 404 check: POST /api/admin/registrations/non-existent-id/unlock-candidature avec admin headers → 404 'Inscription introuvable' ✅. 2.3) Happy path: POST /api/admin/registrations/:id/unlock-candidature avec admin headers → 200 OK avec {ok:true, action:'candidature_unlocked'}. Vérification GET /api/registrations/:id confirme registration.candidature_locked=false ET registration.candidature_unlocked_at est défini (2026-05-18T02:47:11.214Z). Validation_requests avec status 'en_attente' ou 'rdv_fixe' sont bien annulées (status='annulee'). TEST 3 (stand_assignment field): GET /api/registrations/:id retourne bien le champ stand_assignment. Pour reg-arue-A-C02 (avec assignment actif status='provisoire'): stand_assignment contient {id, registration_id, venue_stand_id, assigned_by, assigned_at, status, created_at, updated_at} ✅. Pour reg-arue-A-C01 (sans assignment actif après unlock): stand_assignment=null ✅ (comportement attendu si status='annule' ou 'cancelled'). Tous les endpoints fonctionnent selon les spécifications SESSION 28. Aucune régression détectée."
+
 metadata:
   created_by: "main_agent"
   version: "2.5"
@@ -1659,4 +1672,82 @@ agent_communication:
 agent_communication:
     - agent: "main"
       message: "SESSION 27 — REFACTORING COMPLET (Phase 4 + 5) + Fix overlap convention header. BILAN FINAL : FRONTEND aracom/page.js réduit de 7894 → 3207 lignes (-59%), 17 composants extraits. BACKEND route.js réduit de 8825 → 8225 lignes (-7%), 3 handlers modulaires + helpers partagés. Tests backend 17/17 ✅ — aucune régression. Fix visuel sur le header PDF (Convention, Guide, Reçu, Satisfaction) : zone gauche/droite séparées strictement avec marge de sécurité, texte sous-titre raccourci, ellipsis garantissant zéro chevauchement. Pattern dispatcher backend documenté et reproductible pour les prochains modules à extraire (attendance, wizard, exposant, mailing) — à faire si désiré dans une session future."
+
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28 — UX Portail Exposant : Candidature lock + suppression modal + résumé Aracom
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Verrouillage candidature exposant (candidature_locked)"
+    implemented: true
+    working: "NA"
+    file: "app/api/[[...path]]/route.js + lib/api/handlers/admin-delete-reset.js + app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "NEW FEATURE — Ajout d'un champ candidature_locked sur les registrations. Quand l'exposant clique sur 'Soumettre ma candidature' (POST /api/registrations/:id/request-validation), la registration est verrouillée : l'exposant ne peut plus modifier son site, son stand ou ses créneaux d'animation. Seul un admin ARACOM peut débloquer via POST /api/admin/registrations/:id/unlock-candidature. Le bouton 'Débloquer candidature' apparaît dans AdminOverridePanel quand candidature_locked=true. Le déblocage annule aussi la validation_request en cours (status → annulee) pour permettre une nouvelle soumission. Côté exposant : isLocked inclut désormais r.candidature_locked, donc tous les champs (stand, animations) sont verrouillés visuellement et fonctionnellement après soumission."
+
+  - task: "NEW — Suppression modal soumission candidature (inline)"
+    implemented: true
+    working: "NA"
+    file: "app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "UX IMPROVEMENT — Suppression de la modal qui apparaissait au clic sur 'Confirmer ma présence'. Création d'un nouveau composant ConfirmPresenceInlineCard qui affiche directement dans la page : (1) Le sélecteur de mode de caution (chèque / espèces / virement). (2) Le RIB ARACOM si virement sélectionné. (3) Les champs RDV/Notes facultatifs. (4) Le bouton 'Soumettre ma candidature' avec un seul clic. Le bouton s'active automatiquement dès que stand+animations sont remplis (canRequest=true). Aucun document obligatoire à cette étape. Pas de tests backend nécessaires (UI only)."
+
+  - task: "NEW — Single-page multi-site flow (pas de reload)"
+    implemented: true
+    working: "NA"
+    file: "app/exposant/page.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "UX IMPROVEMENT — Le switch entre sites (clic sur 'Travailler sur ce site') ne recharge plus la page entière (window.location.reload supprimé). À la place, window.history.replaceState met à jour l'URL et onRefresh() recharge uniquement les données via la fonction load(). De même, après ajout d'un nouveau site (POST /api/exposant/sites/add), l'app bascule automatiquement sur le nouveau registration_id sans reload. Cela donne un vrai feeling 'single page application'. Le verrouillage candidature_locked s'applique par site, donc chaque inscription est independante."
+
+  - task: "NEW — Résumé Choix Forum (Stand + Animations) en haut de FicheExposant Aracom"
+    implemented: true
+    working: true
+    file: "components/aracom/choix-forum-summary.jsx + app/aracom/page.js + app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "NEW UI — Création du composant ChoixForumSummary (~140 lignes) affiché en haut de la fiche exposant Aracom, juste sous le nom de l'organisation et avant AdminOverridePanel. Affiche en 2 colonnes : (1) Bloc Stand & site : numéro de stand, nom du site, badges Zone et Surface m². (2) Bloc Animations : compte + détail jour par jour avec titre/horaires. Badge en haut indiquant si la candidature est 'Verrouillée', 'Caution reçue' ou 'Modifiable'. Pour récupérer zone/surface, l'API GET /api/registrations/:id retourne désormais aussi stand_assignment (lookup dans collection stand_assignments avec status !== annule)."
+      - working: true
+        agent: "testing"
+        comment: "✅ BACKEND TESTÉ — GET /api/registrations/:id retourne bien le champ stand_assignment. Pour registrations avec assignment actif (status='provisoire'): stand_assignment contient objet complet {id, registration_id, venue_stand_id, assigned_by, assigned_at, status, created_at, updated_at}. Pour registrations sans assignment actif: stand_assignment=null. Comportement conforme aux spécifications."
+
+  - task: "NEW — Endpoint POST /api/admin/registrations/:id/unlock-candidature"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "NEW BACKEND — Ajout d'un nouvel endpoint dans le handler admin-delete-reset.js : POST /api/admin/registrations/:id/unlock-candidature. Vérifie x-user-role=aracom_admin (403 sinon). Set candidature_locked=false, candidature_unlocked_at, candidature_unlocked_by. Annule aussi la validation_request en cours (status: en_attente → annulee) pour permettre nouvelle soumission. Logue dans activity_logs avec action=unlock_candidature."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ — Endpoint 100% fonctionnel. Permission check: 403 'Accès admin requis' pour non-admin. 404 'Inscription introuvable' pour ID inexistant. Happy path: 200 OK avec {ok:true, action:'candidature_unlocked'}, candidature_locked=false, candidature_unlocked_at défini, validation_requests annulées."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28 — Nouvelles fonctionnalités UX Portail Exposant : (1) Verrouillage candidature : champ candidature_locked sur registration, set à true au request-validation, déblocable uniquement par admin ARACOM via nouveau endpoint /api/admin/registrations/:id/unlock-candidature. (2) Suppression modale soumission : nouveau composant ConfirmPresenceInlineCard avec sélecteur paiement + RDV + notes inline. (3) Flow multi-site single-page : plus de window.location.reload entre sites. (4) Résumé Choix Forum en haut de fiche Aracom : composant ChoixForumSummary affichant stand (numéro+zone+surface) + animations détaillées par jour, avec badge statut. (5) Bouton 'Débloquer candidature' dans AdminOverridePanel + badge violet 'Candidature verrouillée'. À tester backend : endpoint unlock-candidature (auth, comportement, annulation validation_request), GET /api/registrations/:id qui retourne maintenant stand_assignment, POST request-validation qui set candidature_locked=true."
+    - agent: "testing"
+      message: "SESSION 28 BACKEND TESTS COMPLETED — 3/3 tests passed (100%). All new backend features are working correctly: (1) POST /api/registrations/:id/request-validation now sets candidature_locked=true and candidature_locked_at timestamp. (2) POST /api/admin/registrations/:id/unlock-candidature endpoint is fully functional with proper permission checks (403 for non-admin), 404 for non-existent registrations, and correctly unlocks candidature (sets candidature_locked=false, candidature_unlocked_at timestamp) and cancels pending validation_requests. (3) GET /api/registrations/:id now returns stand_assignment field which contains the active stand assignment object (with id, registration_id, venue_stand_id, assigned_by, assigned_at, status, created_at, updated_at) when an active assignment exists (status !== 'annule' or 'cancelled'), or null when no active assignment exists. All endpoints tested with real seeded data (reg-arue-A-C01, reg-arue-A-C02). No regressions detected. Ready for production."
 

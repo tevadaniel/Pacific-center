@@ -85,6 +85,8 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
   const resetSurvey     = () => callAdmin('Questionnaire réinitialisé',   `/admin/registrations/${reg.id}/reset-satisfaction`,        null, `Supprimer la réponse au questionnaire de satisfaction de ${org?.name} ?\n\nL'exposant pourra le re-remplir et l'attestation auto sera régénérée.`);
   const resetAttendanceAll = () => callAdmin('Pointages Jour J supprimés', `/admin/registrations/${reg.id}/reset-attendance`, { scope: 'all' }, `⚠ Supprimer TOUS les pointages Jour J (arrivée + départ) de ${org?.name} ?\n\nLes anomalies de retard/départ anticipé seront aussi supprimées.`);
   const resetAttendanceDay = (event_date, scope) => callAdmin(`Pointage ${event_date} ${scope === 'arrival' ? '(arrivée)' : scope === 'departure' ? '(départ)' : '(tout)'} supprimé`, `/admin/registrations/${reg.id}/reset-attendance`, { event_date, scope }, `Supprimer le pointage ${scope === 'arrival' ? "d'arrivée" : scope === 'departure' ? 'de départ' : 'complet'} du ${event_date} ?`);
+  // 🔓 Déblocage de la candidature (autorise l'exposant à modifier site/stand/animations à nouveau)
+  const unlockCandidature = () => callAdmin('Candidature débloquée', `/admin/registrations/${reg.id}/unlock-candidature`, null, `Débloquer la candidature de ${org?.name} ?\n\nL'exposant pourra à nouveau modifier son site, son stand et ses créneaux d'animation.\nLa demande de validation en cours sera annulée — l'exposant devra resoumettre.`);
 
   // Archive / Restore organisation
   const archiveOrg = async () => {
@@ -116,6 +118,7 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
         <div className="flex items-center gap-2">
           <div className="font-bold text-red-900 text-sm">🛠️ Zone admin — Override & Reset</div>
           {hasArchive && <Badge className="bg-amber-100 text-amber-900 border-amber-300">📦 Archivé</Badge>}
+          {reg.candidature_locked && <Badge className="bg-violet-100 text-violet-900 border-violet-300">🔒 Candidature verrouillée</Badge>}
         </div>
         <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)} className="h-7 text-xs">
           {expanded ? '▲ Masquer' : '▼ Toutes les actions'}
@@ -124,6 +127,13 @@ export default function AdminOverridePanel({ data, onReload, onClose }) {
 
       {/* Actions essentielles (toujours visibles) */}
       <div className="flex flex-wrap gap-2">
+        {/* 🔓 Débloquer la candidature — bouton prioritaire si verrouillée */}
+        {reg.candidature_locked && (
+          <Button size="sm" variant="outline" onClick={unlockCandidature} disabled={busy === 'Candidature débloquée'} className="bg-violet-600 text-white hover:bg-violet-700 border-violet-700 h-8 text-xs">
+            {busy === 'Candidature débloquée' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            🔓 Débloquer candidature
+          </Button>
+        )}
         {reg.stand_code && (
           <Button size="sm" variant="outline" onClick={releaseStand} disabled={busy === 'Stand libéré'} className="bg-white border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs">
             {busy === 'Stand libéré' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}

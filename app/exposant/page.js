@@ -139,7 +139,7 @@ export default function ExposantPortal() {
   const slotsArr = data.slots || [];
   const animationsCount = slotsArr.length;
   const validationRequestId = r.validation_request_id;
-  const isLocked = !!r.is_locked || r.status === 'confirme';
+  const isLocked = !!r.is_locked || !!r.candidature_locked || r.status === 'confirme';
   const checks = [
     { ok: !!r.venue_id && !!r.stand_code, label: 'Site & stand pré-réservés' },
     { ok: animationsCount > 0, label: 'Au moins un créneau d\'animation choisi' },
@@ -319,28 +319,11 @@ export default function ExposantPortal() {
             return <ValidationStatusCard registrationId={r.id} validationRequestId={validationRequestId} onRefresh={load} />;
           }
           return (
-            <Card className={`border-2 ${canRequest ? 'border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50' : 'border-slate-200 bg-slate-50'}`}>
-              <CardContent className="p-5 flex flex-col md:flex-row md:items-center gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Sparkles className={`w-5 h-5 ${canRequest ? 'text-violet-600' : 'text-slate-400'}`} />
-                    <h3 className={`text-lg font-bold ${canRequest ? 'text-violet-900' : 'text-slate-500'}`}>Confirmer ma présence avec dépôt de caution</h3>
-                  </div>
-                  <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
-                    {canRequest
-                      ? <>Tout est prêt ! Cliquez pour <b>verrouiller votre place</b>. ARACOM recevra une notification et vous contactera pour fixer un RDV de remise de la caution (<b>chèque, espèces ou virement</b>, 20 000 XPF).</>
-                      : <>Avant de pouvoir confirmer votre présence : choisissez un site & un stand <i>(onglet Sites & plan)</i>, puis <b>1 créneau d&apos;animation par jour</b> <i>(onglet Animations)</i>.</>
-                    }
-                  </p>
-                  {canRequest && (
-                    <div className="mt-2 text-[12px] rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-emerald-900">
-                      💡 <b>Bon à savoir :</b> Vous pouvez confirmer votre présence maintenant et compléter vos documents (convention signée, attestation d&apos;assurance…) <b>ultérieurement</b>. Aucun document obligatoire pour valider cette étape.
-                    </div>
-                  )}
-                </div>
-                <ConfirmPresenceButton registrationId={r.id} disabled={!canRequest} onDone={load} />
-              </CardContent>
-            </Card>
+            <ConfirmPresenceInlineCard
+              registrationId={r.id}
+              canRequest={canRequest}
+              onDone={load}
+            />
           );
         })()}
 
@@ -538,22 +521,30 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('reg', regId);
-      window.history.pushState({}, '', url);
-      window.location.reload();
+      window.history.replaceState({}, '', url);
     }
+    // 🆕 Pas de rechargement de page : on rafraîchit les données via le parent
+    onRefresh();
   };
 
   const addSite = async () => {
     if (!addVenueId) return toast.error('Choisissez un site à ajouter');
     setBusy(true);
     try {
-      await api('/api/exposant/sites/add', {
+      const res = await api('/api/exposant/sites/add', {
         method: 'POST',
         body: JSON.stringify({ organization_id: organizationId, venue_id: addVenueId }),
       });
       toast.success('🎉 Nouveau site ajouté à votre inscription !');
       setShowAdd(false);
       setAddVenueId('');
+      // 🆕 Bascule automatiquement sur le nouveau site pour permettre de le compléter
+      const newRegId = res?.registration?.id || res?.id;
+      if (newRegId && typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('reg', newRegId);
+        window.history.replaceState({}, '', url);
+      }
       onRefresh();
     } catch (e) { toast.error(e.message); }
     setBusy(false);
@@ -599,7 +590,7 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
       <CardContent className="space-y-2">
         {allSites.map((s) => {
           const isActive = s.id === currentRegId;
-          const isLocked = s.is_locked || s.is_deposit_received;
+          const isLocked = s.is_locked || s.is_deposit_received || s.candidature_locked;
           return (
             <div key={s.id} className={`rounded-md border-2 p-3 transition ${isActive ? 'bg-white border-blue-500 shadow-sm' : 'bg-white/50 border-slate-200 hover:border-blue-300'}`}>
               <div className="flex items-center gap-3 flex-wrap">
@@ -694,7 +685,7 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
 
 function ParcoursWizard({ registration, organization, venue, docs, slots, validationRequest, onRefresh }) {
   const r = registration;
-  const isLocked = r.status === 'verrouille' || validationRequest?.status === 'verrouille';
+  const isLocked = r.status === 'verrouille' || r.candidature_locked || r.is_locked || validationRequest?.status === 'verrouille';
   const isPending = validationRequest?.status === 'en_attente';
   const hasRdv = validationRequest?.status === 'rdv_fixe';
 
@@ -1041,7 +1032,123 @@ function ExposantStepper({ checks, deadlines = {} }) {
 }
 
 // =====================================================================
-// CONFIRM PRESENCE — bouton + modale (envoi demande de validation)
+// CONFIRM PRESENCE — Carte inline (pas de modal)
+// Affiche le sélecteur de mode de caution + le bouton de soumission directement.
+// Le bouton s'active automatiquement dès que stand + animations sont remplis.
+// =====================================================================
+function ConfirmPresenceInlineCard({ registrationId, canRequest, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ preferred_payment: 'cheque', rdv_proposal: '', notes: '' });
+  const [rib, setRib] = useState(null);
+  useEffect(() => {
+    api('/api/admin/rib-config').then(setRib).catch(() => {});
+  }, []);
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registrationId}/request-validation`, {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      toast.success('✅ Demande envoyée à ARACOM. Votre candidature est verrouillée et nous vous recontacterons pour fixer le RDV.');
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card className={`border-2 ${canRequest ? 'border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+      <CardContent className="p-5 space-y-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles className={`w-5 h-5 ${canRequest ? 'text-violet-600' : 'text-slate-400'}`} />
+            <h3 className={`text-lg font-bold ${canRequest ? 'text-violet-900' : 'text-slate-500'}`}>Soumettre ma candidature</h3>
+          </div>
+          <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
+            {canRequest
+              ? <>Tout est prêt ! En soumettant, votre <b>candidature sera verrouillée</b> et ARACOM vous contactera pour fixer un RDV de remise de caution (chèque, espèces ou virement, 20 000 XPF).</>
+              : <>Pour activer la soumission : choisissez un <b>site + stand</b> (onglet Sites &amp; plan) et au moins <b>un créneau d&apos;animation</b> (onglet Animations).</>
+            }
+          </p>
+          {canRequest && (
+            <div className="mt-2 text-[12px] rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-emerald-900">
+              💡 <b>Bon à savoir :</b> Aucun document (convention, assurance…) n&apos;est obligatoire pour soumettre. Vous compléterez votre dossier après la validation ARACOM.
+            </div>
+          )}
+        </div>
+
+        {canRequest && (
+          <>
+            {/* Sélecteur de mode de caution — inline */}
+            <div>
+              <Label className="text-sm font-semibold">Mode de caution préféré (20 000 XPF)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                {[
+                  { v: 'cheque', label: '💳 Chèque', desc: "À l'ordre d'ARACOM" },
+                  { v: 'especes', label: '💵 Espèces', desc: 'Remise en main propre' },
+                  { v: 'virement', label: '🏦 Virement', desc: 'Bancaire (RIB ci-dessous)' },
+                ].map(o => (
+                  <button key={o.v} type="button" onClick={() => setForm({ ...form, preferred_payment: o.v })}
+                    className={`border-2 rounded-md p-3 text-left transition ${form.preferred_payment === o.v ? 'border-violet-500 bg-white shadow-sm' : 'border-slate-200 bg-white/60 hover:border-slate-300'}`}>
+                    <div className="font-semibold text-sm">{o.label}</div>
+                    <div className="text-xs text-slate-500">{o.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {form.preferred_payment === 'virement' && rib && (
+              <div className="rounded-md bg-blue-50 border-2 border-blue-200 p-3 text-xs space-y-1">
+                <div className="font-bold text-blue-900 flex items-center gap-2">🏦 Coordonnées bancaires ARACOM</div>
+                <div className="grid grid-cols-2 gap-2 mt-2 font-mono text-[11px]">
+                  <div><span className="text-slate-500">Titulaire :</span> <b className="text-blue-900">{rib.titulaire || '—'}</b></div>
+                  <div><span className="text-slate-500">Banque :</span> <b className="text-blue-900">{rib.banque || '—'}</b></div>
+                  <div className="col-span-2"><span className="text-slate-500">IBAN :</span> <b className="text-blue-900 select-all">{rib.iban || '—'}</b></div>
+                  <div><span className="text-slate-500">BIC :</span> <b className="text-blue-900 select-all">{rib.bic || '—'}</b></div>
+                </div>
+                <div className="mt-2 pt-2 border-t border-blue-200"><span className="text-slate-500">Référence à indiquer :</span> <b className="text-blue-900">{rib.reference || '—'}</b></div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-sm">Vos disponibilités pour le RDV (facultatif)</Label>
+                <Input
+                  value={form.rdv_proposal}
+                  onChange={(e) => setForm({ ...form, rdv_proposal: e.target.value })}
+                  placeholder="Ex : matin, en semaine, après 17h…"
+                />
+              </div>
+              <div>
+                <Label className="text-sm">Notes pour ARACOM (facultatif)</Label>
+                <Input
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Information utile…"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button
+                size="lg"
+                disabled={busy}
+                onClick={submit}
+                className="bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 gap-2 shadow-lg"
+                data-testid="submit-candidature"
+              >
+                <Lock className="w-5 h-5" /> {busy ? 'Envoi…' : 'Soumettre ma candidature'}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// =====================================================================
+// CONFIRM PRESENCE — bouton + modale (envoi demande de validation) — DEPRECATED
+// Conservé pour compatibilité, mais remplacé par ConfirmPresenceInlineCard.
 // =====================================================================
 function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
   const [open, setOpen] = useState(false);

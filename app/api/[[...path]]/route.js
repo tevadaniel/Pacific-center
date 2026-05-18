@@ -1361,6 +1361,11 @@ export async function GET(request, { params }) {
       const comments = await db.collection('field_comments').find({ registration_id: id }).toArray();
       const sessions = await db.collection('attendance_sessions').find({ registration_id: id }).toArray();
       const media = await db.collection('field_media').find({ registration_id: id }, { projection: { file_data: 0 } }).sort({ captured_at: -1 }).toArray();
+      // 🆕 Récupère l'assignation de stand active pour avoir zone / surface en clair
+      const stand_assignment = reg.stand_code
+        ? await db.collection('stand_assignments').findOne({ registration_id: id, status: { $nin: ['annule', 'cancelled'] } })
+        : null;
+      if (stand_assignment) delete stand_assignment._id;
       [reg, org, venue, deposit].forEach(x => { if (x) delete x._id; });
       // Strip ARACOM-private data for non-admins (exposants and pacific centers)
       if (org && ctx.role !== 'aracom_admin') {
@@ -1381,6 +1386,7 @@ export async function GET(request, { params }) {
         comments: comments.map(c => { delete c._id; return c; }),
         attendance_sessions: sessions.map(s => { delete s._id; return s; }),
         media: media.map(m => { delete m._id; return m; }),
+        stand_assignment,
       });
     }
 
@@ -6152,10 +6158,13 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         created_at: new Date(),
         updated_at: new Date(),
       });
-      // Update registration flag
+      // Update registration flag + 🔒 Verrouillage de la candidature
+      // (l'exposant ne peut plus modifier son site/stand/animations tant qu'ARACOM ne débloque pas)
       await db.collection('registrations').updateOne({ id: regId }, { $set: {
         validation_request_id: reqId,
         validation_requested_at: new Date(),
+        candidature_locked: true,
+        candidature_locked_at: new Date(),
         updated_at: new Date(),
       } });
 
