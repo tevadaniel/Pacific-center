@@ -1615,3 +1615,48 @@ agent_communication:
 
   - agent: "testing"
     message: "✅ FINAL REGRESSION TEST COMPLETE (Session 23+) - 17/17 tests passed (100%). Tested 3 extracted handler modules with dispatcher pattern: (1) admin-delete-reset.js (10 endpoints) - 2/2 smoke tests passed, all routes correctly return 404 with French error messages. (2) caution-appointments.js (3 endpoints) - 6/6 smoke tests passed, validation errors in French, permission checks (403) work correctly. (3) caution-receipts.js (3 endpoints) - 5/5 smoke tests passed, all endpoints return correct 400/403/404 errors. FUNCTIONAL E2E TEST (caution appointments workflow): 4/4 steps passed - Submit appointment → Validate with confirmed_place → Reset → Re-call returns 404. Dispatcher pattern works perfectly: handlers are called at top of POST handler, return Response if route matches, null otherwise. All error messages in French. Permission checks (403 'Accès admin requis' / 'Réservé aux admins') work correctly. NO REGRESSIONS DETECTED. All 3 modules route correctly through dispatcher."
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 27 — Refactoring P2 Phases 4+5 FINALES + Fix overlap header docs
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "FIX — Chevauchement texte sur header convention PDF"
+    implemented: true
+    working: true
+    file: "lib/document-generator.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "FIX VISUEL — Le sous-titre 'AGENCE DE COMMUNICATION & ÉVÉNEMENTIEL' chevauchait avec le titre droit 'CONVENTION DE PARTICIPATION — SUITE' à cause de zones horizontales trop proches dans drawHeader(). CORRECTION : (1) Zone gauche limitée à width=230 strict avec lineBreak=false + ellipsis. (2) Texte raccourci à 'AGENCE COMMUNICATION & ÉVÉNEMENTIEL' avec characterSpacing réduit (1.2 au lieu de 2). (3) Zone droite démarre désormais à x=280 (au lieu de 230) → marge de sécurité de 10pt. (4) Titre droit en 12pt au lieu de 13pt + ellipsis garantissant aucun débordement. Tous les PDFs (Convention, Guide, Reçu Caution, Satisfaction) bénéficient de la correction puisqu'ils partagent drawHeader()."
+
+  - task: "Refactor Phase 5 — DashboardView + BilansView + RelancesView + SatisfactionAdminView extraction"
+    implemented: true
+    working: "NA"
+    file: "components/aracom/*.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "REFACTORING PHASE 5 — Extraction de 4 vues supplémentaires : (1) dashboard-view.jsx (412 lignes) — vue principale avec KPIs, alertes, raccourcis. (2) bilans-view.jsx (364 lignes) — génération et visualisation des bilans (site/global/exposant) + openReport HTML. (3) relances-view.jsx (310 lignes) — module de relances avec filtres multi-statuts et actions de masse + RELANCE_STATUS_CONFIG. (4) satisfaction-admin-view.jsx (397 lignes) — vue admin satisfaction + StatKpi + RatingInline + ConfirmedExposantsPanel. CUMUL TOTAL Phase 1+2+3+5 : aracom/page.js 7894 → 3207 lignes (-4687 lignes, -59%). 17 composants modulaires totalisant 5092 lignes dans /app/components/aracom/."
+
+  - task: "Refactor Phase 4 final — Extraction caution-appointments + caution-receipts handlers"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/caution-appointments.js + lib/api/handlers/caution-receipts.js + app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "REFACTORING PHASE 4 FINAL — Extraction de 2 modules backend supplémentaires : (1) caution-appointments.js (214 lignes) — 3 endpoints : POST /api/exposant/caution-appointment (demande exposant), POST /api/admin/caution-appointments/update (validation admin + email), POST /api/admin/caution-appointments/create (création RDV par admin + email). Inclut placeLabelFr() helper pour les emails. (2) caution-receipts.js (170 lignes) — 3 endpoints : POST /api/admin/register-virement/:regId (validation virement + génération reçu HTML), POST /api/admin/refund-attestation/:regId/upload (dépôt version signée), POST /api/admin/refund-attestation/:regId/generate (régénération attestation). CUMUL TOTAL backend : route.js 8825 → 8225 lignes (-600). 3 handlers modulaires totalisant 674 lignes dans /app/lib/api/handlers/. TESTS BACKEND : 17/17 tests passés (100%) — smoke tests + permissions + E2E workflow caution-appointment (submit → validate → reset → 404). AUCUNE RÉGRESSION."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 27 — REFACTORING COMPLET (Phase 4 + 5) + Fix overlap convention header. BILAN FINAL : FRONTEND aracom/page.js réduit de 7894 → 3207 lignes (-59%), 17 composants extraits. BACKEND route.js réduit de 8825 → 8225 lignes (-7%), 3 handlers modulaires + helpers partagés. Tests backend 17/17 ✅ — aucune régression. Fix visuel sur le header PDF (Convention, Guide, Reçu, Satisfaction) : zone gauche/droite séparées strictement avec marge de sécurité, texte sous-titre raccourci, ellipsis garantissant zéro chevauchement. Pattern dispatcher backend documenté et reproductible pour les prochains modules à extraire (attendance, wizard, exposant, mailing) — à faire si désiré dans une session future."
+
