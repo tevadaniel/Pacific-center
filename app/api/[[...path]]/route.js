@@ -4126,6 +4126,48 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       if (!user && tk.email) {
         user = await db.collection('users').findOne({ email: tk.email.toLowerCase() });
       }
+      // 🆕 SESSION 29 — Self-healing : si le token a une organization_id mais pas de user,
+      // on retrouve l'org puis on cherche par email; sinon on CRÉE un user passwordless lié à l'org.
+      if (!user && tk.organization_id) {
+        const org = await db.collection('organizations').findOne({ id: tk.organization_id });
+        if (org) {
+          // 1. Tente de trouver par email de l'org
+          if (org.main_email) {
+            user = await db.collection('users').findOne({ email: org.main_email.toLowerCase() });
+          }
+          // 2. Tente de trouver par organization_id
+          if (!user) {
+            user = await db.collection('users').findOne({ organization_id: tk.organization_id, role_code: 'exposant' });
+          }
+          // 3. Sinon CRÉE le user passwordless à la volée
+          if (!user) {
+            const exposantRole = await db.collection('roles').findOne({ code: 'exposant' });
+            const newUserId = uuid();
+            const newUser = {
+              id: newUserId,
+              email: (org.main_email || tk.email || `${tk.organization_id}@auto.aracom`).toLowerCase().trim(),
+              full_name: [org.first_name, org.last_name].filter(Boolean).join(' ') || org.contact_name || org.name || 'Exposant',
+              role_id: exposantRole?.id || null,
+              role_code: 'exposant',
+              organization_id: tk.organization_id,
+              passwordless: true,
+              auto_healed_at: new Date(),
+              auto_healed_source: 'access_token_exchange',
+              created_at: new Date(),
+              updated_at: new Date(),
+            };
+            try {
+              await db.collection('users').insertOne(newUser);
+              user = newUser;
+              console.log(`[access-token] ✅ Self-healed user created for org ${tk.organization_id} (${newUser.email})`);
+              // Lie le token au user créé pour les prochaines fois
+              await db.collection('access_tokens').updateOne({ id: tk.id }, { $set: { user_id: newUserId, updated_at: new Date() } });
+            } catch (e) {
+              console.error('[access-token] self-heal insert failed', e?.message);
+            }
+          }
+        }
+      }
       if (!user) return err('Compte associé introuvable', 404);
       if (user.organization_id) organization = await db.collection('organizations').findOne({ id: user.organization_id });
       delete user.password; delete user._id; if (organization) delete organization._id;
