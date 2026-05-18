@@ -23,7 +23,49 @@ const ICONS = {
 };
 const getIcon = (name) => (name && ICONS[name]) ? ICONS[name] : null;
 
-export function Shell({ children, title, subtitle, right, allowedRoles, activeTab, tabs = [], tabGroups = null, onTabClick }) {
+// 🎯 SESSION 29 — Composant Badge intelligent avec couleurs par seuil, animation et tooltip
+//   • 1-9    → ambre (info)
+//   • 10-49  → orange (warning)
+//   • 50+    → rouge + pulse (critique)
+//   • Entrée fade-in + scale, hover ring
+function MenuBadge({ value, tooltip, size = 'sm' }) {
+  const [animateIn, setAnimateIn] = useState(false);
+  useEffect(() => {
+    // Trigger animation au mount + à chaque changement de valeur
+    setAnimateIn(false);
+    const t = setTimeout(() => setAnimateIn(true), 30);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  if (!value || value <= 0) return null;
+
+  // Couleur par seuil
+  let colorCls = 'bg-amber-500 text-white';
+  let pulse = '';
+  if (value >= 50) {
+    colorCls = 'bg-red-500 text-white';
+    pulse = 'animate-pulse';
+  } else if (value >= 10) {
+    colorCls = 'bg-orange-500 text-white';
+  }
+
+  const sizeCls = size === 'lg'
+    ? 'min-w-[22px] h-[20px] px-1.5 text-[11px]'
+    : 'min-w-[20px] h-[18px] px-1.5 text-[10px]';
+
+  const display = value > 99 ? '99+' : value;
+
+  return (
+    <span
+      title={tooltip || `${value}`}
+      className={`inline-flex items-center justify-center rounded-full font-bold leading-none transition-all duration-200 ease-out ${sizeCls} ${colorCls} ${pulse} ${animateIn ? 'opacity-100 scale-100' : 'opacity-0 scale-50'} hover:ring-2 hover:ring-offset-1 hover:ring-current/40`}
+    >
+      {display}
+    </span>
+  );
+}
+
+export function Shell({ children, title, subtitle, right, allowedRoles, activeTab, tabs = [], tabGroups = null, onTabClick, badgeTooltips = {} }) {
   const router = useRouter();
   const [session, setSession] = useState(null);
   useEffect(() => {
@@ -73,7 +115,7 @@ export function Shell({ children, title, subtitle, right, allowedRoles, activeTa
           </div>
         </div>
         {tabGroups && tabGroups.length > 0 ? (
-          <NavWithGroups tabs={tabs} tabGroups={tabGroups} activeTab={activeTab} onTabClick={onTabClick} />
+          <NavWithGroups tabs={tabs} tabGroups={tabGroups} activeTab={activeTab} onTabClick={onTabClick} badgeTooltips={badgeTooltips} />
         ) : tabs.length > 0 ? (
           <div className="max-w-[1600px] mx-auto px-2 sm:px-4 flex gap-1 overflow-x-auto">
             {tabs.map(t => {
@@ -103,7 +145,7 @@ function roleLabel(role) {
 }
 
 // Navigation à 5 groupes principaux avec dropdowns
-function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
+function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick, badgeTooltips = {} }) {
   const tabsByKey = Object.fromEntries(tabs.map(t => [t.key, t]));
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -209,11 +251,7 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
               {Icon ? <Icon className="w-4 h-4" /> : <span className="text-base">{group.icon}</span>}
               <span>{group.label}</span>
               {subLabel && <span className="text-xs text-blue-500 font-normal hidden sm:inline">· {subLabel}</span>}
-              {badgeTotal > 0 && (
-                <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
-                  {badgeTotal > 99 ? '99+' : badgeTotal}
-                </span>
-              )}
+              <MenuBadge value={badgeTotal} tooltip={`${badgeTotal} action(s) à traiter dans ${group.label}`} />
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openMenu === group.key ? 'rotate-180' : ''}`} />
             </button>
           );
@@ -234,20 +272,17 @@ function NavWithGroups({ tabs, tabGroups, activeTab, onTabClick }) {
               const itemActive = activeTab === t.key;
               const ItemIcon = getIcon(t.icon);
               const itemBadge = t.badge || 0;
+              const tooltip = badgeTooltips[t.key] || (itemBadge > 0 ? `${itemBadge} dans ${t.label}` : t.label);
               return (
                 <button
                   key={t.key}
                   onClick={() => handleClick(t.key)}
-                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 transition-colors ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 transition-all hover:translate-x-0.5 ${itemActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
                   role="menuitem"
                 >
                   {ItemIcon ? <ItemIcon className={`w-4 h-4 shrink-0 ${itemActive ? 'text-blue-600' : 'text-slate-400'}`} /> : <span className="w-4 h-4 inline-block" />}
                   <span className="flex-1">{t.label}</span>
-                  {itemBadge > 0 && (
-                    <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold leading-none ${itemActive ? 'bg-blue-600 text-white' : 'bg-red-500 text-white'}`}>
-                      {itemBadge > 99 ? '99+' : itemBadge}
-                    </span>
-                  )}
+                  <MenuBadge value={itemBadge} tooltip={tooltip} />
                   {itemActive && itemBadge === 0 && <span className="text-blue-500 text-xs">●</span>}
                 </button>
               );

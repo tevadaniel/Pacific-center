@@ -173,6 +173,16 @@ export default function AracomPage() {
     'anomalies': 'anomalies',
     'satisfaction': 'satisfaction',
   };
+  // Tooltips contextuels affichés au hover sur chaque badge
+  const BADGE_TOOLTIPS = {
+    'validations': `${menuBadges.validations || 0} demande(s) de validation en attente`,
+    'relances': `${menuBadges.relances || 0} exposant(s) à relancer`,
+    'exposants': `${menuBadges.a_confirmer || 0} dossier(s) à confirmer`,
+    'cautions': `${menuBadges.cautions || 0} caution(s) non encaissée(s)`,
+    'orgs-sans-dossier': `${menuBadges.orphans || 0} compte(s) sans dossier d'inscription`,
+    'anomalies': `${menuBadges.anomalies || 0} anomalie(s) terrain ouverte(s)`,
+    'satisfaction': `${menuBadges.satisfaction || 0} enquête(s) de satisfaction en attente`,
+  };
   const enrichedTabs = TABS.map(t => ({
     ...t,
     onClick: () => setTab(t.key),
@@ -180,7 +190,17 @@ export default function AracomPage() {
   }));
 
   return (
-    <ExposantPanelProvider renderPanel={(id, close) => <FicheExposantV2 id={id} onClose={close} />}>
+    <ExposantPanelProvider renderPanel={(id, close) => (
+      <Sheet open={true} onOpenChange={(o) => !o && close()}>
+        <SheetContent className="w-full sm:max-w-3xl overflow-y-auto p-4">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Fiche exposant</SheetTitle>
+            <SheetDescription>Détails et édition de la fiche exposant</SheetDescription>
+          </SheetHeader>
+          <FicheExposantV2 id={id} onClose={close} />
+        </SheetContent>
+      </Sheet>
+    )}>
       <Shell
       title="Cockpit ARACOM"
       subtitle={<AracomBriefing />}
@@ -189,6 +209,7 @@ export default function AracomPage() {
       tabs={enrichedTabs}
       tabGroups={TAB_GROUPS}
       onTabClick={setTab}
+      badgeTooltips={BADGE_TOOLTIPS}
       right={
         <div className="flex items-center gap-2">
           {mailStatus.test_mode_active && (
