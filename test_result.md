@@ -1938,3 +1938,60 @@ agent_communication:
     - agent: "main"
       message: "SESSION 28e — Bouton 'Tout initialiser' ajouté pour traiter plusieurs orgs en lot. UX : la barre verte apparaît dès qu'il y a 1+ org sans dossier. Permet de choisir un site par défaut pour toutes, tout en respectant les choix individuels. Compatible avec le filtre de recherche pour cibler un sous-ensemble. Barre de progression + toasts détaillés. Testé sur preview : 1 dossier initialisé en mode filtré (recherche '3TBC') avec toast '✅ 1 dossier(s) initialisé(s)' et disparition de la ligne. Aucun changement backend nécessaire — utilise l'endpoint existant POST /api/admin/organizations/:id/initialize-registration."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 28g — NEW : Lier user existant à organisation (Comptes sans org)
+# ═════════════════════════════════════════════════════════════════════════
+
+  - task: "NEW — Endpoint GET /api/admin/users-without-org"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW BACKEND — Liste les comptes users dont organization_id est null/absent. Exclut les admins (role aracom_admin, pacific_centers_readonly) et les comptes inactifs. Cache le champ password. Admin only (403 sinon). Testé 8/8."
+
+  - task: "NEW — Endpoint POST /api/admin/users/:id/link-organization"
+    implemented: true
+    working: true
+    file: "lib/api/handlers/admin-delete-reset.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW BACKEND — Lie un user à une organisation existante. Body : { organization_id }. Valide existence user (404) + org (404) + champ requis (400). Set user.organization_id, linked_at, linked_by, role_code='exposant' par défaut. Permet re-link à une nouvelle org. Logue dans activity_logs. Testé 8/8."
+
+  - task: "NEW — UI 'Comptes à lier' dans onglet '⚠ Comptes & Dossiers'"
+    implemented: true
+    working: true
+    file: "components/aracom/orgs-sans-dossier-view.jsx + app/aracom/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "NEW UI — Nouvelle section rouge en haut de l'onglet (renommé '⚠ Comptes & Dossiers') qui affiche les users sans organisation liée. Pour chaque user : nom + email + ID + dropdown 'Organisation à lier' (66 orgs disponibles) + bouton rouge 'Lier'. Match automatique par email (badge '✨ Match email auto' + pré-sélection automatique). Bouton désactivé tant qu'aucune org sélectionnée. Confirmation native avant action. Testé visuellement E2E : 1 user ARACOM 1 (TEST) lié à 3TBC → toast vert 'Compte lié à 3TBC' + disparition de la section."
+
+  - task: "FIX — Auth bouton Initialiser/Lier (utiliser api() helper au lieu de fetch())"
+    implemented: true
+    working: true
+    file: "components/aracom/orgs-sans-dossier-view.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "FIX — L'utilisateur a signalé en production que les boutons 'Initialiser dossier' / 'Tout initialiser' ne marchaient pas. La cause : utilisation de fetch() brut avec headers x-user-id codés en dur ('u-admin') au lieu du helper api() qui injecte automatiquement les headers de session (user_id réel + role). Tous les appels remplacés par api(). Logs console.error ajoutés pour debug. Tests preview confirment le bon fonctionnement."
+
+agent_communication:
+    - agent: "main"
+      message: "SESSION 28g — RÉSOLUTION COMPLÈTE 'Aucune organisation liée'. L'utilisateur a montré une capture montrant que le compte ARACOM 1 voit 'Aucune organisation n'est liée à votre compte' en production. Diagnostic : c'est un user qui existe mais sans organization_id. Solution livrée : (1) Endpoint GET /api/admin/users-without-org pour lister ces users orphelins (admin only, security). (2) Endpoint POST /api/admin/users/:id/link-organization pour les lier à une org existante. (3) Nouvelle section UI rouge dans l'onglet '⚠ Comptes & Dossiers' avec dropdown des 66 orgs + bouton 'Lier' + match email automatique. (4) Fix auth des boutons Initialiser via passage à api() helper. Backend testé 8/8. Frontend testé visuellement E2E avec succès. Prêt pour Save to Github → déploiement production."
+
