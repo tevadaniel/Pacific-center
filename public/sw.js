@@ -7,7 +7,7 @@
  * ⚠️ IMPORTANT : à chaque mise à jour majeure du frontend, BUMP la version (v3 → v4 → v5…)
  * pour forcer le rafraîchissement des pages chez les utilisateurs déjà installés (PWA).
  */
-const CACHE_VERSION = 'v16';
+const CACHE_VERSION = 'v17';
 const CACHE_NAME = `forum2026-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/manifest.json',
