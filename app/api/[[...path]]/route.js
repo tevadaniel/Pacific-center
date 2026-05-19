@@ -3551,30 +3551,29 @@ export async function POST(request, { params }) {
       if (!registration_id || !profile) return err('registration_id et profile requis');
       const reg = await db.collection('registrations').findOne({ id: registration_id });
       if (!reg) return err('Inscription introuvable', 404);
-      // Validations
+      // 🆕 SESSION 43-i — Phase 1 : SEUL le nom de la structure est obligatoire.
+      // Tous les autres champs sont optionnels et peuvent être complétés plus tard depuis le portail.
       const errs = [];
-      if (!profile.name) errs.push('nom de l\'association');
-      if (!profile.discipline) errs.push('secteur d\'activité');
-      if (!profile.contact_name) errs.push('nom du référent');
-      if (!profile.main_email || !/^[^@]+@[^@]+\.[^@]+$/.test(profile.main_email)) errs.push('email valide');
-      if (!profile.main_phone) errs.push('téléphone');
-      const reps = parseInt(profile.representatives_count) || 0;
+      if (!profile.name || !profile.name.trim()) errs.push('nom de la structure');
+      if (profile.main_email && !/^[^@]+@[^@]+\.[^@]+$/.test(profile.main_email)) {
+        errs.push('email au format valide (si renseigné)');
+      }
+      const reps = parseInt(profile.representatives_count) || 1;
       if (reps < 1 || reps > WIZARD_CONFIG.MAX_REPRESENTATIVES) errs.push(`nombre de représentants (1–${WIZARD_CONFIG.MAX_REPRESENTATIVES})`);
-      if (!profile.stand_description) errs.push('description du stand');
       if (profile.stand_description && profile.stand_description.length > WIZARD_CONFIG.STAND_DESCRIPTION_MAX_CHARS) {
         errs.push(`description ≤ ${WIZARD_CONFIG.STAND_DESCRIPTION_MAX_CHARS} caractères`);
       }
       if (errs.length) return err(`Champs manquants ou invalides : ${errs.join(', ')}`, 400);
 
       const update = {
-        name: profile.name,
-        discipline: profile.discipline,
-        contact_name: profile.contact_name,
+        name: profile.name.trim(),
+        discipline: profile.discipline || null,
+        contact_name: profile.contact_name || null,
         contact_function: profile.contact_function || null,
-        main_email: profile.main_email,
-        main_phone: profile.main_phone,
+        main_email: profile.main_email || null,
+        main_phone: profile.main_phone || null,
         representatives_count: reps,
-        stand_description: profile.stand_description,
+        stand_description: profile.stand_description || null,
         updated_at: new Date(),
       };
       await db.collection('organizations').updateOne({ id: reg.organization_id }, { $set: update });

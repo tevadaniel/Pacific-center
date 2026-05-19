@@ -426,18 +426,23 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
     finally { setSaving(false); }
   };
 
+  const canContinue = !!(p.name && p.name.trim()) && emailValid && descLen <= 150;
+
   return (
     <Card>
       <CardContent className="p-6 space-y-5">
-        <SectionHeader icon="👤" title="Profil exposant" desc="Tous les champs marqués (*) sont obligatoires pour passer à l'étape suivante." />
-        <Field label="Nom de l'association *" testid="profile-name">
+        <SectionHeader icon="👤" title="Profil exposant" desc="" />
+        <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900 leading-relaxed">
+          ℹ️ <b>Seul le nom de votre structure est requis pour continuer.</b> Vous pourrez compléter votre profil à tout moment depuis votre espace exposant.
+        </div>
+        <Field label="Nom de la structure *" testid="profile-name" error={!p.name?.trim() ? null : null}>
           <Input value={p.name || ''} onChange={e => setField('name', e.target.value)} placeholder="Ex: I Mua Papeete" />
         </Field>
-        <Field label="Secteur d'activité *" testid="profile-discipline">
-          <Input value={p.discipline || ''} onChange={e => setField('discipline', e.target.value)} placeholder="Ex: Natation" />
+        <Field label="Secteur d'activité (optionnel)" testid="profile-discipline">
+          <Input value={p.discipline || ''} onChange={e => setField('discipline', e.target.value)} placeholder="Ex: Natation, Judo, Danse…" />
         </Field>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Nom du référent *" testid="profile-contact-name">
+          <Field label="Nom du référent (optionnel)" testid="profile-contact-name">
             <Input value={p.contact_name || ''} onChange={e => setField('contact_name', e.target.value)} placeholder="Prénom NOM" />
           </Field>
           <Field label="Fonction (optionnel)" testid="profile-function">
@@ -445,15 +450,15 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
           </Field>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Email * (format vérifié en direct)" error={p.main_email && !emailValid ? 'Email invalide' : null} testid="profile-email">
+          <Field label="Email (optionnel)" error={p.main_email && !emailValid ? 'Format invalide' : null} testid="profile-email">
             <Input type="email" value={p.main_email || ''} onChange={e => setField('main_email', e.target.value)} placeholder="contact@asso.pf" />
           </Field>
-          <Field label="Téléphone *" testid="profile-phone">
+          <Field label="Téléphone (optionnel)" testid="profile-phone">
             <Input value={p.main_phone || ''} onChange={e => setField('main_phone', e.target.value)} placeholder="87 12 34 56" />
           </Field>
         </div>
 
-        <Field label="Représentants sur le stand * (max 2)" testid="profile-reps">
+        <Field label="Représentants sur le stand (optionnel, max 2)" testid="profile-reps">
           <div className="flex items-center gap-3">
             <Button variant="outline" size="icon" onClick={() => setField('representatives_count', Math.max(1, (p.representatives_count || 1) - 1))} disabled={(p.representatives_count || 1) <= 1}><Minus className="w-4 h-4" /></Button>
             <div className="text-2xl font-bold w-10 text-center">{p.representatives_count || 1}</div>
@@ -462,14 +467,26 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
           </div>
         </Field>
 
-        <Field label={`Description courte du stand * (${descLen}/150 caractères)`} error={descLen > 150 ? 'Trop long' : null} testid="profile-desc">
+        <Field label={`Description courte du stand (optionnel, ${descLen}/150 caractères)`} error={descLen > 150 ? 'Trop long' : null} testid="profile-desc">
           <Textarea rows={3} value={p.stand_description || ''} onChange={e => setField('stand_description', e.target.value.slice(0, 150))} maxLength={150} placeholder="En une phrase : ce que les visiteurs vont découvrir sur votre stand…" />
         </Field>
 
-        <div className="flex justify-end pt-3 border-t">
-          <Button onClick={submit} disabled={saving || !p.name || !p.discipline || !p.contact_name || !emailValid || !p.main_phone || !p.stand_description || descLen > 150} className="gap-2 bg-blue-600 hover:bg-blue-700" data-testid="step1-next">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
-          </Button>
+        <div className="flex flex-col gap-2 pt-3 border-t">
+          {!p.name?.trim() && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              ⚠️ Le nom de votre structure est requis pour débloquer la réservation.
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button
+              onClick={submit}
+              disabled={saving || !canContinue}
+              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              data-testid="step1-next"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
