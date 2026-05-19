@@ -2054,21 +2054,45 @@ export async function GET(request, { params }) {
     // 🆕 SESSION 42 — Dashboard fidélité : stats + export CSV
     if (route === 'dashboard/loyalty') {
       const orgs = await db.collection('organizations').find({}, { projection: { name: 1, participation_history: 1, discipline: 1, main_email: 1, main_phone: 1 } }).toArray();
-      const buckets = { tres_fideles: 0, fideles: 0, recurrents: 0, une_fois: 0, nouveaux: 0 };
+      // 🆕 SESSION 43 — Compte exact des éditions (0..5) + métriques multi-site
+      const editionBuckets = { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0 };
       const top = [];
+      // Cross fidélité × multi-site
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      const regsByOrg = {};
+      regs.forEach(r => { if (!regsByOrg[r.organization_id]) regsByOrg[r.organization_id] = []; regsByOrg[r.organization_id].push(r); });
+      const multiSiteOrgIds = new Set();
+      const siteBuckets = { s1: 0, s2: 0, s3: 0, s4plus: 0 };
+      Object.entries(regsByOrg).forEach(([orgId, list]) => {
+        const n = list.length;
+        if (n >= 2) multiSiteOrgIds.add(orgId);
+        if (n <= 1) siteBuckets.s1++;
+        else if (n === 2) siteBuckets.s2++;
+        else if (n === 3) siteBuckets.s3++;
+        else siteBuckets.s4plus++;
+      });
+      // Croisement multi-site × fidélité
+      let multiSiteAndLoyal = 0;
       for (const o of orgs) {
-        const nb = o.participation_history?.nb_editions || 0;
-        if (nb >= 5)      buckets.tres_fideles++;
-        else if (nb >= 3) buckets.fideles++;
-        else if (nb === 2) buckets.recurrents++;
-        else if (nb === 1) buckets.une_fois++;
-        else              buckets.nouveaux++;
-        if (nb > 0) top.push({ id: o.id, name: o.name, discipline: o.discipline, nb_editions: nb, fidelity: o.participation_history?.fidelity || null });
+        const nb = Math.min(5, o.participation_history?.nb_editions || 0);
+        editionBuckets['e' + nb]++;
+        if (nb > 0) top.push({ id: o.id, name: o.name, discipline: o.discipline, nb_editions: nb, fidelity: o.participation_history?.fidelity || null, is_multisite: multiSiteOrgIds.has(o.id) });
+        if (multiSiteOrgIds.has(o.id) && nb >= 2) multiSiteAndLoyal++;
       }
       top.sort((a, b) => b.nb_editions - a.nb_editions || a.name.localeCompare(b.name));
+
+      const totalOrgs = orgs.length;
+      const multiSiteCount = multiSiteOrgIds.size;
       return json({
-        total_orgs: orgs.length,
-        buckets,
+        total_orgs: totalOrgs,
+        edition_buckets: editionBuckets, // e0..e5 = nb d'orgs par compte exact
+        site_buckets: siteBuckets,       // s1, s2, s3, s4plus
+        multi_site: {
+          total: multiSiteCount,
+          ratio_pct: totalOrgs > 0 ? Math.round((multiSiteCount / totalOrgs) * 100) : 0,
+          loyal_and_multi: multiSiteAndLoyal,
+          loyal_and_multi_pct: multiSiteCount > 0 ? Math.round((multiSiteAndLoyal / multiSiteCount) * 100) : 0,
+        },
         top: top.slice(0, 10),
       });
     }
@@ -2085,7 +2109,12 @@ export async function GET(request, { params }) {
       const vById = Object.fromEntries(venues.map(v => [v.id, v]));
       const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
       const regByOrg = {};
-      regs.forEach(r => { if (!regByOrg[r.organization_id]) regByOrg[r.organization_id] = r; });
+      const regsByOrgAll = {};
+      regs.forEach(r => {
+        if (!regByOrg[r.organization_id]) regByOrg[r.organization_id] = r;
+        if (!regsByOrgAll[r.organization_id]) regsByOrgAll[r.organization_id] = [];
+        regsByOrgAll[r.organization_id].push(r);
+      });
 
       // Trie par nb_editions desc puis nom
       const sorted = [...orgs].sort((a, b) => {
@@ -2095,19 +2124,22 @@ export async function GET(request, { params }) {
         return (a.name || '').localeCompare(b.name || '', 'fr');
       });
 
-      // Header CSV
-      const header = ['Rang', 'Nom organisation', 'Discipline', 'Nb éditions', 'Niveau fidélité', 'Années (2019/2020/2023/2024/2025)', 'Site principal historique', 'Site 2026', 'Stand 2026', 'Statut 2026', 'Email', 'Téléphone'];
+      // Header CSV (🆕 SESSION 43 — ajout colonnes multi-site)
+      const header = ['Rang', 'Nom organisation', 'Discipline', 'Nb éditions', 'Niveau fidélité', 'Années (2019/2020/2023/2024/2025)', 'Site principal historique', 'Nb sites 2026', 'Multi-site ?', 'Sites 2026', 'Stand principal 2026', 'Statut 2026', 'Email', 'Téléphone'];
       const lines = [header.map(csvEsc).join(';')];
       sorted.forEach((o, idx) => {
         const h = o.participation_history || {};
         const reg = regByOrg[o.id];
+        const allRegs = regsByOrgAll[o.id] || [];
+        const sitesNames = allRegs.map(r => vById[r.venue_id]?.name).filter(Boolean).join(' + ');
         const venue = reg?.venue_id ? vById[reg.venue_id] : null;
         const years = [h.y2019 ? '2019' : '', h.y2020 ? '2020' : '', h.y2023 ? '2023' : '', h.y2024 ? '2024' : '', h.y2025 ? '2025' : ''].filter(Boolean).join(', ');
-        const niveau = (h.nb_editions || 0) >= 5 ? 'Très fidèle (5+)'
-          : (h.nb_editions || 0) >= 3 ? 'Fidèle (3-4)'
-          : (h.nb_editions || 0) === 2 ? 'Récurrent (2)'
-          : (h.nb_editions || 0) === 1 ? 'Une fois'
-          : 'Nouveau';
+        const niveau = (h.nb_editions || 0) >= 5 ? '5 éditions'
+          : (h.nb_editions || 0) === 4 ? '4 éditions'
+          : (h.nb_editions || 0) === 3 ? '3 éditions'
+          : (h.nb_editions || 0) === 2 ? '2 éditions'
+          : (h.nb_editions || 0) === 1 ? '1 édition'
+          : 'Nouveau (0 édition)';
         lines.push([
           String(idx + 1),
           o.name || '',
@@ -2116,7 +2148,9 @@ export async function GET(request, { params }) {
           niveau,
           years,
           h.site_principal || '',
-          venue?.name || '',
+          String(allRegs.length),
+          allRegs.length >= 2 ? 'OUI' : 'non',
+          sitesNames,
           reg?.stand_code || '',
           reg?.status || '',
           o.main_email || '',

@@ -40,7 +40,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v43-2026-05-19-loyalty-dashboard-export';
+                var APP_VERSION = 'v44-2026-05-19-loyalty-exact-multisite-ratio';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif

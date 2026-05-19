@@ -102,11 +102,11 @@ function DashboardView({ onGoto }) {
         <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
       </div>
 
-      {/* 🆕 SESSION 42 — Fidélité des exposants */}
+      {/* 🆕 SESSION 42 — Fidélité des exposants — refondu SESSION 43 */}
       {loyalty && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center justify-between gap-2">
+            <CardTitle className="text-base flex items-center justify-between gap-2 flex-wrap">
               <span className="flex items-center gap-2">🏅 Fidélité des exposants <Badge variant="secondary" className="text-[10px]">{loyalty.total_orgs} organisations</Badge></span>
               <Button
                 size="sm"
@@ -118,34 +118,69 @@ function DashboardView({ onGoto }) {
               </Button>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
-              <div className="rounded-md bg-gradient-to-br from-amber-100 to-orange-100 border-2 border-amber-300 p-3 text-center">
-                <div className="text-2xl font-extrabold text-orange-700">{loyalty.buckets.tres_fideles}</div>
-                <div className="text-[10px] uppercase text-orange-700 font-bold tracking-wider">🏆 Très fidèles</div>
-                <div className="text-[9px] text-slate-500 mt-0.5">5+ éditions</div>
-              </div>
-              <div className="rounded-md bg-emerald-50 border-2 border-emerald-200 p-3 text-center">
-                <div className="text-2xl font-extrabold text-emerald-700">{loyalty.buckets.fideles}</div>
-                <div className="text-[10px] uppercase text-emerald-700 font-bold tracking-wider">🏅 Fidèles</div>
-                <div className="text-[9px] text-slate-500 mt-0.5">3-4 éditions</div>
-              </div>
-              <div className="rounded-md bg-emerald-50 border border-emerald-100 p-3 text-center">
-                <div className="text-2xl font-extrabold text-emerald-600">{loyalty.buckets.recurrents}</div>
-                <div className="text-[10px] uppercase text-emerald-700 font-medium tracking-wider">Récurrents</div>
-                <div className="text-[9px] text-slate-500 mt-0.5">2 éditions</div>
-              </div>
-              <div className="rounded-md bg-blue-50 border border-blue-100 p-3 text-center">
-                <div className="text-2xl font-extrabold text-blue-600">{loyalty.buckets.une_fois}</div>
-                <div className="text-[10px] uppercase text-blue-700 font-medium tracking-wider">Une fois</div>
-                <div className="text-[9px] text-slate-500 mt-0.5">1 édition</div>
-              </div>
-              <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-center">
-                <div className="text-2xl font-extrabold text-slate-700">{loyalty.buckets.nouveaux}</div>
-                <div className="text-[10px] uppercase text-slate-600 font-medium tracking-wider">🆕 Nouveaux</div>
-                <div className="text-[9px] text-slate-500 mt-0.5">0 édition</div>
+          <CardContent className="space-y-4">
+            {/* ── Compteur par nombre exact d'éditions (0-5) ── */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1.5">Nombre d&apos;éditions précédentes</div>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                <div className="rounded-md bg-gradient-to-br from-amber-100 to-orange-200 border-2 border-amber-400 p-3 text-center shadow-sm">
+                  <div className="text-2xl font-extrabold text-orange-800">{loyalty.edition_buckets.e5}</div>
+                  <div className="text-[10px] uppercase text-orange-800 font-bold">🏆 5×</div>
+                </div>
+                <div className="rounded-md bg-amber-50 border-2 border-amber-300 p-3 text-center">
+                  <div className="text-2xl font-extrabold text-amber-700">{loyalty.edition_buckets.e4}</div>
+                  <div className="text-[10px] uppercase text-amber-700 font-bold">🥇 4×</div>
+                </div>
+                <div className="rounded-md bg-emerald-50 border-2 border-emerald-300 p-3 text-center">
+                  <div className="text-2xl font-extrabold text-emerald-700">{loyalty.edition_buckets.e3}</div>
+                  <div className="text-[10px] uppercase text-emerald-700 font-bold">🥈 3×</div>
+                </div>
+                <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-center">
+                  <div className="text-2xl font-extrabold text-emerald-600">{loyalty.edition_buckets.e2}</div>
+                  <div className="text-[10px] uppercase text-emerald-700 font-medium">🥉 2×</div>
+                </div>
+                <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-center">
+                  <div className="text-2xl font-extrabold text-blue-600">{loyalty.edition_buckets.e1}</div>
+                  <div className="text-[10px] uppercase text-blue-700 font-medium">1×</div>
+                </div>
+                <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-center">
+                  <div className="text-2xl font-extrabold text-slate-700">{loyalty.edition_buckets.e0}</div>
+                  <div className="text-[10px] uppercase text-slate-600 font-medium">🆕 0</div>
+                </div>
               </div>
             </div>
+
+            {/* ── 🆕 SESSION 43 — Ratio multi-site + croisement fidélité ── */}
+            {loyalty.multi_site && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1.5">Multi-sites</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="rounded-md bg-gradient-to-br from-violet-50 to-purple-100 border-2 border-violet-300 p-3 text-center">
+                    <div className="text-2xl font-extrabold text-violet-700">{loyalty.multi_site.total}</div>
+                    <div className="text-[10px] uppercase text-violet-700 font-bold">📍 Multi-sites</div>
+                    <div className="text-[9px] text-slate-500">sur {loyalty.total_orgs}</div>
+                  </div>
+                  <div className="rounded-md bg-violet-50 border border-violet-200 p-3 text-center">
+                    <div className="text-2xl font-extrabold text-violet-600">{loyalty.multi_site.ratio_pct}%</div>
+                    <div className="text-[10px] uppercase text-violet-700 font-medium">Ratio multi-site</div>
+                  </div>
+                  <div className="rounded-md bg-gradient-to-br from-violet-100 to-amber-100 border border-amber-300 p-3 text-center" title="Exposants à la fois multi-sites ET fidèles (≥ 2 éditions)">
+                    <div className="text-2xl font-extrabold text-orange-700">{loyalty.multi_site.loyal_and_multi}</div>
+                    <div className="text-[10px] uppercase text-orange-700 font-bold">🏅+📍 Fidèles & multi</div>
+                    <div className="text-[9px] text-slate-500">{loyalty.multi_site.loyal_and_multi_pct}% des multi-sites</div>
+                  </div>
+                  {loyalty.site_buckets && (
+                    <div className="rounded-md bg-slate-50 border border-slate-200 p-2 text-xs">
+                      <div className="text-[9px] uppercase text-slate-500 font-bold mb-1">Répartition</div>
+                      <div className="flex justify-between"><span>1 site</span><b>{loyalty.site_buckets.s1}</b></div>
+                      <div className="flex justify-between"><span>2 sites</span><b className="text-violet-700">{loyalty.site_buckets.s2}</b></div>
+                      <div className="flex justify-between"><span>3 sites</span><b className="text-violet-700">{loyalty.site_buckets.s3}</b></div>
+                      <div className="flex justify-between"><span>4+ sites</span><b className="text-violet-700">{loyalty.site_buckets.s4plus}</b></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Top 10 plus fidèles */}
             {loyalty.top && loyalty.top.length > 0 && (
@@ -167,14 +202,15 @@ function DashboardView({ onGoto }) {
                       <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-bold flex items-center justify-center">{idx + 1}</div>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                         o.nb_editions >= 5 ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
-                        : o.nb_editions >= 3 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : o.nb_editions === 4 ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                        : o.nb_editions === 3 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                         : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       }`}>
-                        {o.nb_editions >= 5 ? '🏆' : '🏅'} {o.nb_editions}×
+                        {o.nb_editions >= 5 ? '🏆' : o.nb_editions === 4 ? '🥇' : o.nb_editions === 3 ? '🥈' : '🥉'} {o.nb_editions}×
                       </span>
                       <span className="font-semibold text-sm text-slate-900 flex-1 truncate">{o.name}</span>
+                      {o.is_multisite && <Badge className="bg-violet-100 text-violet-800 border-violet-300 text-[9px] shrink-0">📍 multi-site</Badge>}
                       <span className="text-xs text-slate-500 truncate hidden sm:inline">{o.discipline || ''}</span>
-                      {o.fidelity && <Badge variant="secondary" className="text-[9px] shrink-0">{o.fidelity}</Badge>}
                     </div>
                   ))}
                 </div>
