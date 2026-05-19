@@ -190,11 +190,14 @@ export default function SendExposantMailDialog({ registration, organization, ven
           {/* Subject */}
           <div>
             <Label className="text-xs">Sujet</Label>
-            <Input
+            <input
+              type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Sujet du mail…"
-              className="mt-1"
+              autoFocus
+              style={{ pointerEvents: 'auto' }}
+              className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
             {subject !== previewSubject && (
               <div className="text-[11px] text-slate-500 mt-1 italic">
@@ -206,12 +209,13 @@ export default function SendExposantMailDialog({ registration, organization, ven
           {/* Body HTML */}
           <div>
             <Label className="text-xs">Corps du message (HTML accepté)</Label>
-            <Textarea
+            <textarea
               rows={12}
               value={bodyHtml}
               onChange={(e) => setBodyHtml(e.target.value)}
               placeholder="Bonjour,…"
-              className="mt-1 font-mono text-xs"
+              style={{ pointerEvents: 'auto' }}
+              className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
 
