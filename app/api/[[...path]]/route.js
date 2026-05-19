@@ -773,7 +773,7 @@ export async function GET(request, { params }) {
         JSON.stringify({
           version: BUILD_VERSION,
           boot_at: BUILD_BOOT_ISO,
-          sw_cache: 'v16',
+          sw_cache: 'v18',
         }),
         {
           status: 200,
