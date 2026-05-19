@@ -18,7 +18,7 @@ import {
   ChevronDown, ChevronUp, Pencil, Plus, X, Check, Loader2,
   User, Phone, FileText, MapPin, History, ListChecks, Wallet,
   FileBox, Sparkles, Activity, StickyNote, AlertTriangle, Trash2,
-  Mail, ExternalLink, Building2, Users as UsersIcon,
+  Mail, ExternalLink, Building2, Users as UsersIcon, CalendarClock,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
@@ -197,6 +197,29 @@ export default function FicheExposantV2({ id, onClose }) {
   const entityType = org.entity_type === 'association' ? 'association' : 'entreprise';
   const isAssoc = entityType === 'association';
 
+  // 🗓️ Format dates (FR) — pour affichage "Profil créé le …"
+  const fmtDate = (d) => {
+    if (!d) return null;
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return null;
+      return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return null; }
+  };
+  const fmtDateTime = (d) => {
+    if (!d) return null;
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return null;
+      return date.toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return null; }
+  };
+  const orgCreatedAt = fmtDate(org.created_at);
+  const orgCreatedAtFull = fmtDateTime(org.created_at);
+  const regCreatedAt = fmtDate(reg.created_at);
+  const regCreatedAtFull = fmtDateTime(reg.created_at);
+  const orgUpdatedAtFull = fmtDateTime(org.updated_at);
+
   // 🏷️ Compute display metrics
   const dossierPct = reg.completion_percent ?? reg.dossier_pct ?? 0;
   const isCautionOk = dep && dep.status && dep.status !== 'en_attente';
@@ -311,6 +334,36 @@ export default function FicheExposantV2({ id, onClose }) {
                   : 'bg-blue-100 text-blue-800 border-blue-300'} text-[10px]`}>Priorité {org.priority_level}</Badge>
               )}
             </div>
+
+            {/* 🗓️ Métadonnées temporelles : création + dernière MAJ */}
+            {(orgCreatedAt || regCreatedAt) && (
+              <div
+                className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] text-slate-500"
+                title={[
+                  orgCreatedAtFull && `Profil organisation créé : ${orgCreatedAtFull}`,
+                  regCreatedAtFull && `Inscription créée : ${regCreatedAtFull}`,
+                  orgUpdatedAtFull && `Dernière modification : ${orgUpdatedAtFull}`,
+                ].filter(Boolean).join('\n')}
+              >
+                <CalendarClock className="w-3 h-3 text-slate-400" />
+                {orgCreatedAt && (
+                  <span>
+                    Profil créé le <span className="font-semibold text-slate-700">{orgCreatedAt}</span>
+                  </span>
+                )}
+                {regCreatedAt && regCreatedAt !== orgCreatedAt && (
+                  <span>· Inscription le <span className="font-semibold text-slate-700">{regCreatedAt}</span></span>
+                )}
+                {org.source_origin && (
+                  <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-slate-200 text-slate-500 font-normal">
+                    {org.source_origin === 'import_excel_2026' ? 'Import 2026'
+                      : org.source_origin === 'public_inscription' ? 'Inscription publique'
+                      : org.source_origin === 'admin_manual' ? 'Création admin'
+                      : org.source_origin}
+                  </Badge>
+                )}
+              </div>
+            )}
 
             {/* Status badges */}
             <div className="flex flex-wrap gap-1 mt-2">
