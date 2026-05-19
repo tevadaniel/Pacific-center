@@ -805,6 +805,10 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
     ? reg.attending_days
     : (Array.isArray(draft.booking?.attending_days) ? draft.booking.attending_days : []);
 
+  // 🆕 SESSION 44 — Grille dynamique par site+jour (durée = plage_totale ÷ N exposants)
+  const venue = (availability?.venues || []).find(v => v.id === venueId);
+  const animationGrid = venue?.animation_grid || {};
+
   // Animations en cours d'édition (un objet par jour de présence)
   const initialAnims = useMemo(() => {
     const existing = Array.isArray(draft.animations) ? draft.animations : [];
@@ -827,22 +831,31 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
   const [anims, setAnims] = useState(initialAnims);
   useEffect(() => { setAnims(initialAnims); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [attendingDays.join(',')]);
 
+  // 🆕 Auto-sélection du 1er créneau libre quand l'utilisateur entre dans Step4
+  useEffect(() => {
+    setAnims(prev => {
+      let changed = false;
+      const next = prev.map(a => {
+        if (a.start_time && a.end_time) return a;
+        const grid = animationGrid[a.day_label];
+        if (!grid || !Array.isArray(grid.slots)) return a;
+        const free = grid.slots.find(s => !s.occupied || s.registration_id === registrationId);
+        if (!free) return a;
+        changed = true;
+        return { ...a, start_time: free.start, end_time: free.end };
+      });
+      if (changed) setDraft(d => ({ ...d, animations: next }));
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venueId, attendingDays.join(',')]);
+
   const updateAnim = (day, field, value) => {
     setAnims(prev => {
       const next = prev.map(a => a.day_label === day ? { ...a, [field]: value } : a);
       setDraft(d => ({ ...d, animations: next }));
       return next;
     });
-  };
-
-  // Créneaux occupés par d'autres exposants sur ce site / par jour / par lieu
-  const venue = (availability?.venues || []).find(v => v.id === venueId);
-  const occupiedSlots = (day, location_type) => {
-    return (venue?.animation_slots_occupied || []).filter(s =>
-      s.day_label === day &&
-      s.registration_id !== registrationId &&
-      (s.location_type ? s.location_type === location_type : true)
-    );
   };
 
   const submit = async () => {
@@ -871,6 +884,7 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
       });
       toast.success(`${anims.length} animation${anims.length > 1 ? 's' : ''} enregistrée${anims.length > 1 ? 's' : ''} ✓`);
       await reload();
+      await reloadAvailability();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
     finally { setSaving(false); }
@@ -896,8 +910,8 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
       <CardContent className="p-6 space-y-6">
         <SectionHeader
           icon="🎭"
-          title="Animations (obligatoire)"
-          desc={`Une animation obligatoire par jour de présence (${attendingDays.length} jour${attendingDays.length > 1 ? 's' : ''} coché${attendingDays.length > 1 ? 's' : ''}). Vous pouvez animer sur votre stand ou dans la zone de démonstration.`}
+          title="Animations — obligatoire pour tous les exposants"
+          desc={`Chaque exposant doit proposer une animation par jour de présence (${attendingDays.length} jour${attendingDays.length > 1 ? 's' : ''} coché${attendingDays.length > 1 ? 's' : ''}). Les créneaux sont calculés automatiquement en fonction du nombre d'exposants attendus.`}
         />
 
         {anims.map((a, idx) => (
@@ -906,7 +920,8 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
             anim={a}
             idx={idx}
             config={config}
-            occupied={occupiedSlots(a.day_label, a.location_type)}
+            grid={animationGrid[a.day_label]}
+            registrationId={registrationId}
             update={(field, value) => updateAnim(a.day_label, field, value)}
           />
         ))}
@@ -922,24 +937,36 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
   );
 }
 
-function AnimationBlock({ anim, idx, config, occupied, update }) {
+function AnimationBlock({ anim, idx, config, grid, registrationId, update }) {
   const a = anim;
   const dayLabel = a.day_label === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
   const typeInfo = (config.ANIMATION_TYPES || []).find(t => t.value === a.slot_type);
-  const animSlots = (config.ANIM_SLOTS || []).map(slot => {
-    const isOccupied = occupied.some(o => o.start_time < slot.end && o.end_time > slot.start);
+
+  // 🆕 SESSION 44 — Grille DYNAMIQUE (durée = plage_totale ÷ N exposants attendus)
+  const gridSlots = Array.isArray(grid?.slots) ? grid.slots : [];
+  const animSlots = gridSlots.map(slot => {
+    const isOccupiedByOther = slot.occupied && slot.registration_id !== registrationId;
     const isSel = a.start_time === slot.start && a.end_time === slot.end;
-    return { ...slot, isOccupied, isSel };
+    return { ...slot, isOccupied: isOccupiedByOther, isSel };
   });
+  const isFull = grid?.is_full === true;
+  const waitlistCount = grid?.waitlist_count || 0;
+  const duration = grid?.duration_min || 30;
 
   return (
     <div className="border-2 border-violet-200 rounded-lg p-4 bg-violet-50/30 space-y-4">
       <div className="flex items-center gap-3">
         <div className="bg-violet-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">{idx + 1}</div>
-        <div>
+        <div className="flex-1">
           <div className="font-bold text-slate-900">Animation du {dayLabel}</div>
           <div className="text-xs text-slate-600">Champs obligatoires pour finaliser l&apos;inscription.</div>
         </div>
+        {grid && (
+          <div className="text-right">
+            <div className="text-[11px] text-violet-700 font-semibold">{duration} min/créneau</div>
+            <div className="text-[10px] text-slate-500">{grid.expected_count} exposant·s · {grid.capacity} créneaux</div>
+          </div>
+        )}
       </div>
 
       {/* 1) Lieu */}
@@ -1009,8 +1036,24 @@ function AnimationBlock({ anim, idx, config, occupied, update }) {
 
       {/* 3) Créneau horaire */}
       <div>
-        <Label className="text-sm font-semibold">Créneau horaire * ({dayLabel} · 45 min)</Label>
-        <div className="text-xs text-slate-500 my-2">Les créneaux pris par d&apos;autres exposants ({a.location_type === 'sur_stand' ? 'sur stand' : 'zone démo'}) sont grisés.</div>
+        <Label className="text-sm font-semibold">Créneau horaire * — {dayLabel} · {duration} min</Label>
+        {grid && (
+          <div className="text-xs text-slate-500 my-2">
+            Plage <b>{grid.window_start}–{grid.window_end}</b> · durée dynamique : <b>{duration} min</b> par exposant
+            {grid.expected_count > 0 && (
+              <> · {grid.expected_count} exposant·s attendu·s sur {grid.capacity} créneaux disponibles</>
+            )}
+          </div>
+        )}
+        {isFull && (
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r text-sm text-amber-900 mb-3">
+            ⚠️ <b>Tous les créneaux sont attribués.</b> Vous serez automatiquement placé en liste d&apos;attente — l&apos;équipe ARACOM ajustera la plage horaire ou la durée des créneaux pour vous intégrer.
+            {waitlistCount > 0 && <span className="block text-xs mt-1">Liste d&apos;attente actuelle : {waitlistCount} exposant·s</span>}
+          </div>
+        )}
+        {!isFull && animSlots.length > 0 && (
+          <div className="text-xs text-emerald-700 my-2">💡 Un créneau libre a été pré-sélectionné automatiquement. Vous pouvez choisir un autre créneau ci-dessous.</div>
+        )}
         <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
           {animSlots.map((s, i) => (
             <button
@@ -1026,10 +1069,15 @@ function AnimationBlock({ anim, idx, config, occupied, update }) {
               data-testid={`anim-${a.day_label}-slot-${s.start}`}
             >
               <div className="font-mono text-xs font-bold">{s.start}</div>
-              <div className="text-[10px]">{s.isOccupied ? 'Pris' : 'Libre'}</div>
+              <div className="text-[10px]">{s.isOccupied ? (s.organization_name ? s.organization_name.slice(0, 12) : 'Pris') : 'Libre'}</div>
             </button>
           ))}
         </div>
+        {animSlots.length === 0 && (
+          <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-800 text-center">
+            Aucun créneau disponible — la plage horaire n&apos;est pas encore configurée pour ce site. Contactez ARACOM.
+          </div>
+        )}
         {a.start_time && (
           <div className="mt-3 bg-emerald-50 border-l-4 border-emerald-500 p-2 rounded-r text-sm font-medium text-emerald-900">
             ✓ {a.start_time} → {a.end_time}

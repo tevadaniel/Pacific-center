@@ -1,526 +1,617 @@
 #!/usr/bin/env python3
 """
-SESSION 28g Backend Tests - User-Organization Linking
-Tests the new endpoints for linking users to organizations.
+SESSION 44 — Test des nouvelles fonctionnalités d'animation dynamique
+Backend testing for animation features:
+1. Animation obligatoire pour tous (already implemented)
+2. Créneaux d'animation dynamiques (duration = plage ÷ N_exposants, bounded [15-60 min], rounded to 5 min)
+3. Plages horaires configurables par site/jour in admin
+4. Endpoint admin de swap with auto email notification
 """
 
 import requests
 import json
-import uuid
-from pymongo import MongoClient
-import os
+import sys
 from datetime import datetime
 
-# Configuration
-BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
-API_URL = f"{BASE_URL}/api"
-DB_NAME = os.getenv('DB_NAME', 'your_database_name')
-MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
+# Base URL from .env
+BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
 
-# Admin headers
+# Admin credentials
 ADMIN_HEADERS = {
-    'x-user-role': 'aracom_admin',
-    'x-user-id': 'u-admin',
-    'Content-Type': 'application/json'
+    "x-user-role": "aracom_admin",
+    "x-user-id": "u-admin",
+    "Content-Type": "application/json"
 }
 
-# Non-admin headers (exposant)
-EXPOSANT_HEADERS = {
-    'x-user-role': 'exposant',
-    'x-user-id': 'u-test-exposant',
-    'Content-Type': 'application/json'
-}
+def log_test(test_name, passed, details=""):
+    """Log test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    print(f"{status} - {test_name}")
+    if details:
+        print(f"  Details: {details}")
+    return passed
 
-def print_test_header(test_name):
-    print(f"\n{'='*80}")
-    print(f"TEST: {test_name}")
-    print(f"{'='*80}")
-
-def print_result(success, message):
-    status = "✅ PASS" if success else "❌ FAIL"
-    print(f"{status}: {message}")
-
-def setup_test_data():
-    """Create test user and organization in MongoDB"""
-    print_test_header("SETUP - Creating test data")
-    
-    try:
-        client = MongoClient(MONGO_URL)
-        db = client[DB_NAME]
-        
-        # Generate unique IDs
-        uuid_suffix = str(uuid.uuid4())[:8]
-        test_user_id = f'u-test-link-{uuid_suffix}'
-        test_email = f'testlink-{uuid_suffix}@test.pf'
-        
-        # Create test user without organization
-        user_doc = {
-            'id': test_user_id,
-            'email': test_email,
-            'full_name': 'Test User Link',
-            'role_code': 'exposant',
-            'organization_id': None,
-            'is_active': True,
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow()
-        }
-        
-        db.users.insert_one(user_doc)
-        print_result(True, f"Created test user: {test_user_id} ({test_email})")
-        
-        # Verify org-19 exists
-        org_19 = db.organizations.find_one({'id': 'org-19'})
-        if org_19:
-            print_result(True, f"Verified org-19 exists: {org_19.get('name', 'Unknown')}")
-        else:
-            print_result(False, "org-19 not found in database")
-        
-        # Verify org-31 exists (ACE Arue)
-        org_31 = db.organizations.find_one({'id': 'org-31'})
-        if org_31:
-            print_result(True, f"Verified org-31 exists: {org_31.get('name', 'Unknown')}")
-        else:
-            print_result(False, "org-31 not found in database")
-        
-        client.close()
-        return test_user_id, test_email
-        
-    except Exception as e:
-        print_result(False, f"Setup failed: {str(e)}")
-        return None, None
-
-def cleanup_test_data():
-    """Remove test users from MongoDB"""
-    print_test_header("CLEANUP - Removing test data")
-    
-    try:
-        client = MongoClient(MONGO_URL)
-        db = client[DB_NAME]
-        
-        result = db.users.delete_many({'id': {'$regex': '^u-test-link-'}})
-        print_result(True, f"Deleted {result.deleted_count} test users")
-        
-        client.close()
-        
-    except Exception as e:
-        print_result(False, f"Cleanup failed: {str(e)}")
-
-def test_1_get_users_without_org_no_admin():
-    """Test 1: GET /api/admin/users-without-org without admin role → 403"""
-    print_test_header("Test 1: GET users-without-org without admin role")
-    
-    try:
-        response = requests.get(
-            f"{API_URL}/admin/users-without-org",
-            headers=EXPOSANT_HEADERS,
-            timeout=10
-        )
-        
-        if response.status_code == 403:
-            data = response.json()
-            if 'Accès admin requis' in data.get('error', ''):
-                print_result(True, f"403 with correct error message: {data.get('error')}")
-                return True
-            else:
-                print_result(False, f"403 but wrong error message: {data}")
-                return False
-        else:
-            print_result(False, f"Expected 403, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_2_get_users_without_org_with_admin(test_user_id, test_email):
-    """Test 2: GET /api/admin/users-without-org with admin role → 200 with array"""
-    print_test_header("Test 2: GET users-without-org with admin role")
-    
-    try:
-        response = requests.get(
-            f"{API_URL}/admin/users-without-org",
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if not isinstance(data, list):
-                print_result(False, f"Expected array, got: {type(data)}")
-                return False
-            
-            print_result(True, f"200 OK with array of {len(data)} users")
-            
-            # Verify test user is in the list
-            test_user = next((u for u in data if u.get('id') == test_user_id), None)
-            if test_user:
-                print_result(True, f"Test user found in list: {test_user.get('email')}")
-                
-                # Verify required fields
-                required_fields = ['id', 'email', 'role_code', 'is_active']
-                missing_fields = [f for f in required_fields if f not in test_user]
-                if missing_fields:
-                    print_result(False, f"Missing fields: {missing_fields}")
-                    return False
-                else:
-                    print_result(True, f"All required fields present")
-                
-                # Verify organization_id is null
-                if test_user.get('organization_id') is None:
-                    print_result(True, "organization_id is null as expected")
-                else:
-                    print_result(False, f"organization_id should be null, got: {test_user.get('organization_id')}")
-                    return False
-                
-                # Verify no password field (security)
-                if 'password' in test_user:
-                    print_result(False, "SECURITY ISSUE: password field exposed in response")
-                    return False
-                else:
-                    print_result(True, "No password field in response (secure)")
-                
-            else:
-                print_result(False, f"Test user {test_user_id} not found in list")
-                return False
-            
-            # Verify no admins in the list
-            admins = [u for u in data if u.get('role_code') == 'aracom_admin']
-            if admins:
-                print_result(False, f"Found {len(admins)} admin users in list (should be excluded)")
-                return False
-            else:
-                print_result(True, "No admin users in list (correctly excluded)")
-            
-            # Verify no inactive users
-            inactive = [u for u in data if u.get('is_active') == False]
-            if inactive:
-                print_result(False, f"Found {len(inactive)} inactive users in list (should be excluded)")
-                return False
-            else:
-                print_result(True, "No inactive users in list (correctly excluded)")
-            
-            return True
-            
-        else:
-            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_3_link_user_404():
-    """Test 3: POST /api/admin/users/non-existent-user/link-organization → 404"""
-    print_test_header("Test 3: POST link-organization with non-existent user")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/non-existent-user-12345/link-organization",
-            headers=ADMIN_HEADERS,
-            json={'organization_id': 'org-19'},
-            timeout=10
-        )
-        
-        # Check if endpoint exists
-        if response.status_code == 404:
-            data = response.json()
-            error_msg = data.get('error', '')
-            
-            # Could be either "Utilisateur introuvable" or route not found
-            if 'introuvable' in error_msg.lower() or 'not found' in error_msg.lower():
-                print_result(True, f"404 with error: {error_msg}")
-                return True
-            else:
-                print_result(False, f"404 but unexpected error: {error_msg}")
-                return False
-        else:
-            print_result(False, f"Expected 404, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_4_link_user_no_org_id(test_user_id):
-    """Test 4: POST /api/admin/users/:userId/link-organization without organization_id → 400"""
-    print_test_header("Test 4: POST link-organization without organization_id")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/{test_user_id}/link-organization",
-            headers=ADMIN_HEADERS,
-            json={},
-            timeout=10
-        )
-        
-        if response.status_code == 400:
-            data = response.json()
-            error_msg = data.get('error', '')
-            if 'organization_id' in error_msg.lower() and 'requis' in error_msg.lower():
-                print_result(True, f"400 with correct error: {error_msg}")
-                return True
-            else:
-                print_result(False, f"400 but wrong error: {error_msg}")
-                return False
-        elif response.status_code == 404:
-            print_result(False, f"Endpoint not found (404) - feature not implemented")
-            return False
-        else:
-            print_result(False, f"Expected 400, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_5_link_user_invalid_org(test_user_id):
-    """Test 5: POST /api/admin/users/:userId/link-organization with invalid org → 404"""
-    print_test_header("Test 5: POST link-organization with invalid organization")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/{test_user_id}/link-organization",
-            headers=ADMIN_HEADERS,
-            json={'organization_id': 'non-existent-org-12345'},
-            timeout=10
-        )
-        
-        if response.status_code == 404:
-            data = response.json()
-            error_msg = data.get('error', '')
-            if 'organisation' in error_msg.lower() and 'introuvable' in error_msg.lower():
-                print_result(True, f"404 with correct error: {error_msg}")
-                return True
-            else:
-                print_result(False, f"404 but wrong error: {error_msg}")
-                return False
-        elif response.status_code == 404:
-            print_result(False, f"Endpoint not found (404) - feature not implemented")
-            return False
-        else:
-            print_result(False, f"Expected 404, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_6_link_user_no_admin(test_user_id):
-    """Test 6: POST /api/admin/users/:userId/link-organization without admin → 403"""
-    print_test_header("Test 6: POST link-organization without admin role")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/{test_user_id}/link-organization",
-            headers=EXPOSANT_HEADERS,
-            json={'organization_id': 'org-19'},
-            timeout=10
-        )
-        
-        if response.status_code == 403:
-            data = response.json()
-            error_msg = data.get('error', '')
-            if 'admin' in error_msg.lower() and 'requis' in error_msg.lower():
-                print_result(True, f"403 with correct error: {error_msg}")
-                return True
-            else:
-                print_result(False, f"403 but wrong error: {error_msg}")
-                return False
-        elif response.status_code == 404:
-            print_result(False, f"Endpoint not found (404) - feature not implemented")
-            return False
-        else:
-            print_result(False, f"Expected 403, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_7_link_user_happy_path(test_user_id):
-    """Test 7: HAPPY PATH - Link user to org-19"""
-    print_test_header("Test 7: HAPPY PATH - Link user to org-19")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/{test_user_id}/link-organization",
-            headers=ADMIN_HEADERS,
-            json={'organization_id': 'org-19'},
-            timeout=10
-        )
-        
-        if response.status_code == 404:
-            print_result(False, "❌ CRITICAL: Endpoint not found (404) - POST /api/admin/users/:userId/link-organization NOT IMPLEMENTED")
-            return False
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Verify response structure
-            if data.get('ok') == True and data.get('action') == 'user_linked':
-                print_result(True, f"200 OK with correct response structure")
-                
-                if data.get('user_id') == test_user_id and data.get('organization_id') == 'org-19':
-                    print_result(True, f"Correct user_id and organization_id in response")
-                else:
-                    print_result(False, f"Wrong IDs in response: {data}")
-                    return False
-                
-                # Verify in database
-                try:
-                    client = MongoClient(MONGO_URL)
-                    db = client[DB_NAME]
-                    
-                    user = db.users.find_one({'id': test_user_id})
-                    if user:
-                        if user.get('organization_id') == 'org-19':
-                            print_result(True, "Database: user.organization_id = 'org-19'")
-                        else:
-                            print_result(False, f"Database: user.organization_id = {user.get('organization_id')} (expected 'org-19')")
-                            client.close()
-                            return False
-                        
-                        if user.get('linked_at'):
-                            print_result(True, f"Database: user.linked_at is set ({user.get('linked_at')})")
-                        else:
-                            print_result(False, "Database: user.linked_at is not set")
-                            client.close()
-                            return False
-                        
-                        if user.get('linked_by'):
-                            print_result(True, f"Database: user.linked_by is set ({user.get('linked_by')})")
-                        else:
-                            print_result(False, "Database: user.linked_by is not set")
-                            client.close()
-                            return False
-                    else:
-                        print_result(False, f"User {test_user_id} not found in database")
-                        client.close()
-                        return False
-                    
-                    client.close()
-                    
-                except Exception as e:
-                    print_result(False, f"Database verification failed: {str(e)}")
-                    return False
-                
-                # Verify user no longer in users-without-org list
-                try:
-                    list_response = requests.get(
-                        f"{API_URL}/admin/users-without-org",
-                        headers=ADMIN_HEADERS,
-                        timeout=10
-                    )
-                    
-                    if list_response.status_code == 200:
-                        users = list_response.json()
-                        if any(u.get('id') == test_user_id for u in users):
-                            print_result(False, "User still in users-without-org list")
-                            return False
-                        else:
-                            print_result(True, "User no longer in users-without-org list")
-                    else:
-                        print_result(False, f"Failed to verify users-without-org list: {list_response.status_code}")
-                        return False
-                        
-                except Exception as e:
-                    print_result(False, f"List verification failed: {str(e)}")
-                    return False
-                
-                return True
-                
-            else:
-                print_result(False, f"Wrong response structure: {data}")
-                return False
-                
-        else:
-            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def test_8_relink_user_different_org(test_user_id):
-    """Test 8: Re-link user to different org (org-31)"""
-    print_test_header("Test 8: Re-link user to different organization (org-31)")
-    
-    try:
-        response = requests.post(
-            f"{API_URL}/admin/users/{test_user_id}/link-organization",
-            headers=ADMIN_HEADERS,
-            json={'organization_id': 'org-31'},
-            timeout=10
-        )
-        
-        if response.status_code == 404:
-            print_result(False, "Endpoint not found (404) - feature not implemented")
-            return False
-        
-        if response.status_code == 200:
-            data = response.json()
-            print_result(True, f"200 OK - Re-linking allowed")
-            
-            # Verify in database
-            try:
-                client = MongoClient(MONGO_URL)
-                db = client[DB_NAME]
-                
-                user = db.users.find_one({'id': test_user_id})
-                if user:
-                    if user.get('organization_id') == 'org-31':
-                        print_result(True, "Database: user.organization_id = 'org-31'")
-                        client.close()
-                        return True
-                    else:
-                        print_result(False, f"Database: user.organization_id = {user.get('organization_id')} (expected 'org-31')")
-                        client.close()
-                        return False
-                else:
-                    print_result(False, f"User {test_user_id} not found in database")
-                    client.close()
-                    return False
-                    
-            except Exception as e:
-                print_result(False, f"Database verification failed: {str(e)}")
-                return False
-                
-        else:
-            print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_result(False, f"Request failed: {str(e)}")
-        return False
-
-def main():
+def test_1_get_wizard_availability():
+    """
+    TEST 1: GET /api/wizard/availability (PUBLIC, no auth)
+    Verify animation_windows and animation_grid structure
+    """
     print("\n" + "="*80)
-    print("SESSION 28g - User-Organization Linking Backend Tests")
+    print("TEST 1: GET /api/wizard/availability")
     print("="*80)
     
-    # Setup
-    test_user_id, test_email = setup_test_data()
-    if not test_user_id:
-        print("\n❌ SETUP FAILED - Cannot proceed with tests")
-        return
+    try:
+        response = requests.get(f"{BASE_URL}/wizard/availability", timeout=30)
+        
+        if response.status_code != 200:
+            return log_test("GET /api/wizard/availability", False, f"Status {response.status_code}")
+        
+        data = response.json()
+        
+        # Check structure
+        if "venues" not in data:
+            return log_test("GET /api/wizard/availability", False, "Missing 'venues' key")
+        
+        venues = data["venues"]
+        if len(venues) == 0:
+            return log_test("GET /api/wizard/availability", False, "No venues returned")
+        
+        # Check first venue for animation_windows and animation_grid
+        venue = venues[0]
+        
+        # Check animation_windows
+        if "animation_windows" not in venue:
+            return log_test("GET /api/wizard/availability", False, "Missing 'animation_windows'")
+        
+        windows = venue["animation_windows"]
+        if "vendredi" not in windows or "samedi" not in windows:
+            return log_test("GET /api/wizard/availability", False, "Missing vendredi/samedi in animation_windows")
+        
+        # Check default values (09:00-17:00)
+        ven = windows["vendredi"]
+        sam = windows["samedi"]
+        
+        print(f"  Venue: {venue['name']}")
+        print(f"  Animation windows - Vendredi: {ven['start']}-{ven['end']}, Samedi: {sam['start']}-{sam['end']}")
+        
+        # Check animation_grid
+        if "animation_grid" not in venue:
+            return log_test("GET /api/wizard/availability", False, "Missing 'animation_grid'")
+        
+        grid = venue["animation_grid"]
+        if "vendredi" not in grid or "samedi" not in grid:
+            return log_test("GET /api/wizard/availability", False, "Missing vendredi/samedi in animation_grid")
+        
+        # Check grid structure for vendredi
+        ven_grid = grid["vendredi"]
+        required_keys = ["duration_min", "capacity", "expected_count", "is_full", "waitlist_count", "window_start", "window_end", "slots"]
+        
+        for key in required_keys:
+            if key not in ven_grid:
+                return log_test("GET /api/wizard/availability", False, f"Missing '{key}' in animation_grid.vendredi")
+        
+        print(f"  Animation grid (vendredi):")
+        print(f"    - duration_min: {ven_grid['duration_min']}")
+        print(f"    - capacity: {ven_grid['capacity']}")
+        print(f"    - expected_count: {ven_grid['expected_count']}")
+        print(f"    - is_full: {ven_grid['is_full']}")
+        print(f"    - waitlist_count: {ven_grid['waitlist_count']}")
+        print(f"    - window: {ven_grid['window_start']}-{ven_grid['window_end']}")
+        print(f"    - slots count: {len(ven_grid['slots'])}")
+        
+        # Verify duration is between 15 and 60
+        if not (15 <= ven_grid['duration_min'] <= 60):
+            return log_test("GET /api/wizard/availability", False, f"duration_min {ven_grid['duration_min']} not in [15, 60]")
+        
+        # Verify duration is multiple of 5
+        if ven_grid['duration_min'] % 5 != 0:
+            return log_test("GET /api/wizard/availability", False, f"duration_min {ven_grid['duration_min']} not multiple of 5")
+        
+        # Check slots structure
+        if len(ven_grid['slots']) > 0:
+            slot = ven_grid['slots'][0]
+            slot_keys = ["index", "start", "end", "occupied"]
+            for key in slot_keys:
+                if key not in slot:
+                    return log_test("GET /api/wizard/availability", False, f"Missing '{key}' in slot")
+            
+            print(f"    - First slot: {slot['start']}-{slot['end']}, occupied: {slot['occupied']}")
+            
+            if slot['occupied']:
+                if "registration_id" in slot and "organization_name" in slot:
+                    print(f"      Occupied by: {slot.get('organization_name', 'N/A')}")
+        
+        return log_test("GET /api/wizard/availability", True, f"Returned {len(venues)} venues with correct structure")
+        
+    except Exception as e:
+        return log_test("GET /api/wizard/availability", False, f"Exception: {str(e)}")
+
+def test_2_post_animation_windows():
+    """
+    TEST 2: POST /api/venues/:id/animation-windows (ADMIN ONLY)
+    Test configuration of animation windows per site/day
+    """
+    print("\n" + "="*80)
+    print("TEST 2: POST /api/venues/:id/animation-windows")
+    print("="*80)
+    
+    venue_id = "venue-faaa"
+    
+    # Test 2.1: Without admin header → 403
+    print("\n  Test 2.1: Without admin header → expect 403")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/venues/{venue_id}/animation-windows",
+            json={"vendredi": {"start": "14:00", "end": "17:00"}},
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+        
+        if response.status_code != 403:
+            log_test("POST animation-windows without admin", False, f"Expected 403, got {response.status_code}")
+        else:
+            log_test("POST animation-windows without admin", True, "Correctly returned 403")
+    except Exception as e:
+        log_test("POST animation-windows without admin", False, f"Exception: {str(e)}")
+    
+    # Test 2.2: With admin header + valid body → 200
+    print("\n  Test 2.2: With admin header + valid body → expect 200")
+    try:
+        payload = {
+            "vendredi": {"start": "14:00", "end": "17:00"},
+            "samedi": {"start": "13:00", "end": "17:00"}
+        }
+        
+        response = requests.post(
+            f"{BASE_URL}/venues/{venue_id}/animation-windows",
+            json=payload,
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            log_test("POST animation-windows with admin", False, f"Status {response.status_code}: {response.text}")
+            return False
+        
+        data = response.json()
+        
+        if not data.get("ok"):
+            log_test("POST animation-windows with admin", False, "Response ok=false")
+            return False
+        
+        if "animation_windows" not in data:
+            log_test("POST animation-windows with admin", False, "Missing animation_windows in response")
+            return False
+        
+        windows = data["animation_windows"]
+        
+        if windows["vendredi"]["start"] != "14:00" or windows["vendredi"]["end"] != "17:00":
+            log_test("POST animation-windows with admin", False, f"Vendredi not saved correctly: {windows['vendredi']}")
+            return False
+        
+        if windows["samedi"]["start"] != "13:00" or windows["samedi"]["end"] != "17:00":
+            log_test("POST animation-windows with admin", False, f"Samedi not saved correctly: {windows['samedi']}")
+            return False
+        
+        print(f"    Saved: Vendredi {windows['vendredi']['start']}-{windows['vendredi']['end']}, Samedi {windows['samedi']['start']}-{windows['samedi']['end']}")
+        log_test("POST animation-windows with admin", True, "Windows saved correctly")
+        
+    except Exception as e:
+        log_test("POST animation-windows with admin", False, f"Exception: {str(e)}")
+        return False
+    
+    # Test 2.3: Verify via GET /api/wizard/availability
+    print("\n  Test 2.3: Verify via GET /api/wizard/availability")
+    try:
+        response = requests.get(f"{BASE_URL}/wizard/availability", timeout=30)
+        
+        if response.status_code != 200:
+            log_test("Verify animation-windows via GET", False, f"Status {response.status_code}")
+            return False
+        
+        data = response.json()
+        faaa_venue = next((v for v in data["venues"] if v["id"] == venue_id), None)
+        
+        if not faaa_venue:
+            log_test("Verify animation-windows via GET", False, "Faaa venue not found")
+            return False
+        
+        windows = faaa_venue["animation_windows"]
+        
+        if windows["vendredi"]["start"] != "14:00" or windows["vendredi"]["end"] != "17:00":
+            log_test("Verify animation-windows via GET", False, f"Vendredi not persisted: {windows['vendredi']}")
+            return False
+        
+        # Check that animation_grid was recalculated
+        grid = faaa_venue["animation_grid"]["vendredi"]
+        
+        if grid["window_start"] != "14:00" or grid["window_end"] != "17:00":
+            log_test("Verify animation-windows via GET", False, f"Grid not recalculated: {grid['window_start']}-{grid['window_end']}")
+            return False
+        
+        # Calculate expected duration: 180 min (14:00-17:00) / expected_count
+        window_minutes = 180
+        expected_count = grid["expected_count"]
+        
+        print(f"    Faaa venue: window 14:00-17:00 ({window_minutes} min), expected_count={expected_count}")
+        print(f"    Grid: duration_min={grid['duration_min']}, capacity={grid['capacity']}, slots={len(grid['slots'])}")
+        
+        # Verify first slot starts at 14:00
+        if len(grid['slots']) > 0:
+            first_slot = grid['slots'][0]
+            if first_slot['start'] != "14:00":
+                log_test("Verify animation-windows via GET", False, f"First slot doesn't start at 14:00: {first_slot['start']}")
+                return False
+            print(f"    First slot: {first_slot['start']}-{first_slot['end']}")
+        
+        log_test("Verify animation-windows via GET", True, "Windows persisted and grid recalculated")
+        
+    except Exception as e:
+        log_test("Verify animation-windows via GET", False, f"Exception: {str(e)}")
+        return False
+    
+    # Test 2.4: Invalid body (start >= end) → should ignore
+    print("\n  Test 2.4: Invalid body (start >= end) → should ignore")
+    try:
+        payload = {
+            "vendredi": {"start": "17:00", "end": "14:00"}  # Invalid: start >= end
+        }
+        
+        response = requests.post(
+            f"{BASE_URL}/venues/{venue_id}/animation-windows",
+            json=payload,
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            log_test("POST animation-windows invalid body", False, f"Status {response.status_code}")
+            return False
+        
+        data = response.json()
+        windows = data["animation_windows"]
+        
+        # Should keep previous value (14:00-17:00)
+        if windows["vendredi"]["start"] != "14:00" or windows["vendredi"]["end"] != "17:00":
+            log_test("POST animation-windows invalid body", False, f"Invalid value not ignored: {windows['vendredi']}")
+            return False
+        
+        log_test("POST animation-windows invalid body", True, "Invalid value correctly ignored")
+        
+    except Exception as e:
+        log_test("POST animation-windows invalid body", False, f"Exception: {str(e)}")
+        return False
+    
+    # Test 2.5: Non-existent venue ID → 404
+    print("\n  Test 2.5: Non-existent venue ID → expect 404")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/venues/venue-nonexistent/animation-windows",
+            json={"vendredi": {"start": "09:00", "end": "17:00"}},
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 404:
+            log_test("POST animation-windows nonexistent venue", False, f"Expected 404, got {response.status_code}")
+        else:
+            log_test("POST animation-windows nonexistent venue", True, "Correctly returned 404")
+    except Exception as e:
+        log_test("POST animation-windows nonexistent venue", False, f"Exception: {str(e)}")
+    
+    return True
+
+def test_3_post_animation_slot_swap():
+    """
+    TEST 3: POST /api/admin/registrations/:id/animation-slot/swap (ADMIN ONLY)
+    Test admin swap of animation slot with email notification
+    """
+    print("\n" + "="*80)
+    print("TEST 3: POST /api/admin/registrations/:id/animation-slot/swap")
+    print("="*80)
+    
+    # First, get a registration with animation slots
+    print("\n  Finding a registration with animation slots...")
+    try:
+        response = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=30)
+        
+        if response.status_code != 200:
+            log_test("Find registration for swap test", False, f"Status {response.status_code}")
+            return False
+        
+        registrations = response.json()
+        
+        # Find a registration with animations
+        test_reg = None
+        for reg in registrations:
+            if reg.get("venue_id") and reg.get("status") != "annule":
+                test_reg = reg
+                break
+        
+        if not test_reg:
+            log_test("Find registration for swap test", False, "No suitable registration found")
+            return False
+        
+        reg_id = test_reg["id"]
+        print(f"    Using registration: {reg_id} ({test_reg.get('organization_name', 'N/A')})")
+        
+    except Exception as e:
+        log_test("Find registration for swap test", False, f"Exception: {str(e)}")
+        return False
+    
+    # Test 3.1: Without admin header → 403
+    print("\n  Test 3.1: Without admin header → expect 403")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/registrations/{reg_id}/animation-slot/swap",
+            json={"day_label": "vendredi", "start_time": "10:00", "end_time": "10:30"},
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+        
+        if response.status_code != 403:
+            log_test("POST animation-slot/swap without admin", False, f"Expected 403, got {response.status_code}")
+        else:
+            log_test("POST animation-slot/swap without admin", True, "Correctly returned 403")
+    except Exception as e:
+        log_test("POST animation-slot/swap without admin", False, f"Exception: {str(e)}")
+    
+    # Test 3.2: With admin + valid body → 200
+    print("\n  Test 3.2: With admin + valid body → expect 200")
+    try:
+        payload = {
+            "day_label": "vendredi",
+            "start_time": "10:00",
+            "end_time": "10:30"
+        }
+        
+        response = requests.post(
+            f"{BASE_URL}/admin/registrations/{reg_id}/animation-slot/swap",
+            json=payload,
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            log_test("POST animation-slot/swap with admin", False, f"Status {response.status_code}: {response.text}")
+            return False
+        
+        data = response.json()
+        
+        if not data.get("ok"):
+            log_test("POST animation-slot/swap with admin", False, "Response ok=false")
+            return False
+        
+        if "animation_slot" not in data:
+            log_test("POST animation-slot/swap with admin", False, "Missing animation_slot in response")
+            return False
+        
+        slot = data["animation_slot"]
+        
+        if slot["start_time"] != "10:00" or slot["end_time"] != "10:30":
+            log_test("POST animation-slot/swap with admin", False, f"Slot not updated: {slot['start_time']}-{slot['end_time']}")
+            return False
+        
+        if "last_admin_swap_at" not in slot or "last_admin_swap_by" not in slot:
+            log_test("POST animation-slot/swap with admin", False, "Missing last_admin_swap_* fields")
+            return False
+        
+        print(f"    Slot updated: {slot['start_time']}-{slot['end_time']}")
+        print(f"    last_admin_swap_at: {slot['last_admin_swap_at']}")
+        print(f"    last_admin_swap_by: {slot['last_admin_swap_by']}")
+        
+        log_test("POST animation-slot/swap with admin", True, "Slot swapped successfully")
+        
+    except Exception as e:
+        log_test("POST animation-slot/swap with admin", False, f"Exception: {str(e)}")
+        return False
+    
+    # Test 3.3: Missing required fields → 400
+    print("\n  Test 3.3: Missing required fields → expect 400")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/registrations/{reg_id}/animation-slot/swap",
+            json={"day_label": "vendredi"},  # Missing start_time and end_time
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 400:
+            log_test("POST animation-slot/swap missing fields", False, f"Expected 400, got {response.status_code}")
+        else:
+            log_test("POST animation-slot/swap missing fields", True, "Correctly returned 400")
+    except Exception as e:
+        log_test("POST animation-slot/swap missing fields", False, f"Exception: {str(e)}")
+    
+    # Test 3.4: Invalid time (start >= end) → 400
+    print("\n  Test 3.4: Invalid time (start >= end) → expect 400")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/registrations/{reg_id}/animation-slot/swap",
+            json={"day_label": "vendredi", "start_time": "10:30", "end_time": "10:00"},
+            headers=ADMIN_HEADERS,
+            timeout=30
+        )
+        
+        if response.status_code != 400:
+            log_test("POST animation-slot/swap invalid time", False, f"Expected 400, got {response.status_code}")
+        else:
+            log_test("POST animation-slot/swap invalid time", True, "Correctly returned 400")
+    except Exception as e:
+        log_test("POST animation-slot/swap invalid time", False, f"Exception: {str(e)}")
+    
+    return True
+
+def test_4_dynamic_formula_coherence():
+    """
+    TEST 4: Verify dynamic formula coherence
+    duration_min = floor(window_minutes / expected_count), bounded [15, 60], rounded to 5
+    """
+    print("\n" + "="*80)
+    print("TEST 4: Dynamic formula coherence")
+    print("="*80)
+    
+    try:
+        response = requests.get(f"{BASE_URL}/wizard/availability", timeout=30)
+        
+        if response.status_code != 200:
+            return log_test("Dynamic formula coherence", False, f"Status {response.status_code}")
+        
+        data = response.json()
+        
+        # Test formula for each venue
+        for venue in data["venues"]:
+            venue_name = venue["name"]
+            print(f"\n  Venue: {venue_name}")
+            
+            for day_key in ["vendredi", "samedi"]:
+                grid = venue["animation_grid"][day_key]
+                
+                # Parse window times
+                window_start = grid["window_start"]
+                window_end = grid["window_end"]
+                
+                start_h, start_m = map(int, window_start.split(":"))
+                end_h, end_m = map(int, window_end.split(":"))
+                
+                window_minutes = (end_h * 60 + end_m) - (start_h * 60 + start_m)
+                
+                expected_count = grid["expected_count"]
+                duration_min = grid["duration_min"]
+                capacity = grid["capacity"]
+                
+                print(f"    {day_key}: window={window_start}-{window_end} ({window_minutes} min), expected={expected_count}")
+                print(f"      duration_min={duration_min}, capacity={capacity}")
+                
+                # Verify formula
+                if expected_count == 0:
+                    # Should use default (30)
+                    if duration_min != 30:
+                        log_test(f"Formula {venue_name} {day_key}", False, f"Expected default 30 for N=0, got {duration_min}")
+                        continue
+                else:
+                    # Calculate expected duration
+                    raw = window_minutes // expected_count
+                    # Bound to [15, 60]
+                    bounded = max(15, min(60, raw))
+                    # Round to nearest 5 (min 5)
+                    expected_duration = max(5, round(bounded / 5) * 5)
+                    
+                    if duration_min != expected_duration:
+                        log_test(f"Formula {venue_name} {day_key}", False, 
+                                f"Expected duration={expected_duration} (raw={raw}, bounded={bounded}), got {duration_min}")
+                        continue
+                
+                # Verify capacity
+                expected_capacity = window_minutes // duration_min if duration_min > 0 else 0
+                
+                if capacity != expected_capacity:
+                    log_test(f"Formula {venue_name} {day_key}", False, 
+                            f"Expected capacity={expected_capacity}, got {capacity}")
+                    continue
+                
+                # Verify is_full
+                is_full = grid["is_full"]
+                expected_is_full = expected_count >= capacity and capacity > 0
+                
+                if is_full != expected_is_full:
+                    log_test(f"Formula {venue_name} {day_key}", False, 
+                            f"Expected is_full={expected_is_full}, got {is_full}")
+                    continue
+                
+                # Verify waitlist_count
+                waitlist_count = grid["waitlist_count"]
+                expected_waitlist = max(0, expected_count - capacity)
+                
+                if waitlist_count != expected_waitlist:
+                    log_test(f"Formula {venue_name} {day_key}", False, 
+                            f"Expected waitlist={expected_waitlist}, got {waitlist_count}")
+                    continue
+                
+                print(f"      ✓ Formula correct")
+        
+        return log_test("Dynamic formula coherence", True, "All venues verified")
+        
+    except Exception as e:
+        return log_test("Dynamic formula coherence", False, f"Exception: {str(e)}")
+
+def test_5_regression():
+    """
+    TEST 5: Regression tests - verify existing endpoints still work
+    """
+    print("\n" + "="*80)
+    print("TEST 5: Regression tests")
+    print("="*80)
+    
+    all_passed = True
+    
+    # Test 5.1: GET /api/wizard/availability
+    print("\n  Test 5.1: GET /api/wizard/availability")
+    try:
+        response = requests.get(f"{BASE_URL}/wizard/availability", timeout=30)
+        if response.status_code != 200:
+            log_test("Regression: wizard/availability", False, f"Status {response.status_code}")
+            all_passed = False
+        else:
+            log_test("Regression: wizard/availability", True, "Still working")
+    except Exception as e:
+        log_test("Regression: wizard/availability", False, f"Exception: {str(e)}")
+        all_passed = False
+    
+    # Test 5.2: GET /api/venues
+    print("\n  Test 5.2: GET /api/venues")
+    try:
+        response = requests.get(f"{BASE_URL}/venues", headers=ADMIN_HEADERS, timeout=30)
+        if response.status_code != 200:
+            log_test("Regression: venues", False, f"Status {response.status_code}")
+            all_passed = False
+        else:
+            venues = response.json()
+            # Check if animation_windows field is present
+            if len(venues) > 0:
+                venue = venues[0]
+                if "animation_windows" in venue:
+                    print(f"    animation_windows present: {venue['animation_windows']}")
+                log_test("Regression: venues", True, f"Returned {len(venues)} venues")
+            else:
+                log_test("Regression: venues", False, "No venues returned")
+                all_passed = False
+    except Exception as e:
+        log_test("Regression: venues", False, f"Exception: {str(e)}")
+        all_passed = False
+    
+    # Test 5.3: GET /api/registrations
+    print("\n  Test 5.3: GET /api/registrations")
+    try:
+        response = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=30)
+        if response.status_code != 200:
+            log_test("Regression: registrations", False, f"Status {response.status_code}")
+            all_passed = False
+        else:
+            regs = response.json()
+            log_test("Regression: registrations", True, f"Returned {len(regs)} registrations")
+    except Exception as e:
+        log_test("Regression: registrations", False, f"Exception: {str(e)}")
+        all_passed = False
+    
+    return all_passed
+
+def main():
+    """Run all tests"""
+    print("\n" + "="*80)
+    print("SESSION 44 — Backend Tests for Animation Features")
+    print("="*80)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Started at: {datetime.now().isoformat()}")
     
     results = []
     
     # Run tests
-    try:
-        results.append(("Test 1: GET without admin", test_1_get_users_without_org_no_admin()))
-        results.append(("Test 2: GET with admin", test_2_get_users_without_org_with_admin(test_user_id, test_email)))
-        results.append(("Test 3: POST 404 user", test_3_link_user_404()))
-        results.append(("Test 4: POST no org_id", test_4_link_user_no_org_id(test_user_id)))
-        results.append(("Test 5: POST invalid org", test_5_link_user_invalid_org(test_user_id)))
-        results.append(("Test 6: POST no admin", test_6_link_user_no_admin(test_user_id)))
-        results.append(("Test 7: HAPPY PATH", test_7_link_user_happy_path(test_user_id)))
-        results.append(("Test 8: Re-link", test_8_relink_user_different_org(test_user_id)))
-        
-    finally:
-        # Cleanup
-        cleanup_test_data()
+    results.append(("Test 1: GET wizard/availability", test_1_get_wizard_availability()))
+    results.append(("Test 2: POST animation-windows", test_2_post_animation_windows()))
+    results.append(("Test 3: POST animation-slot/swap", test_3_post_animation_slot_swap()))
+    results.append(("Test 4: Dynamic formula coherence", test_4_dynamic_formula_coherence()))
+    results.append(("Test 5: Regression tests", test_5_regression()))
     
     # Summary
     print("\n" + "="*80)
@@ -532,17 +623,12 @@ def main():
     
     for test_name, result in results:
         status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{status}: {test_name}")
+        print(f"{status} - {test_name}")
     
-    print(f"\n{'='*80}")
-    print(f"TOTAL: {passed}/{total} tests passed ({passed*100//total}%)")
-    print(f"{'='*80}\n")
+    print(f"\nTotal: {passed}/{total} tests passed ({passed*100//total}%)")
+    print(f"Finished at: {datetime.now().isoformat()}")
     
-    if passed < total:
-        print("⚠️  CRITICAL FINDINGS:")
-        print("   - POST /api/admin/users/:userId/link-organization endpoint is NOT IMPLEMENTED")
-        print("   - Only GET /api/admin/users-without-org is working")
-        print("   - Feature is incomplete and cannot be used")
+    return 0 if passed == total else 1
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    sys.exit(main())

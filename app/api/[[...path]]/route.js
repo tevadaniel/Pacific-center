@@ -5943,6 +5943,133 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true, referent });
     }
 
+    // 🆕 SESSION 44 — Configuration de la PLAGE HORAIRE d'animation par site et par jour (admin only)
+    // Body: { vendredi?: { start, end }, samedi?: { start, end } }
+    if (route.match(/^venues\/[^/]+\/animation-windows$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const id = p[1];
+      const venue = await db.collection('venues').findOne({ id });
+      if (!venue) return err('Site introuvable', 404);
+      const current = venue.animation_windows || {
+        vendredi: { start: '09:00', end: '17:00' },
+        samedi: { start: '09:00', end: '17:00' },
+      };
+      const validateHHMM = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
+      const merge = (curr, inp) => {
+        if (!inp) return curr;
+        const s = validateHHMM(inp.start) ? inp.start : curr.start;
+        const e = validateHHMM(inp.end) ? inp.end : curr.end;
+        if (s >= e) return curr; // ignore invalid
+        return { start: s, end: e };
+      };
+      const next = {
+        vendredi: merge(current.vendredi || { start: '09:00', end: '17:00' }, body?.vendredi),
+        samedi: merge(current.samedi || { start: '09:00', end: '17:00' }, body?.samedi),
+      };
+      await db.collection('venues').updateOne(
+        { id },
+        { $set: { animation_windows: next, updated_at: new Date() } }
+      );
+      return json({ ok: true, animation_windows: next });
+    }
+
+    // 🆕 SESSION 44 — ADMIN swap manuel d'un créneau d'animation d'un exposant
+    // POST /api/admin/registrations/:id/animation-slot/swap
+    // Body: { day_label: 'vendredi'|'samedi', start_time: 'HH:MM', end_time: 'HH:MM', location_type?: 'sur_stand'|'zone_demo', force?: boolean }
+    if (route.match(/^admin\/registrations\/[^/]+\/animation-slot\/swap$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const regId = p[2];
+      const { day_label, start_time, end_time, location_type, force } = body || {};
+      if (!day_label || !start_time || !end_time) return err('day_label, start_time et end_time requis', 400);
+      if (start_time >= end_time) return err("L'heure de fin doit être après le début", 400);
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Vérifie conflit (sauf en force)
+      if (!force) {
+        const conflict = await db.collection('animation_slots').findOne({
+          venue_id: reg.venue_id,
+          day_label,
+          location_type: location_type || undefined,
+          registration_id: { $ne: regId },
+          status: { $ne: 'annulé' },
+          start_time: { $lt: end_time },
+          end_time: { $gt: start_time },
+        });
+        if (conflict) {
+          return err(`Conflit : créneau déjà occupé par ${conflict.organization_name || 'un autre exposant'}. Utiliser force=true pour forcer.`, 409);
+        }
+      }
+      const existing = await db.collection('animation_slots').findOne({ registration_id: regId, day_label });
+      const upd = {
+        start_time, end_time,
+        ...(location_type ? { location_type } : {}),
+        updated_at: new Date(),
+        last_admin_swap_at: new Date(),
+        last_admin_swap_by: ctx.userId || 'admin',
+      };
+      if (existing) {
+        await db.collection('animation_slots').updateOne({ id: existing.id }, { $set: upd });
+      } else {
+        // Création d'un slot vide si absent (cas rare : admin assigne pour la première fois)
+        const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        await db.collection('animation_slots').insertOne({
+          id: uuid(),
+          registration_id: regId,
+          venue_id: reg.venue_id,
+          venue_name: venue?.name,
+          organization_name: org?.name,
+          discipline: org?.discipline,
+          stand_code: reg.stand_code,
+          day_label,
+          event_date: day_label === 'vendredi' ? '2026-08-14' : '2026-08-15',
+          start_time, end_time,
+          slot_type: 'demonstration',
+          location_type: location_type || 'sur_stand',
+          title: '(assigné par admin)',
+          description: 'Créneau réservé pour cet exposant — détails à compléter',
+          target_audience: 'tous_publics',
+          material_needs: '',
+          status: 'planifié',
+          created_at: new Date(),
+          updated_at: new Date(),
+          last_admin_swap_at: new Date(),
+          last_admin_swap_by: ctx.userId || 'admin',
+        });
+      }
+      // 🆕 Notification automatique à l'exposant (réutilise la fonction existante)
+      try {
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+        if (org?.main_email) {
+          const { sendMail } = await import('@/lib/mailer');
+          const dayLabel = day_label === 'vendredi' ? 'Vendredi 14 août 2026' : 'Samedi 15 août 2026';
+          await sendMail({
+            to: org.main_email,
+            subject: `Modification de votre créneau d'animation — Forum de la Rentrée 2026`,
+            html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937">
+              <h2 style="color:#7c3aed;margin:0 0 16px">🎭 Modification de votre créneau d'animation</h2>
+              <p>Bonjour ${org.contact_name || 'à vous'},</p>
+              <p>Suite à l'organisation des plannings, votre créneau d'animation pour <b>${venue?.name || ''}</b> a été modifié par l'équipe ARACOM :</p>
+              <div style="background:#f5f3ff;border-left:4px solid #7c3aed;padding:12px 16px;border-radius:6px;margin:16px 0">
+                <div style="font-size:13px;color:#5b21b6"><b>${dayLabel}</b></div>
+                <div style="font-size:18px;font-weight:700;color:#1f2937;margin-top:4px">${start_time} → ${end_time}</div>
+                ${location_type ? `<div style="font-size:12px;color:#64748b;margin-top:4px">Lieu : ${location_type === 'sur_stand' ? 'Sur votre stand' : 'Zone de démonstration'}</div>` : ''}
+              </div>
+              <p>Vous pouvez consulter le détail dans votre portail exposant.</p>
+              <p style="color:#64748b;font-size:12px;margin-top:24px">Pour toute question, contactez-nous à <a href="mailto:agence@aracom-conseil.fr">agence@aracom-conseil.fr</a>.</p>
+              <p style="color:#94a3b8;font-size:11px;margin-top:12px">— ARACOM · Forum de la Rentrée 2026</p>
+            </div>`,
+          });
+        }
+      } catch (mailErr) {
+        console.error('[animation-swap-notify]', mailErr);
+      }
+      const out = await db.collection('animation_slots').findOne({ registration_id: regId, day_label });
+      if (out) delete out._id;
+      return json({ ok: true, animation_slot: out });
+    }
+
     // ============================================================
     // 🆕 CONFIG ARACOM — RIB + Templates documents officiels (admin only)
     // ============================================================

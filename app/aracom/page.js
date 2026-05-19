@@ -1354,6 +1354,106 @@ function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvail
           </div>
         )}
       </div>
+
+      {/* 🆕 SESSION 44 — Plage horaire d'animation par site/jour */}
+      <AnimationWindowsConfig venue={venue} />
+    </div>
+  );
+}
+
+// 🆕 SESSION 44 — Composant pour configurer les plages horaires d'animation par site et par jour
+function AnimationWindowsConfig({ venue }) {
+  const defaultWin = { vendredi: { start: '09:00', end: '17:00' }, samedi: { start: '09:00', end: '17:00' } };
+  const [open, setOpen] = useState(false);
+  const [win, setWin] = useState(venue.animation_windows || defaultWin);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setWin(venue.animation_windows || defaultWin);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venue.id, venue.animation_windows?.vendredi?.start, venue.animation_windows?.vendredi?.end, venue.animation_windows?.samedi?.start, venue.animation_windows?.samedi?.end]);
+  const isCustom = venue.animation_windows && (
+    (venue.animation_windows.vendredi?.start !== '09:00' || venue.animation_windows.vendredi?.end !== '17:00') ||
+    (venue.animation_windows.samedi?.start !== '09:00' || venue.animation_windows.samedi?.end !== '17:00')
+  );
+  const minutesBetween = (s, e) => {
+    const toM = (x) => { const [h, m] = (x || '00:00').split(':').map(Number); return h * 60 + m; };
+    return Math.max(0, toM(e) - toM(s));
+  };
+  const setDay = (day, field, val) => setWin(w => ({ ...w, [day]: { ...(w[day] || { start: '09:00', end: '17:00' }), [field]: val } }));
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/venues/${venue.id}/animation-windows`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(win),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'Erreur enregistrement');
+      toast.success(`Plage animation ${venue.name} enregistrée`);
+      // Soft refresh venues list (via custom event listened in SitesView)
+      try { window.dispatchEvent(new CustomEvent('venues-refresh')); } catch {}
+      setOpen(false);
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="pt-1.5 mt-1.5 border-t border-emerald-100/50">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-[11px] text-slate-700 hover:text-violet-700 transition"
+        data-testid={`anim-window-toggle-${venue.code}`}
+      >
+        <span className="flex items-center gap-1">
+          🎭 <span className="font-medium">Plage animation</span>
+          {isCustom ? (
+            <Badge variant="secondary" className="text-[9px] bg-violet-100 text-violet-800 ml-1">personnalisée</Badge>
+          ) : (
+            <Badge variant="secondary" className="text-[9px] bg-slate-100 text-slate-600 ml-1">par défaut 9h–17h</Badge>
+          )}
+        </span>
+        <span className="text-slate-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 bg-white rounded-md p-2 border border-violet-100">
+          <div className="text-[10px] text-slate-500 leading-snug">
+            Les créneaux d&apos;animation sont calculés dynamiquement : <b>durée = plage ÷ nombre d&apos;exposants</b>. Modifiez cette plage pour absorber la liste d&apos;attente.
+          </div>
+          {['vendredi', 'samedi'].map(d => {
+            const w = win[d] || { start: '09:00', end: '17:00' };
+            const mins = minutesBetween(w.start, w.end);
+            return (
+              <div key={d} className="grid grid-cols-[60px_1fr_1fr_auto] items-center gap-1.5">
+                <span className="text-[11px] font-medium capitalize">{d}</span>
+                <Input
+                  type="time"
+                  value={w.start}
+                  onChange={(e) => setDay(d, 'start', e.target.value)}
+                  className="h-7 text-xs"
+                  data-testid={`anim-window-${venue.code}-${d}-start`}
+                />
+                <Input
+                  type="time"
+                  value={w.end}
+                  onChange={(e) => setDay(d, 'end', e.target.value)}
+                  className="h-7 text-xs"
+                  data-testid={`anim-window-${venue.code}-${d}-end`}
+                />
+                <span className="text-[10px] text-slate-500 w-14 text-right">{mins} min</span>
+              </div>
+            );
+          })}
+          <Button
+            size="sm"
+            onClick={save}
+            disabled={saving}
+            className="w-full h-7 text-[11px] bg-violet-600 hover:bg-violet-700"
+            data-testid={`anim-window-save-${venue.code}`}
+          >
+            {saving ? '…' : '💾 Enregistrer plage animation'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1367,6 +1467,12 @@ function SitesView() {
   const { open: openExposant } = useExposantPanel();
   useEffect(() => { api('/api/venues').then(v => { setVenues(v); if (v[0]) setSelected(v[0].id); }); api('/api/registrations').then(setRegs); }, []);
   useEffect(() => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); }, [selected]);
+  // 🆕 SESSION 44 — Rafraîchir la liste des sites quand la plage animation est modifiée
+  useEffect(() => {
+    const onRefresh = () => { api('/api/venues').then(setVenues); };
+    window.addEventListener('venues-refresh', onRefresh);
+    return () => window.removeEventListener('venues-refresh', onRefresh);
+  }, []);
   const reload = () => { if (selected) api(`/api/venues/${selected}/stands`).then(setStands); api('/api/registrations').then(setRegs); };
 
   const assignRegToStand = async (regId) => {
