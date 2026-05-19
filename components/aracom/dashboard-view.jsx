@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ExposantLink, useExposantPanel } from './exposant-panel-context';
+import SiteAnimationsOverview from './site-animations-overview';
 
 /**
  * DASHBOARD VIEW — Vue principale Aracom (KPIs, alertes, anomalies, validations).
@@ -101,6 +102,9 @@ function DashboardView({ onGoto }) {
         <KpiCard label="Cautions reçues" value={kpis.cautions_recues} hint={`${(kpis.xpf_encaisses || 0).toLocaleString('fr-FR')} XPF`} accent="emerald" icon={Wallet} />
         <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
       </div>
+
+      {/* 🆕 SESSION 45 — Remplissage stand par jour + animations par site (overview + onglets) */}
+      <SiteAnimationsOverview />
 
       {/* 🆕 SESSION 42 — Fidélité des exposants — refondu SESSION 43 */}
       {loyalty && (
