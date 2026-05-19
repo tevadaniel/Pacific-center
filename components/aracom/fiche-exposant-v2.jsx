@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+// (Tabs supprimés en SESSION 43-g — tout regroupé en sections scrollables)
 import DeleteOrgDialog from './delete-org-dialog';
 import SendExposantMailDialog from './send-exposant-mail-dialog';
 import DocumentsTab from './documents-tab';
@@ -456,19 +456,8 @@ export default function FicheExposantV2({ id, onClose }) {
         </div>
       </div>
 
-      {/* ═══════════════════ TABS NAVIGATION ═══════════════════ */}
-      <Tabs defaultValue="profil" className="w-full">
-        <TabsList className="grid grid-cols-6 w-full bg-slate-100 h-9 p-0.5">
-          <TabsTrigger value="profil" className="text-[11px] gap-1 data-[state=active]:bg-white"><User className="w-3 h-3" /> Profil</TabsTrigger>
-          <TabsTrigger value="animations" className="text-[11px] gap-1 data-[state=active]:bg-white"><Sparkles className="w-3 h-3" /> Animations</TabsTrigger>
-          <TabsTrigger value="documents" className="text-[11px] gap-1 data-[state=active]:bg-white"><FileBox className="w-3 h-3" /> Documents</TabsTrigger>
-          <TabsTrigger value="statut" className="text-[11px] gap-1 data-[state=active]:bg-white"><ListChecks className="w-3 h-3" /> Statut</TabsTrigger>
-          <TabsTrigger value="bilan" className="text-[11px] gap-1 data-[state=active]:bg-white"><Activity className="w-3 h-3" /> Bilan&nbsp;J</TabsTrigger>
-          <TabsTrigger value="portail" className="text-[11px] gap-1 data-[state=active]:bg-white"><ExternalLink className="w-3 h-3" /> Portail</TabsTrigger>
-        </TabsList>
-
-        {/* ═══════════════════ ONGLET PROFIL ═══════════════════ */}
-        <TabsContent value="profil" className="space-y-3 mt-3">
+      {/* ═══════════════════ TOUT-EN-UN — SCROLL UNIQUE PAR SITE ═══════════════════ */}
+      <div className="space-y-3 mt-3">
 
       {/* ═══════════════════ SECTION 1 : IDENTITÉ ═══════════════════ */}
       <CollapsibleSection icon={User} title="Identité" defaultOpen>
@@ -612,11 +601,6 @@ export default function FicheExposantV2({ id, onClose }) {
         <div className="text-[10px] italic text-slate-400 mt-1">🔒 Non visible par l&apos;exposant</div>
       </CollapsibleSection>
 
-        </TabsContent>
-
-        {/* ═══════════════════ ONGLET STATUT ═══════════════════ */}
-        <TabsContent value="statut" className="space-y-3 mt-3">
-
       {/* ═══════════════════ SECTION 6 : STATUT & DOSSIER ═══════════════════ */}
       <CollapsibleSection icon={ListChecks} title="Statut & Dossier" defaultOpen>
         <div className="text-xs text-slate-500 mb-1.5">Statut d&apos;inscription</div>
@@ -661,21 +645,16 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Date restit. effective" type="date" value={reg.restitution_actual_date} onSave={(v) => saveReg({ restitution_actual_date: v })} />
       </CollapsibleSection>
 
-        </TabsContent>
-
-        {/* ═══════════════════ ONGLET DOCUMENTS ═══════════════════ */}
-        <TabsContent value="documents" className="space-y-3 mt-3">
-          <DocumentsTab
-            registration={reg}
-            organization={org}
-            deposit={dep}
-            documents={docs}
-            onReload={load}
-          />
-        </TabsContent>
-
-        {/* ═══════════════════ ONGLET ANIMATIONS ═══════════════════ */}
-        <TabsContent value="animations" className="space-y-3 mt-3">
+      {/* ═══════════════════ SECTION 8 : DOCUMENTS ═══════════════════ */}
+      <CollapsibleSection icon={FileBox} title="Documents officiels">
+        <DocumentsTab
+          registration={reg}
+          organization={org}
+          deposit={dep}
+          documents={docs}
+          onReload={load}
+        />
+      </CollapsibleSection>
 
       {/* ═══════════════════ SECTION 9 : ANIMATIONS — CRUD ADMIN ═══════════════════ */}
       <CollapsibleSection icon={Sparkles} title="Animations" badge={<Badge className="text-[10px] ml-1">{slots.length}</Badge>}>
@@ -690,11 +669,6 @@ export default function FicheExposantV2({ id, onClose }) {
         />
       </CollapsibleSection>
 
-        </TabsContent>
-
-        {/* ═══════════════════ ONGLET BILAN JOUR J ═══════════════════ */}
-        <TabsContent value="bilan" className="space-y-3 mt-3">
-
       {/* ═══════════════════ SECTION 10 : BILAN JOUR J ═══════════════════ */}
       <CollapsibleSection icon={Activity} title="Bilan Jour J">
         <EditableField label="Présence constatée" type="select" options={[{ value: 'present', label: 'Présent' }, { value: 'absent', label: 'Absent' }, { value: 'retard', label: 'Retard' }, { value: 'depart_anticipe', label: 'Départ anticipé' }]} value={reg.bilan_presence} onSave={(v) => saveReg({ bilan_presence: v })} />
@@ -707,13 +681,12 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Reco caution" type="select" options={[{ value: 'integrale', label: 'Restitution intégrale' }, { value: 'partielle', label: 'Retenue partielle' }, { value: 'totale', label: 'Retenue totale' }, { value: 'a_verifier', label: 'À vérifier' }]} value={reg.bilan_caution_reco} onSave={(v) => saveReg({ bilan_caution_reco: v })} />
       </CollapsibleSection>
 
-        </TabsContent>
+      {/* ═══════════════════ SECTION 11 : PORTAIL EXPOSANT ═══════════════════ */}
+      <CollapsibleSection icon={ExternalLink} title="Portail exposant">
+        <PortalTab registration={reg} organization={org} documents={docs} />
+      </CollapsibleSection>
 
-        {/* ═══════════════════ ONGLET PORTAIL ═══════════════════ */}
-        <TabsContent value="portail" className="space-y-3 mt-3">
-          <PortalTab registration={reg} organization={org} documents={docs} />
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* ═══════════════════ ZONE DE SUPPRESSION ═══════════════════ */}
       <div className="rounded-xl border-2 border-red-300 bg-red-50/50 p-3.5 mt-6">
@@ -1262,16 +1235,6 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Site</label>
-                        <select
-                          value={editDraft.venue_id || ''}
-                          onChange={(e) => setEditDraft((f) => ({ ...f, venue_id: e.target.value }))}
-                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
-                        >
-                          {allVenuesList.map((v) => <option key={v.id} value={v.id}>📍 {v.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
                         <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Zone</label>
                         <select
                           value={editDraft.location_type}
@@ -1282,8 +1245,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                           <option value="zone_demo">🟧 Zone démo (30 min)</option>
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Créneau</label>
+                      <div className="col-span-2">
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Créneau horaire</label>
                         <select
                           value={String(editDraft.slot_index)}
                           onChange={(e) => setEditDraft((f) => ({ ...f, slot_index: Number(e.target.value) }))}
