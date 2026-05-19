@@ -157,6 +157,12 @@ export default function ExposantsListView() {
       let cmp;
       if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
       else cmp = String(va).localeCompare(String(vb), 'fr', { numeric: true, sensitivity: 'base' });
+      // 🪢 Tie-break stable par nom (A→Z) pour un ordre déterministe quand les valeurs sont égales
+      if (cmp === 0 && sortKey !== 'name') {
+        const na = (a.organization?.name || '').toLowerCase();
+        const nb = (b.organization?.name || '').toLowerCase();
+        cmp = na.localeCompare(nb, 'fr', { sensitivity: 'base' });
+      }
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return sorted;

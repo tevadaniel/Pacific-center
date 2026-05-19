@@ -41,7 +41,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v32-2026-05-19-sort-exposants';
+                var APP_VERSION = 'v33-2026-05-19-sort-created-at-fix';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif

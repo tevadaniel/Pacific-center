@@ -1331,7 +1331,7 @@ export async function GET(request, { params }) {
         const v = vById[r.venue_id];
         const d = depByReg[r.id];
         delete r._id;
-        return { ...r, organization: o ? { id: o.id, name: o.name, discipline: o.discipline, priority_level: o.priority_level, main_email: o.main_email, main_phone: o.main_phone, contact_name: o.contact_name, participation_history: o.participation_history || null } : null, venue: v ? { id: v.id, name: v.name, code: v.code } : null, deposit: d ? { status: d.status, amount_xpf: d.amount_xpf } : null };
+        return { ...r, organization: o ? { id: o.id, name: o.name, discipline: o.discipline, priority_level: o.priority_level, main_email: o.main_email, main_phone: o.main_phone, contact_name: o.contact_name, participation_history: o.participation_history || null, created_at: o.created_at || null, updated_at: o.updated_at || null, source_origin: o.source_origin || null } : null, venue: v ? { id: v.id, name: v.name, code: v.code } : null, deposit: d ? { status: d.status, amount_xpf: d.amount_xpf } : null };
       });
       if (priority) rows = rows.filter(r => r.organization?.priority_level === priority);
       if (discipline) rows = rows.filter(r => r.organization?.discipline === discipline);
