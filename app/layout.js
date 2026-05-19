@@ -7,7 +7,6 @@ export const metadata = {
   description: 'Plateforme de pilotage opérationnel — Forum de la Rentrée 2026 • Polynésie française',
   applicationName: 'Forum 2026',
   manifest: '/manifest.json',
-  themeColor: '#1d4ed8',
   appleWebApp: {
     capable: true,
     title: 'Forum 2026',
@@ -41,7 +40,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v39-2026-05-19-badge-attestation-charte';
+                var APP_VERSION = 'v40-2026-05-19-deploy-fix-gitignore';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif
