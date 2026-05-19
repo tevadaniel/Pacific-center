@@ -98,6 +98,7 @@ export default function SendExposantMailDialog({ registration, organization, ven
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
   const [sending, setSending] = useState(false);
+  const [confirmStep, setConfirmStep] = useState(false);
 
   const applyTemplate = (key) => {
     setTemplateKey(key);
@@ -118,10 +119,10 @@ export default function SendExposantMailDialog({ registration, organization, ven
     if (!bodyHtml.trim()) { toast.error('Corps du message requis'); return; }
     if (!organization?.main_email) { toast.error('Aucun email destinataire'); return; }
     if (!registration?.id) { toast.error('Inscription introuvable'); return; }
-    if (!window.confirm(`Envoyer ce mail à ${organization.main_email} ?`)) return;
 
     setSending(true);
     try {
+      console.log('[mail-dialog] Envoi en cours →', organization.main_email);
       const res = await api('/api/mailing/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -131,19 +132,32 @@ export default function SendExposantMailDialog({ registration, organization, ven
           mail_type: 'admin_direct',
         }),
       });
+      console.log('[mail-dialog] Réponse API:', res);
       if (res?.sent > 0) {
         toast.success(`📧 Email envoyé à ${organization.main_email}`);
         onClose();
       } else if (res?.failed > 0) {
-        toast.error(`Échec de l'envoi (${res.errors?.[0] || 'erreur inconnue'})`);
+        toast.error(`Échec de l'envoi (${res.errors?.[0]?.error || res.errors?.[0] || 'erreur inconnue'})`);
+      } else if (res?.test_mode_active) {
+        toast.info(`Mode TEST actif — mail redirigé vers ${res.redirect_to || 'allow-list'}`);
+        onClose();
       } else {
-        toast.info(res?.message || 'Aucun envoi effectué (vérifiez les filtres test/redirect)');
+        toast.warning(res?.message || `Aucun envoi effectué (réponse: ${JSON.stringify(res)})`);
       }
     } catch (e) {
+      console.error('[mail-dialog] Erreur envoi:', e);
       toast.error(e.message || 'Erreur lors de l\'envoi');
     } finally {
       setSending(false);
+      setConfirmStep(false);
     }
+  };
+
+  const handleSendClick = () => {
+    if (!subject.trim()) { toast.error('Sujet requis'); return; }
+    if (!bodyHtml.trim()) { toast.error('Corps du message requis'); return; }
+    if (!organization?.main_email) { toast.error('Aucun email destinataire'); return; }
+    setConfirmStep(true);
   };
 
   return (
@@ -222,19 +236,44 @@ export default function SendExposantMailDialog({ registration, organization, ven
           </div>
         </div>
 
-        <DialogFooter className="px-5 py-3 border-t bg-slate-50/50 gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={sending}>
-            Annuler
-          </Button>
-          <Button
-            size="sm"
-            onClick={send}
-            disabled={sending || !subject.trim() || !bodyHtml.trim()}
-            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-          >
-            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Envoyer le mail
-          </Button>
+        <DialogFooter className="px-5 py-3 border-t bg-slate-50/50 gap-2 flex-col sm:flex-row">
+          {confirmStep ? (
+            <div className="flex w-full items-center justify-between gap-2 flex-wrap">
+              <div className="text-xs text-slate-700">
+                Confirmer l'envoi à <span className="font-mono font-bold">{organization?.main_email}</span> ?
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setConfirmStep(false)} disabled={sending}>
+                  Non
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={send}
+                  disabled={sending}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                >
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Oui, envoyer
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={onClose} disabled={sending}>
+                Annuler
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={handleSendClick}
+                disabled={sending || !subject.trim() || !bodyHtml.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+              >
+                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Envoyer le mail
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
