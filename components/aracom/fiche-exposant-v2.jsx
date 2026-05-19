@@ -454,9 +454,9 @@ export default function FicheExposantV2({ id, onClose }) {
       <Tabs defaultValue="profil" className="w-full">
         <TabsList className="grid grid-cols-6 w-full bg-slate-100 h-9 p-0.5">
           <TabsTrigger value="profil" className="text-[11px] gap-1 data-[state=active]:bg-white"><User className="w-3 h-3" /> Profil</TabsTrigger>
-          <TabsTrigger value="statut" className="text-[11px] gap-1 data-[state=active]:bg-white"><ListChecks className="w-3 h-3" /> Statut</TabsTrigger>
-          <TabsTrigger value="documents" className="text-[11px] gap-1 data-[state=active]:bg-white"><FileBox className="w-3 h-3" /> Documents</TabsTrigger>
           <TabsTrigger value="animations" className="text-[11px] gap-1 data-[state=active]:bg-white"><Sparkles className="w-3 h-3" /> Animations</TabsTrigger>
+          <TabsTrigger value="documents" className="text-[11px] gap-1 data-[state=active]:bg-white"><FileBox className="w-3 h-3" /> Documents</TabsTrigger>
+          <TabsTrigger value="statut" className="text-[11px] gap-1 data-[state=active]:bg-white"><ListChecks className="w-3 h-3" /> Statut</TabsTrigger>
           <TabsTrigger value="bilan" className="text-[11px] gap-1 data-[state=active]:bg-white"><Activity className="w-3 h-3" /> Bilan&nbsp;J</TabsTrigger>
           <TabsTrigger value="portail" className="text-[11px] gap-1 data-[state=active]:bg-white"><ExternalLink className="w-3 h-3" /> Portail</TabsTrigger>
         </TabsList>
@@ -686,28 +686,17 @@ export default function FicheExposantV2({ id, onClose }) {
         {/* ═══════════════════ ONGLET ANIMATIONS ═══════════════════ */}
         <TabsContent value="animations" className="space-y-3 mt-3">
 
-      {/* ═══════════════════ SECTION 9 : ANIMATIONS DÉCLARÉES ═══════════════════ */}
-      <CollapsibleSection icon={Sparkles} title="Animations déclarées" badge={<Badge className="text-[10px] ml-1">{slots.length}</Badge>}>
-        {slots.length === 0 ? (
-          <div className="text-xs italic text-slate-400 text-center py-3">Aucune animation déclarée</div>
-        ) : (
-          <div className="space-y-2">
-            {slots.map((s) => (
-              <div key={s.id} className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <Badge className="bg-violet-100 text-violet-800 border-violet-300 text-[10px]">{s.animation_type_label || s.type || 'Animation'}</Badge>
-                  <span className="text-[10px] text-slate-500">{s.event_date} · {s.time_slot || `${s.start_time || ''}–${s.end_time || ''}`}</span>
-                </div>
-                <div className="font-medium text-slate-800">{s.title || s.animation_name || '—'}</div>
-                <div className="text-[11px] text-slate-600 mt-0.5">{s.description}</div>
-                <div className="text-[10px] text-slate-500 mt-1">📍 {s.location_detail || s.zone_label || venue?.name || '—'}</div>
-              </div>
-            ))}
-          </div>
-        )}
-        <Button size="sm" variant="outline" className="w-full mt-2 h-7 text-[11px]" onClick={() => toast.info('💡 Ajout / suppression via l\'onglet Pilotage > Animations')}>
-          <Plus className="w-3 h-3 mr-1" /> Gérer les animations…
-        </Button>
+      {/* ═══════════════════ SECTION 9 : ANIMATIONS — CRUD ADMIN ═══════════════════ */}
+      <CollapsibleSection icon={Sparkles} title="Animations" badge={<Badge className="text-[10px] ml-1">{slots.length}</Badge>}>
+        <AdminAnimationsPanel
+          registrationId={reg.id}
+          venueId={reg.venue_id}
+          venueName={venue?.name}
+          attendingDays={Array.isArray(reg.attending_days) ? reg.attending_days : []}
+          slots={slots}
+          isLocked={reg.is_locked || reg.candidature_locked}
+          onReload={load}
+        />
       </CollapsibleSection>
 
         </TabsContent>
@@ -1041,3 +1030,268 @@ function AdminMultiSitesPanel({ organizationId, currentRegId, onReload, onSwitch
   );
 }
 
+
+
+// =======================================================
+// 🎭 AdminAnimationsPanel — CRUD animations depuis l'admin
+//   (réplique le portail exposant : liste + ajout + suppression)
+// =======================================================
+function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDays, slots, isLocked, onReload }) {
+  const [allSlotsVenue, setAllSlotsVenue] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [busyDelete, setBusyDelete] = useState(null);
+  const [form, setForm] = useState({
+    day: 'vendredi',
+    location_type: 'sur_stand',
+    slot_index: 0,
+    title: '',
+    description: '',
+  });
+
+  const EVENT_DATES_LOCAL = [
+    { label: 'vendredi', date: '2026-08-14', display: 'Vendredi 14 août' },
+    { label: 'samedi', date: '2026-08-15', display: 'Samedi 15 août' },
+  ];
+  const STAND_SLOTS_FRIDAY = [
+    { start: '11:00', end: '12:00' }, { start: '12:00', end: '13:00' },
+    { start: '13:00', end: '14:00' }, { start: '14:00', end: '15:00' },
+    { start: '15:00', end: '16:00' }, { start: '16:00', end: '17:00' },
+  ];
+  const STAND_SLOTS_SATURDAY = [
+    { start: '09:00', end: '10:00' }, { start: '10:00', end: '11:00' },
+    ...STAND_SLOTS_FRIDAY,
+  ];
+  const DEMO_SLOTS = [
+    { start: '09:00', end: '09:30' }, { start: '09:30', end: '10:00' },
+    { start: '10:00', end: '10:30' }, { start: '10:30', end: '11:00' },
+    { start: '11:00', end: '11:30' }, { start: '11:30', end: '12:00' },
+    { start: '13:00', end: '13:30' }, { start: '13:30', end: '14:00' },
+    { start: '14:00', end: '14:30' }, { start: '14:30', end: '15:00' },
+    { start: '15:00', end: '15:30' }, { start: '15:30', end: '16:00' },
+    { start: '16:00', end: '16:30' }, { start: '16:30', end: '17:00' },
+  ];
+
+  const slotChoicesForCurrent = () => {
+    if (form.location_type === 'zone_demo') return DEMO_SLOTS;
+    return form.day === 'vendredi' ? STAND_SLOTS_FRIDAY : STAND_SLOTS_SATURDAY;
+  };
+
+  const loadAllVenueSlots = async () => {
+    if (!venueId) { setAllSlotsVenue([]); return; }
+    try {
+      const data = await api(`/api/animation-slots?venue_id=${venueId}`);
+      setAllSlotsVenue(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { loadAllVenueSlots(); }, [venueId, slots.length]);
+
+  const normalizeLoc = (v) => (v === 'zone_demo' || v === 'zone_animation' || v === 'scene') ? 'zone_demo' : 'sur_stand';
+
+  const isDemoSlotTaken = (day, start, end) => {
+    return allSlotsVenue.some(s =>
+      s.day_label === day
+      && normalizeLoc(s.location_type) === 'zone_demo'
+      && s.start_time === start
+      && s.end_time === end
+      && s.registration_id !== registrationId
+    );
+  };
+
+  const addAnim = async () => {
+    if (!venueId) return toast.error('Aucun site défini sur cette inscription');
+    if (!form.title.trim()) return toast.error('Titre requis');
+    const choices = slotChoicesForCurrent();
+    const slot = choices[form.slot_index];
+    if (!slot) return toast.error('Créneau invalide');
+    if (form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, slot.start, slot.end)) {
+      return toast.error('Ce créneau de zone démo est déjà pris par un autre exposant');
+    }
+    setBusy(true);
+    try {
+      const event_date = form.day === 'vendredi' ? '2026-08-14' : '2026-08-15';
+      await api('/api/animation-slots', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          venue_id: venueId,
+          day_label: form.day,
+          event_date,
+          start_time: slot.start,
+          end_time: slot.end,
+          duration_minutes: form.location_type === 'zone_demo' ? 30 : 60,
+          title: form.title,
+          description: form.description || null,
+          slot_type: form.location_type,
+          location_type: form.location_type,
+        }),
+      });
+      toast.success(`✨ Animation ${slot.start}–${slot.end} créée`);
+      setShowForm(false);
+      setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '' });
+      await loadAllVenueSlots();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const deleteAnim = async (slotId) => {
+    setBusyDelete(slotId);
+    try {
+      await api(`/api/animation-slots/${slotId}`, { method: 'DELETE' });
+      toast.success('Animation supprimée');
+      await loadAllVenueSlots();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusyDelete(null);
+  };
+
+  if (!venueId) {
+    return (
+      <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+        ⚠️ Aucun site défini sur cette inscription. Définissez d&apos;abord un site dans la section <b>Stand &amp; Site</b>.
+      </div>
+    );
+  }
+
+  const slotsByDay = {
+    vendredi: slots.filter(s => s.day_label === 'vendredi'),
+    samedi: slots.filter(s => s.day_label === 'samedi'),
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-2 leading-relaxed">
+        📍 Site : <b>{venueName || '—'}</b>
+        {attendingDays.length > 0 && <> · Jours prévus : <b>{attendingDays.includes('vendredi') ? 'Ven' : ''}{attendingDays.length === 2 ? ' + ' : ''}{attendingDays.includes('samedi') ? 'Sam' : ''}</b></>}
+        <br />
+        🟦 <b>Sur stand</b> = 1h propre à votre stand · 🟧 <b>Zone démo</b> = 30 min partagé (1 seul exposant à la fois)
+        {isLocked && <div className="mt-1 text-amber-700 font-semibold">🔒 Inscription verrouillée — modifications restreintes</div>}
+      </div>
+
+      {EVENT_DATES_LOCAL.map((d) => {
+        const list = slotsByDay[d.label];
+        return (
+          <div key={d.label} className="rounded-md border border-slate-200 bg-white p-2">
+            <div className="text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span>📅 {d.display}</span>
+              <Badge variant="outline" className="text-[10px]">{list.length} animation{list.length > 1 ? 's' : ''}</Badge>
+            </div>
+            {list.length === 0 ? (
+              <div className="text-[11px] italic text-slate-400 py-1">Aucune animation ce jour</div>
+            ) : (
+              <div className="space-y-1">
+                {list.map((s) => (
+                  <div key={s.id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 flex items-start gap-2 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge className={`text-[10px] ${normalizeLoc(s.location_type) === 'zone_demo' ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-blue-100 text-blue-800 border-blue-300'}`} variant="outline">
+                          {normalizeLoc(s.location_type) === 'zone_demo' ? '🟧 Zone démo' : '🟦 Sur stand'}
+                        </Badge>
+                        <span className="text-[10px] font-mono font-semibold text-slate-700">{s.start_time}–{s.end_time}</span>
+                      </div>
+                      <div className="font-medium text-slate-800 mt-0.5 truncate">{s.title || '—'}</div>
+                      {s.description && <div className="text-[10px] text-slate-500 truncate">{s.description}</div>}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-1.5 border-red-300 text-red-700 hover:bg-red-50 shrink-0"
+                      disabled={isLocked || busyDelete === s.id}
+                      onClick={() => deleteAnim(s.id)}
+                      title="Supprimer cette animation"
+                    >
+                      {busyDelete === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {!showForm && !isLocked && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full border-dashed border-2 border-violet-300 text-violet-700 hover:bg-violet-50 gap-2 h-8 text-xs"
+          onClick={() => setShowForm(true)}
+        >
+          <Plus className="w-3.5 h-3.5" /> Ajouter une animation
+        </Button>
+      )}
+      {showForm && (
+        <div className="rounded-md border-2 border-violet-400 bg-violet-50/30 p-3 space-y-2">
+          <div className="text-xs font-bold text-violet-900 mb-1">Nouvelle animation</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Jour</label>
+              <Select value={form.day} onValueChange={(v) => setForm((f) => ({ ...f, day: v, slot_index: 0 }))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vendredi">Vendredi 14 août</SelectItem>
+                  <SelectItem value="samedi">Samedi 15 août</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Type</label>
+              <Select value={form.location_type} onValueChange={(v) => setForm((f) => ({ ...f, location_type: v, slot_index: 0 }))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sur_stand">🟦 Sur stand (1h)</SelectItem>
+                  <SelectItem value="zone_demo">🟧 Zone démo (30 min)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Créneau horaire</label>
+            <Select value={String(form.slot_index)} onValueChange={(v) => setForm((f) => ({ ...f, slot_index: Number(v) }))}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {slotChoicesForCurrent().map((s, i) => {
+                  const taken = form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, s.start, s.end);
+                  return (
+                    <SelectItem key={`${s.start}-${s.end}`} value={String(i)} disabled={taken}>
+                      {s.start}–{s.end} {taken ? '🚫 (déjà pris)' : ''}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Titre *</label>
+            <Input
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="ex: Démonstration de judo"
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Description</label>
+            <Textarea
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="Détails (optionnel)…"
+              rows={2}
+              className="text-xs"
+            />
+          </div>
+          <div className="flex gap-1 justify-end pt-1">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => { setShowForm(false); setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '' }); }}>
+              Annuler
+            </Button>
+            <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white gap-1" disabled={busy || !form.title.trim()} onClick={addAnim}>
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+              Créer
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
