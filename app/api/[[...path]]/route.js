@@ -4094,6 +4094,10 @@ export async function POST(request, { params }) {
             status: state.registration.status === 'confirme' ? 'confirme' : 'a_confirmer',
             modification_token_visit: tokVisit,
             modification_token_animation: tokAnim,
+            // 🆕 SESSION 43-j — PHASE 3 : Verrouillage du bloc réservation (Site/Date/Stand/Animation)
+            //   Après finalisation, l'exposant voit le bloc en lecture seule. Pour modifier,
+            //   il doit utiliser POST /api/registrations/:id/request-modification qui email ARACOM.
+            block_locked_at: new Date(),
             updated_at: new Date(),
           },
         }
@@ -6859,6 +6863,77 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true, attending_days: valid, removed_animations: removedSlots, registration: updated && (delete updated._id, updated) });
     }
 
+
+    // 🆕 SESSION 43-j — PHASE 3 : DEMANDE DE MODIFICATION (bloc réservation verrouillé)
+    //   POST /api/registrations/:id/request-modification  body: { message, requested_changes }
+    //   L'exposant ne peut plus modifier son bloc Site/Stand/Animation après confirmation.
+    //   Il envoie ici une demande qui crée une activité + email automatique à ARACOM (agence@aracom-conseil.fr).
+    if (route.match(/^registrations\/[^/]+\/request-modification$/)) {
+      const regId = p[1];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const { message = '', requested_changes = '' } = body || {};
+      if (!message.trim() && !requested_changes.trim()) {
+        return err('Précisez la modification souhaitée dans le message', 400);
+      }
+      const reqId = uuid();
+      const baseUrl = getPublicBaseUrl(request);
+      const adminLink = `${baseUrl}/aracom?tab=exposants&open=${regId}`;
+      await db.collection('modification_requests').insertOne({
+        id: reqId,
+        registration_id: regId,
+        organization_id: reg.organization_id,
+        organization_name: org?.name,
+        venue_name: venue?.name,
+        stand_code: reg.stand_code,
+        message: message.trim(),
+        requested_changes: requested_changes.trim(),
+        status: 'en_attente',
+        created_at: new Date(),
+      });
+      await logActivity(db, null, 'registration', regId, 'modification_requested', { message: message.slice(0, 200) }, { request_id: reqId });
+      // 📧 Email à ARACOM
+      try {
+        const { sendMailAuto } = await import('@/lib/mail-config');
+        await sendMailAuto({
+          to: 'agence@aracom-conseil.fr',
+          subject: `🔧 Demande de modification — ${org?.name || 'Exposant'} (${venue?.name || '—'} · ${reg.stand_code || '—'})`,
+          html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px">
+<h2 style="color:#1e3a8a">🔧 Demande de modification reçue</h2>
+<p>Un exposant a demandé une modification de son bloc réservation (verrouillé après confirmation).</p>
+<div style="background:#eff6ff;border-left:4px solid #1d4ed8;padding:14px;margin:14px 0;border-radius:6px">
+  <div><b>Exposant :</b> ${org?.name || '—'}</div>
+  <div><b>Email :</b> ${org?.main_email || '—'}</div>
+  <div><b>Téléphone :</b> ${org?.main_phone || '—'}</div>
+  <div><b>Site :</b> ${venue?.name || '—'}</div>
+  <div><b>Stand :</b> ${reg.stand_code || '—'}</div>
+  <div><b>Statut :</b> ${reg.status || '—'}</div>
+</div>
+${requested_changes ? `<div style="background:#fef3c7;border-left:4px solid #d97706;padding:14px;margin:14px 0;border-radius:6px">
+  <h3 style="margin:0 0 8px 0">Modifications demandées :</h3>
+  <div style="white-space:pre-wrap">${requested_changes}</div>
+</div>` : ''}
+${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;padding:14px;margin:14px 0;border-radius:6px">
+  <h3 style="margin:0 0 8px 0">Message de l'exposant :</h3>
+  <div style="white-space:pre-wrap">${message}</div>
+</div>` : ''}
+<p style="margin-top:20px"><a href="${adminLink}" style="display:inline-block;padding:12px 24px;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">👉 Ouvrir la fiche dans le cockpit ARACOM</a></p>
+<p style="font-size:12px;color:#6b7280;margin-top:20px">Demande #${reqId.slice(0, 8)} · ${new Date().toLocaleString('fr-FR')}</p>
+</div>`,
+          replyTo: org?.main_email || undefined,
+        });
+      } catch (e) {
+        console.error('[request-modification] email failed:', e.message);
+      }
+      return json({ ok: true, request_id: reqId, message: 'Votre demande a bien été transmise à ARACOM. Vous serez notifié par email du suivi.' });
+    }
+
+    // 🆕 SESSION 43-j — PHASE 3 : Liste des demandes de modif pour ARACOM
+    //   GET /api/admin/modification-requests
+    // (handler GET — voir plus haut)
+
     if (route.match(/^registrations\/[^/]+\/request-validation$/)) {
       const regId = p[1];
       const reg = await db.collection('registrations').findOne({ id: regId });
@@ -8714,6 +8789,56 @@ export async function PUT(request, { params }) {
       upd.updated_at = new Date();
       await db.collection('registrations').updateOne({ id }, { $set: upd });
       await logActivity(db, ctx.userId, 'registration', id, 'update', old, upd);
+
+      // 🆕 SESSION 43-j — PHASE 3/4 : Si l'admin modifie un BLOC VERROUILLÉ (réservation après confirmation),
+      //   on notifie automatiquement l'exposant par email avec le détail des changements.
+      try {
+        const isAdmin = ctx.role === 'aracom_admin' || (request.headers.get('x-user-role') === 'aracom_admin');
+        if (isAdmin && old.block_locked_at) {
+          const LOCKED_FIELDS = ['venue_id', 'stand_code', 'attending_days', 'stand_size', 'status'];
+          const changes = [];
+          for (const k of LOCKED_FIELDS) {
+            if (k in upd && JSON.stringify(old[k]) !== JSON.stringify(upd[k])) {
+              changes.push({ field: k, before: old[k], after: upd[k] });
+            }
+          }
+          if (changes.length > 0) {
+            const org = await db.collection('organizations').findOne({ id: old.organization_id });
+            const venue = old.venue_id ? await db.collection('venues').findOne({ id: old.venue_id }) : null;
+            if (org?.main_email) {
+              const baseUrl = getPublicBaseUrl(request);
+              const FIELD_LABELS = {
+                venue_id: 'Site',
+                stand_code: 'N° de stand',
+                attending_days: 'Jours de présence',
+                stand_size: 'Taille du stand',
+                status: 'Statut',
+              };
+              const changesHtml = changes.map((c) => {
+                let beforeTxt = Array.isArray(c.before) ? c.before.join(', ') : (c.before || '—');
+                let afterTxt = Array.isArray(c.after) ? c.after.join(', ') : (c.after || '—');
+                return `<li><b>${FIELD_LABELS[c.field] || c.field}</b> : <s>${beforeTxt}</s> → <b style="color:#1d4ed8">${afterTxt}</b></li>`;
+              }).join('');
+              const { sendMailAuto } = await import('@/lib/mail-config');
+              await sendMailAuto({
+                to: org.main_email,
+                subject: `🔔 Mise à jour de votre réservation Forum 2026 — ${org.name}`,
+                html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px">
+<h2 style="color:#1e3a8a">🔔 Votre dossier exposant a été mis à jour par ARACOM</h2>
+<p>Bonjour <b>${org.contact_name || org.name}</b>,</p>
+<p>Voici les modifications effectuées par notre équipe sur votre réservation :</p>
+<ul style="background:#eff6ff;border-left:4px solid #1d4ed8;padding:14px 20px;border-radius:6px">${changesHtml}</ul>
+<p style="margin-top:20px"><a href="${baseUrl}/exposant" style="display:inline-block;padding:12px 24px;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">👉 Voir mon dossier mis à jour</a></p>
+<p>Pour toute question, vous pouvez répondre à cet email ou nous contacter à agence@aracom-conseil.fr.</p>
+<p style="font-size:12px;color:#6b7280">— L'équipe ARACOM<br>Forum de la Rentrée 2026 · 14–15 août 2026</p>
+</div>`,
+                replyTo: 'agence@aracom-conseil.fr',
+              });
+            }
+          }
+        }
+      } catch (e) { console.error('[admin-modify-locked-notify] failed:', e.message); }
+
       const reg = await db.collection('registrations').findOne({ id });
       delete reg._id;
       return json(reg);

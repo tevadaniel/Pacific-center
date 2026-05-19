@@ -591,7 +591,7 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
         </div>
 
         {/* 2) JOURS DE PRÉSENCE + HORAIRES */}
-        {selectedVenue && (
+        {selectedVenue ? (
           <div>
             <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> 2. Mes jours et horaires de présence</h3>
             <div className="text-xs text-slate-500 mb-3">Cochez au moins un jour. Renseignez vos horaires d&apos;ouverture du stand pour chaque jour coché.</div>
@@ -602,19 +602,38 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
               ].map(d => {
                 const isChecked = Array.isArray(b.attending_days) && b.attending_days.includes(d.key);
                 const t = b.attending_day_times?.[d.key] || { start: '08:00', end: '17:00' };
+                // 🆕 SESSION 43-j — PHASE 2 : Places restantes dynamiques par jour
+                const dayAvail = (availability?.venues || []).find(av => av.id === selectedVenue.id);
+                const dayInfo = (dayAvail?.available_per_day || []).find(x => x.day_key === d.key);
+                const dayRemaining = dayInfo?.remaining ?? null;
+                const dayTotal = dayInfo?.total_capacity ?? (selectedVenue.capacity_stands || 16);
+                const isDayFull = dayInfo?.is_full === true || dayRemaining === 0;
                 return (
-                  <div key={d.key} className={`p-4 rounded-lg border-2 transition ${isChecked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200'}`}>
-                    <label className="flex items-center gap-3 cursor-pointer">
+                  <div key={d.key} className={`p-4 rounded-lg border-2 transition ${
+                    isDayFull ? 'border-red-200 bg-red-50/40 opacity-60' :
+                    isChecked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200'
+                  }`}>
+                    <label className={`flex items-center gap-3 ${isDayFull ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                       <input
                         type="checkbox"
                         checked={isChecked}
-                        onChange={() => toggleDay(d.key)}
+                        disabled={isDayFull}
+                        onChange={() => !isDayFull && toggleDay(d.key)}
                         className="w-5 h-5 accent-blue-600"
                         data-testid={`day-check-${d.key}`}
                       />
-                      <span className="font-bold text-slate-900">{d.label}</span>
+                      <span className="font-bold text-slate-900 flex-1">{d.label}</span>
+                      {dayRemaining !== null && (
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                          isDayFull ? 'bg-red-100 text-red-700 border border-red-300' :
+                          dayRemaining <= 3 ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                          'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        }`}>
+                          {isDayFull ? 'COMPLET' : `${dayRemaining}/${dayTotal} places restantes`}
+                        </span>
+                      )}
                     </label>
-                    {isChecked && (
+                    {isChecked && !isDayFull && (
                       <div className="mt-3 ml-8 grid grid-cols-2 gap-3 max-w-md">
                         <Field label="De" testid={`day-${d.key}-start`}>
                           <Input type="time" value={t.start || '08:00'} onChange={e => setTime(d.key, 'start', e.target.value)} step={900} />
@@ -627,6 +646,13 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
                   </div>
                 );
               })}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+            <div className="text-sm text-slate-500 flex items-center justify-center gap-2">
+              <span className="text-xl">🔒</span>
+              <span>Choisissez d&apos;abord votre site ci-dessus pour débloquer le choix des jours.</span>
             </div>
           </div>
         )}

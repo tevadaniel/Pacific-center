@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import BusinessCard from '@/components/exposant/business-card';
+import RequestModificationDialog from '@/components/exposant/request-modification-dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
@@ -141,6 +142,28 @@ export default function ExposantPortal() {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+  // 🆕 SESSION 43-j — PHASE 4 : Sync admin ↔ exposant en temps réel
+  //   Polling toutes les 60s pour détecter une modif ARACOM. Si updated_at change,
+  //   toast d'info + rechargement automatique.
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  useEffect(() => {
+    if (!data?.registration?.id) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/registrations/${data.registration.id}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const fresh = await r.json();
+        const newUpdate = fresh?.registration?.updated_at;
+        const knownUpdate = lastUpdatedAt || data?.registration?.updated_at;
+        if (newUpdate && knownUpdate && new Date(newUpdate) > new Date(knownUpdate)) {
+          setLastUpdatedAt(newUpdate);
+          toast.info('🔔 Votre dossier a été modifié par ARACOM. Mise à jour…', { duration: 5000 });
+          load();
+        }
+      } catch {/* ignore */}
+    }, 60000);
+    return () => clearInterval(t);
+  }, [data?.registration?.id, lastUpdatedAt]);
   // Charge les deadlines globales définies par ARACOM (pour le compte à rebours)
   useEffect(() => {
     api('/api/step-deadlines').then(d => setStepDeadlines(d.deadlines || {})).catch(() => {});
@@ -1825,7 +1848,17 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
             <SelectTrigger><SelectValue placeholder="Choisir un site…" /></SelectTrigger>
             <SelectContent>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
           </Select>
-          {isLocked && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md p-2">🔒 Inscription confirmée — votre site et votre stand sont définitifs.</p>}
+          {isLocked && (
+            <div className="rounded-md p-2.5 bg-emerald-50 border border-emerald-200 space-y-2">
+              <p className="text-xs text-emerald-800">🔒 Inscription confirmée — votre bloc réservation est verrouillé.</p>
+              <RequestModificationDialog
+                registrationId={registration.id}
+                triggerLabel="Demander une modification"
+                triggerClass="border-blue-400 text-blue-700 hover:bg-blue-50 w-full sm:w-auto"
+                context="site"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
