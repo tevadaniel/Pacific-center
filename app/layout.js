@@ -40,7 +40,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v40-2026-05-19-deploy-fix-gitignore';
+                var APP_VERSION = 'v42-2026-05-19-sort-loyalty-editions';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif

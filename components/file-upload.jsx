@@ -4,9 +4,12 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, Camera, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { chunkedUpload } from '@/lib/chunked-upload';
 
-const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB pour documents PDF/images (auto-routé vers Drive si > 4 MB)
-const VIDEO_MAX_SIZE = 200 * 1024 * 1024; // 200 MB pour les vidéos (Drive)
+// 🆕 SESSION 41 — Limites élargies pour fichiers volumineux via chunked upload
+const DEFAULT_MAX_SIZE = 200 * 1024 * 1024; // 200 MB (PDF/images)
+const VIDEO_MAX_SIZE = 500 * 1024 * 1024;   // 500 MB (vidéos)
+const CHUNKED_THRESHOLD = 3 * 1024 * 1024;  // >3 MB → upload chunké (évite limites ingress)
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -21,9 +24,33 @@ function fileToBase64(file) {
   });
 }
 
-export function FileUploadButton({ onUpload, accept = 'image/*,application/pdf', capture = false, label = 'Ajouter un fichier', icon, variant = 'outline', className = '', maxSize = null }) {
+/**
+ * FileUploadButton — gère upload de fichiers jusqu'à 200 MB (500 MB vidéos)
+ *
+ * 🆕 Pour les fichiers > 3 MB, utilise automatiquement l'upload chunké
+ *   (chunks de 2 MB → /api/uploads/chunk puis /api/uploads/finalize)
+ *   pour contourner les limites du proxy Kubernetes & garantir un upload fiable.
+ *
+ * Props supplémentaires pour chunked upload :
+ *   - registrationId : id de l'inscription (passé au backend pour Drive folder)
+ *   - documentType   : type de document (assurance, devis, photo, etc.)
+ */
+export function FileUploadButton({
+  onUpload,
+  accept = 'image/*,application/pdf',
+  capture = false,
+  label = 'Ajouter un fichier',
+  icon,
+  variant = 'outline',
+  className = '',
+  maxSize = null,
+  registrationId = null,
+  documentType = null,
+}) {
   const ref = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+
   const handle = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -36,23 +63,56 @@ export function FileUploadButton({ onUpload, accept = 'image/*,application/pdf',
       return;
     }
     setBusy(true);
-    const t = toast.loading(isVideo ? `Upload vidéo (${(f.size / (1024 * 1024)).toFixed(1)} Mo)…` : 'Upload en cours…');
+    setProgress(0);
+    const fileMb = (f.size / (1024 * 1024)).toFixed(1);
+    const useChunked = f.size > CHUNKED_THRESHOLD;
+    const t = toast.loading(useChunked
+      ? `Upload chunké (${fileMb} Mo) — 0%`
+      : `Upload en cours (${fileMb} Mo)…`);
     try {
-      const base64 = await fileToBase64(f);
-      await onUpload({ file_data: base64, file_name: f.name, mime_type: f.type, size_bytes: f.size });
-      toast.success('Fichier uploadé', { id: t });
+      if (useChunked) {
+        // 🆕 Upload chunké : envoie en morceaux de 2 MB
+        const result = await chunkedUpload(f, {
+          registrationId,
+          documentType,
+          onProgress: (pct) => {
+            setProgress(pct);
+            toast.loading(`Upload (${fileMb} Mo) — ${pct}%`, { id: t });
+          },
+        });
+        // result peut contenir file_data (base64) OU drive_meta
+        await onUpload({
+          file_data: result.file_data || null,
+          file_name: result.file_name || f.name,
+          mime_type: result.mime_type || f.type,
+          size_bytes: result.size_bytes || f.size,
+          drive_file_id: result.drive_file_id || null,
+          drive_view_link: result.drive_view_link || null,
+          drive_download_link: result.drive_download_link || null,
+          stored_in_drive: result.stored_in_drive || false,
+        });
+      } else {
+        // Petit fichier → flow classique base64
+        const base64 = await fileToBase64(f);
+        await onUpload({ file_data: base64, file_name: f.name, mime_type: f.type, size_bytes: f.size });
+      }
+      toast.success('Fichier uploadé ✅', { id: t });
     } catch (err) {
-      toast.error('Erreur upload : ' + err.message, { id: t });
+      console.error('[FileUploadButton]', err);
+      toast.error('Erreur upload : ' + (err?.message || 'inconnue'), { id: t });
     }
     setBusy(false);
+    setProgress(0);
     if (ref.current) ref.current.value = '';
   };
+
   const Icon = icon || (capture ? Camera : Upload);
   return (
     <>
       <input ref={ref} type="file" accept={accept} capture={capture ? 'environment' : undefined} className="hidden" onChange={handle} />
       <Button type="button" variant={variant} className={`gap-2 ${className}`} onClick={() => ref.current?.click()} disabled={busy}>
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />} {label}
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
+        {busy && progress > 0 ? `${label} · ${progress}%` : label}
       </Button>
     </>
   );

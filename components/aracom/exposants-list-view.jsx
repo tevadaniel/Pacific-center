@@ -44,6 +44,8 @@ const SORT_OPTS = [
   { key: 'name',         label: '🔤 Nom (Z → A)',              dir: 'desc' },
   { key: 'created_at',   label: '📅 Profil — plus récent',     dir: 'desc' },
   { key: 'created_at',   label: '📅 Profil — plus ancien',     dir: 'asc'  },
+  { key: 'editions',     label: '🏅 Fidélité — Multi-éditions d\'abord', dir: 'desc' },
+  { key: 'editions',     label: '🆕 Nouveaux d\'abord',         dir: 'asc'  },
   { key: 'priority',     label: '🏷 Priorité (A → C)',          dir: 'asc'  },
   { key: 'status',       label: '⏱ Statut (À conf. → Annulé)', dir: 'asc'  },
   { key: 'venue',        label: '📍 Site (A → Z)',             dir: 'asc'  },
@@ -142,6 +144,7 @@ export default function ExposantsListView() {
       switch (sortKey) {
         case 'name':       return (r.organization?.name || '').toLowerCase();
         case 'created_at': return r.organization?.created_at ? new Date(r.organization.created_at).getTime() : 0;
+        case 'editions':   return r.organization?.participation_history?.nb_editions || 0;
         case 'priority':   return PRIO_ORDER[prioOf(r)] ?? 99;
         case 'status':     return STATUS_ORDER[r.status] ?? 99;
         case 'venue':      return venueNameOf(r);
@@ -506,7 +509,17 @@ export default function ExposantsListView() {
                     </td>
                     <td className="p-2">
                       <button onClick={() => openExposant(r.id)} className="text-left">
-                        <div className="font-semibold text-slate-900 hover:underline">{r.organization?.name || '—'}</div>
+                        <div className="font-semibold text-slate-900 hover:underline flex items-center gap-1.5 flex-wrap">
+                          <span>{r.organization?.name || '—'}</span>
+                          {/* 🆕 SESSION 41 — Badge fidélité multi-éditions */}
+                          {(() => {
+                            const nb = r.organization?.participation_history?.nb_editions || 0;
+                            if (nb >= 4) return <span className="text-[9px] bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold px-1.5 py-0.5 rounded" title={`Fidèle · ${nb} éditions`}>🏆 {nb}×</span>;
+                            if (nb >= 2) return <span className="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-1.5 py-0.5 rounded" title={`Multi-éditions · ${nb} éditions`}>🏅 {nb}×</span>;
+                            if (nb === 1) return <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 font-medium px-1.5 py-0.5 rounded" title="Participation antérieure">1×</span>;
+                            return <span className="text-[9px] bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded" title="Nouveau">🆕</span>;
+                          })()}
+                        </div>
                         <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                           <span>{r.organization?.discipline || '—'}</span>
                           {r.organization?.created_at && (

@@ -2666,6 +2666,109 @@ export async function POST(request, { params }) {
       return json(report);
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 41 — UPLOAD CHUNKÉ pour fichiers volumineux (>4 MB)
+    //   1. POST /api/uploads/chunk     (multipart) — reçoit un chunk
+    //   2. POST /api/uploads/finalize  (json) — assemble + upload Drive
+    //   Permet d'envoyer >50 MB sans tomber sur les limites ingress
+    // ═══════════════════════════════════════════════════════════════════
+    if (route === 'uploads/chunk') {
+      // Multipart form-data : uploadId, chunkIndex, totalChunks, data (blob)
+      const form = await request.formData();
+      const uploadId = form.get('uploadId');
+      const chunkIndex = parseInt(form.get('chunkIndex'), 10);
+      const totalChunks = parseInt(form.get('totalChunks'), 10);
+      const chunkBlob = form.get('data');
+      if (!uploadId || isNaN(chunkIndex) || isNaN(totalChunks) || !chunkBlob) {
+        return err('uploadId, chunkIndex, totalChunks et data requis', 400);
+      }
+      // Récupère le contenu binaire du blob
+      const buf = Buffer.from(await chunkBlob.arrayBuffer());
+      // Stocke dans la collection upload_chunks (TTL 1h)
+      await db.collection('upload_chunks').updateOne(
+        { upload_id: uploadId, chunk_index: chunkIndex },
+        { $set: { upload_id: uploadId, chunk_index: chunkIndex, total_chunks: totalChunks, data: buf, size: buf.length, created_at: new Date() } },
+        { upsert: true }
+      );
+      // Assure l'index TTL une seule fois
+      try { await db.collection('upload_chunks').createIndex({ created_at: 1 }, { expireAfterSeconds: 3600 }); } catch {}
+      return json({ ok: true, chunkIndex, received: buf.length });
+    }
+
+    if (route === 'uploads/finalize') {
+      // JSON : uploadId, fileName, mimeType, registrationId, documentType
+      const { uploadId, fileName, mimeType, registrationId, documentType } = body || {};
+      if (!uploadId) return err('uploadId requis', 400);
+      // Récupère tous les chunks triés
+      const chunks = await db.collection('upload_chunks')
+        .find({ upload_id: uploadId })
+        .sort({ chunk_index: 1 })
+        .toArray();
+      if (!chunks.length) return err('Aucun chunk reçu pour cet uploadId', 404);
+      const totalChunks = chunks[0].total_chunks;
+      if (chunks.length !== totalChunks) {
+        return err(`Chunks incomplets : ${chunks.length}/${totalChunks} reçus`, 400);
+      }
+      // Assemble le buffer
+      const buffers = chunks.map(c => c.data?.buffer ? Buffer.from(c.data.buffer) : Buffer.from(c.data || []));
+      const fullBuffer = Buffer.concat(buffers);
+      const sizeBytes = fullBuffer.length;
+
+      // Routage : Drive si configuré et fichier >4 MB, sinon retourne base64
+      let driveMeta = null;
+      let fileDataB64 = null;
+      const HEAVY = 4 * 1024 * 1024;
+      if (sizeBytes > HEAVY && isDriveConfigured()) {
+        try {
+          // Folder structure : Documents exposants / <orgName ou _orphan>
+          let orgName = '_orphan';
+          if (registrationId) {
+            const reg = await db.collection('registrations').findOne({ id: registrationId });
+            const org = reg ? await db.collection('organizations').findOne({ id: reg.organization_id }) : null;
+            if (org?.name) orgName = driveSafeName(org.name);
+          }
+          const folderId = await ensureFolderPath(['Documents exposants', orgName]);
+          const safeName = driveSafeName(fileName || 'document');
+          const uploaded = await driveUploadFile({
+            folderId,
+            fileName: `${documentType || 'doc'}__${Date.now()}__${safeName}`,
+            mimeType: mimeType || 'application/octet-stream',
+            buffer: fullBuffer,
+          });
+          driveMeta = {
+            drive_file_id: uploaded.id,
+            drive_view_link: uploaded.webViewLink || null,
+            drive_download_link: uploaded.webContentLink || null,
+            stored_in_drive: true,
+          };
+        } catch (driveErr) {
+          console.error('[uploads/finalize/drive]', driveErr);
+          // Fallback: stocke en base64 si Drive échoue (pour <16 MB)
+          if (sizeBytes < 15 * 1024 * 1024) fileDataB64 = fullBuffer.toString('base64');
+          else return err(`Drive indisponible et fichier trop volumineux (${Math.round(sizeBytes/1024/1024)}MB) pour stockage MongoDB`, 500);
+        }
+      } else {
+        // Fichier petit OU Drive non configuré → base64 (uniquement si <16 MB)
+        if (sizeBytes < 15 * 1024 * 1024) {
+          fileDataB64 = fullBuffer.toString('base64');
+        } else {
+          return err(`Google Drive non configuré et fichier trop volumineux (${Math.round(sizeBytes/1024/1024)}MB)`, 500);
+        }
+      }
+
+      // Cleanup des chunks
+      await db.collection('upload_chunks').deleteMany({ upload_id: uploadId });
+
+      return json({
+        ok: true,
+        file_data: fileDataB64,
+        file_name: fileName,
+        mime_type: mimeType,
+        size_bytes: sizeBytes,
+        ...driveMeta,
+      });
+    }
+
     // ─── POST /api/registration-documents — Upload un document depuis la fiche (cockpit ou portail)
     if (route === 'registration-documents') {
       const { registration_id, document_type, category, file_name, mime_type, file_data, status } = body;
@@ -4781,11 +4884,20 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
     if (route === 'documents') {
       const sizeBytes = body.size_bytes || (body.file_data ? Math.floor(body.file_data.length * 0.75) : 0);
       const HEAVY_THRESHOLD = 4 * 1024 * 1024; // 4 MB → upload vers Drive
+      // 🆕 SESSION 41 — Si le client a déjà fait l'upload Drive (via chunked), réutilise ses métadonnées
       let driveMeta = null;
+      if (body.drive_file_id || body.stored_in_drive) {
+        driveMeta = {
+          drive_file_id: body.drive_file_id || null,
+          drive_view_link: body.drive_view_link || null,
+          drive_download_link: body.drive_download_link || null,
+          stored_in_drive: true,
+        };
+      }
       let storeBase64 = body.file_data || null;
 
-      // Upload heavy files to Google Drive instead of MongoDB base64
-      if (sizeBytes > HEAVY_THRESHOLD && body.file_data && isDriveConfigured()) {
+      // Upload heavy files to Google Drive instead of MongoDB base64 (uniquement si pas déjà uploadé)
+      if (!driveMeta && sizeBytes > HEAVY_THRESHOLD && body.file_data && isDriveConfigured()) {
         try {
           const buffer = Buffer.from(String(body.file_data).replace(/^data:[^;]+;base64,/, ''), 'base64');
           // Resolve org name for folder structure
