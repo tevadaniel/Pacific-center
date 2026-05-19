@@ -472,11 +472,11 @@ export default function FicheExposantV2({ id, onClose }) {
 
       {/* ═══════════════════ SECTION 1 : IDENTITÉ ═══════════════════ */}
       <CollapsibleSection icon={User} title="Identité" defaultOpen>
-        <EditableField label="Raison sociale" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
-        <EditableField label="Poste / Fonction" value={org.position} onSave={(v) => saveOrg({ position: v })} />
+        <EditableField label="Nom de la structure" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
+        <EditableField label="Nom du représentant" value={org.contact_name} placeholder="Prénom Nom" onSave={(v) => saveOrg({ contact_name: v })} />
+        <EditableField label="Fonction" value={org.position} placeholder="ex: Président, Directeur, Responsable…" onSave={(v) => saveOrg({ position: v })} />
         <EditableField label="Secteur / Discipline" value={org.discipline} placeholder="ex: Sport, Artisanat, Santé..." onSave={(v) => saveOrg({ discipline: v })} />
         <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
-        <EditableField label="Président(e)" value={org.president_name} placeholder="Si association — laisser vide sinon" onSave={(v) => saveOrg({ president_name: v })} />
       </CollapsibleSection>
 
       {/* ═══════════════════ SECTION 2 : CONTACT ═══════════════════ */}
@@ -498,22 +498,20 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="N° Tahiti" value={org.tahiti_number} placeholder="N° Tahiti (obligatoire en PF)" onSave={(v) => saveOrg({ tahiti_number: v })} />
         <EditableField label="SIRET" value={org.siret} placeholder="14 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siret: v })} />
         <EditableField label="SIREN" value={org.siren} placeholder="9 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siren: v })} />
-        <EditableField label="N° RNA" value={org.rna_number} placeholder="W... (associations uniquement)" onSave={(v) => saveOrg({ rna_number: v })} />
         <EditableField
           label="Forme juridique"
           type="select"
           options={[
-            'SARL',
-            'PATENTE',
             'Association',
+            'Entreprise',
+            'Société',
+            'SARL',
             'SAS',
-            'EI (Entreprise individuelle)',
             'EURL',
-            'Association Loi 1901',
-            'Association Loi 1887 PF',
+            'EI (Entreprise individuelle)',
+            'Patente',
             'GIE',
             'Coopérative',
-            'Société Civile',
             'Profession libérale',
             'Autre',
           ]}
@@ -545,7 +543,6 @@ export default function FicheExposantV2({ id, onClose }) {
             return v ? `📍 ${v.name}` : (venue?.name || '—');
           }}
         />
-        <EditableField label="N° stand" value={reg.stand_code} onSave={(v) => saveReg({ stand_code: v })} />
         {/* 🆕 SESSION 43-d — Sélecteur visuel de stands libres (réplique du portail exposant) */}
         <AdminStandPicker
           registrationId={reg.id}
@@ -555,29 +552,13 @@ export default function FicheExposantV2({ id, onClose }) {
           isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme'}
           onReload={load}
         />
-        <EditableField
-          label="Taille stand"
-          type="select"
-          options={['3×3 m', '3×6 m', '6×6 m', 'Angle/Spécial']}
-          value={reg.stand_size}
-          onSave={(v) => saveReg({ stand_size: v })}
-        />
-        <EditableField
-          label="Sites secondaires"
-          value={Array.isArray(org.secondary_sites) ? org.secondary_sites.join(', ') : org.secondary_sites}
-          placeholder="ex: Punaauia, Arue"
-          onSave={(v) => saveOrg({ secondary_sites: v ? v.split(',').map((s) => s.trim()) : [] })}
-        />
-        <EditableField
-          label="Priorité"
-          type="select"
-          options={[
-            { value: 'A', label: 'A — Fidèle / prioritaire' },
-            { value: 'B', label: 'B — Régulier' },
-            { value: 'C', label: 'C — Nouveau' },
-          ]}
-          value={org.priority_level}
-          onSave={(v) => saveOrg({ priority_level: v })}
+        {/* 🆕 SESSION 43-g — Sites secondaires : multi-select connecté aux venues disponibles */}
+        <AdminSecondarySitesField
+          organizationId={org.id}
+          currentSites={Array.isArray(org.secondary_sites) ? org.secondary_sites : (org.secondary_sites ? [org.secondary_sites] : [])}
+          allVenues={allVenues}
+          primaryVenueId={reg.venue_id}
+          onSave={(arr) => saveOrg({ secondary_sites: arr })}
         />
         <EditableField
           label="Jour(s) présence"
@@ -1053,6 +1034,9 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyDelete, setBusyDelete] = useState(null);
+  const [editingId, setEditingId] = useState(null); // id de l'animation en cours d'édition
+  const [editDraft, setEditDraft] = useState({});
+  const [allVenuesList, setAllVenuesList] = useState([]);
   const [form, setForm] = useState({
     day: 'vendredi',
     location_type: 'sur_stand',
@@ -1096,7 +1080,13 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
       setAllSlotsVenue(Array.isArray(data) ? data : []);
     } catch { /* ignore */ }
   };
-  useEffect(() => { loadAllVenueSlots(); }, [venueId, slots.length]);
+  const loadAllVenues = async () => {
+    try {
+      const v = await api('/api/venues');
+      setAllVenuesList(Array.isArray(v) ? v.filter((x) => x.is_available_2026 !== false) : []);
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { loadAllVenueSlots(); loadAllVenues(); }, [venueId, slots.length]);
 
   const normalizeLoc = (v) => (v === 'zone_demo' || v === 'zone_animation' || v === 'scene') ? 'zone_demo' : 'sur_stand';
 
@@ -1158,6 +1148,69 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     setBusyDelete(null);
   };
 
+  // 🆕 Édition d'une animation existante (créneau, zone, jour, site, titre, descriptif)
+  const startEdit = (s) => {
+    const loc = normalizeLoc(s.location_type);
+    const choices = loc === 'zone_demo' ? DEMO_SLOTS : (s.day_label === 'vendredi' ? STAND_SLOTS_FRIDAY : STAND_SLOTS_SATURDAY);
+    const idx = choices.findIndex((c) => c.start === s.start_time && c.end === s.end_time);
+    setEditDraft({
+      day: s.day_label,
+      location_type: loc,
+      slot_index: idx >= 0 ? idx : 0,
+      venue_id: s.venue_id || venueId,
+      title: s.title || '',
+      description: s.description || '',
+    });
+    setEditingId(s.id);
+  };
+  const editSlotChoices = () => {
+    if (editDraft.location_type === 'zone_demo') return DEMO_SLOTS;
+    return editDraft.day === 'vendredi' ? STAND_SLOTS_FRIDAY : STAND_SLOTS_SATURDAY;
+  };
+  const saveEdit = async () => {
+    const choices = editSlotChoices();
+    const slot = choices[editDraft.slot_index];
+    if (!slot) return toast.error('Créneau invalide');
+    if (!editDraft.title?.trim()) return toast.error('Titre requis');
+    if (editDraft.location_type === 'zone_demo') {
+      // Vérif conflit avec d'autres exposants (sauf moi-même)
+      const conflict = allSlotsVenue.some((s) =>
+        s.id !== editingId
+        && s.day_label === editDraft.day
+        && normalizeLoc(s.location_type) === 'zone_demo'
+        && s.start_time === slot.start
+        && s.end_time === slot.end
+        && s.venue_id === editDraft.venue_id
+      );
+      if (conflict) return toast.error('Ce créneau de zone démo est déjà pris par un autre exposant sur ce site');
+    }
+    setBusy(true);
+    try {
+      const event_date = editDraft.day === 'vendredi' ? '2026-08-14' : '2026-08-15';
+      await api(`/api/animation-slots/${editingId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          day_label: editDraft.day,
+          event_date,
+          start_time: slot.start,
+          end_time: slot.end,
+          duration_minutes: editDraft.location_type === 'zone_demo' ? 30 : 60,
+          title: editDraft.title,
+          description: editDraft.description || null,
+          slot_type: editDraft.location_type,
+          location_type: editDraft.location_type,
+          venue_id: editDraft.venue_id,
+        }),
+      });
+      toast.success('✨ Animation modifiée');
+      setEditingId(null);
+      setEditDraft({});
+      await loadAllVenueSlots();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
   if (!venueId) {
     return (
       <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
@@ -1193,7 +1246,78 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
               <div className="text-[11px] italic text-slate-400 py-1">Aucune animation ce jour</div>
             ) : (
               <div className="space-y-1">
-                {list.map((s) => (
+                {list.map((s) => editingId === s.id ? (
+                  <div key={s.id} className="rounded border-2 border-violet-400 bg-violet-50/40 p-2 space-y-1.5 text-xs">
+                    <div className="text-[10px] font-bold uppercase text-violet-900">✏️ Modifier l&apos;animation</div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Jour</label>
+                        <select
+                          value={editDraft.day}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, day: e.target.value, slot_index: 0 }))}
+                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
+                        >
+                          <option value="vendredi">Vendredi 14 août</option>
+                          <option value="samedi">Samedi 15 août</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Site</label>
+                        <select
+                          value={editDraft.venue_id || ''}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, venue_id: e.target.value }))}
+                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
+                        >
+                          {allVenuesList.map((v) => <option key={v.id} value={v.id}>📍 {v.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Zone</label>
+                        <select
+                          value={editDraft.location_type}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, location_type: e.target.value, slot_index: 0 }))}
+                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
+                        >
+                          <option value="sur_stand">🟦 Sur stand (1h)</option>
+                          <option value="zone_demo">🟧 Zone démo (30 min)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Créneau</label>
+                        <select
+                          value={String(editDraft.slot_index)}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, slot_index: Number(e.target.value) }))}
+                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
+                        >
+                          {editSlotChoices().map((c, i) => {
+                            const taken = editDraft.location_type === 'zone_demo' && allSlotsVenue.some((x) =>
+                              x.id !== editingId
+                              && x.day_label === editDraft.day
+                              && normalizeLoc(x.location_type) === 'zone_demo'
+                              && x.start_time === c.start && x.end_time === c.end
+                              && x.venue_id === editDraft.venue_id
+                            );
+                            return <option key={`${c.start}-${c.end}`} value={String(i)} disabled={taken}>{c.start}–{c.end}{taken ? ' 🚫' : ''}</option>;
+                          })}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Titre *</label>
+                      <Input value={editDraft.title} onChange={(e) => setEditDraft((f) => ({ ...f, title: e.target.value }))} className="h-7 text-[11px]" />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Descriptif</label>
+                      <Textarea value={editDraft.description} onChange={(e) => setEditDraft((f) => ({ ...f, description: e.target.value }))} rows={2} className="text-[11px]" />
+                    </div>
+                    <div className="flex gap-1 justify-end">
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={busy} onClick={() => { setEditingId(null); setEditDraft({}); }}>Annuler</Button>
+                      <Button size="sm" className="h-6 px-2 text-[11px] bg-violet-600 hover:bg-violet-700 text-white" disabled={busy || !editDraft.title?.trim()} onClick={saveEdit}>
+                        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
                   <div key={s.id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 flex items-start gap-2 text-xs">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1201,20 +1325,35 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                           {normalizeLoc(s.location_type) === 'zone_demo' ? '🟧 Zone démo' : '🟦 Sur stand'}
                         </Badge>
                         <span className="text-[10px] font-mono font-semibold text-slate-700">{s.start_time}–{s.end_time}</span>
+                        {s.venue_id && s.venue_id !== venueId && (
+                          <Badge variant="outline" className="text-[9px] bg-amber-50 border-amber-300 text-amber-800">📍 autre site</Badge>
+                        )}
                       </div>
                       <div className="font-medium text-slate-800 mt-0.5 truncate">{s.title || '—'}</div>
                       {s.description && <div className="text-[10px] text-slate-600 mt-0.5 whitespace-pre-wrap break-words">{s.description}</div>}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-1.5 border-red-300 text-red-700 hover:bg-red-50 shrink-0"
-                      disabled={isLocked || busyDelete === s.id}
-                      onClick={() => deleteAnim(s.id)}
-                      title="Supprimer cette animation"
-                    >
-                      {busyDelete === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                    </Button>
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+                        disabled={isLocked || busyDelete === s.id || editingId === s.id}
+                        onClick={() => startEdit(s)}
+                        title="Modifier cette animation"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-1.5 border-red-300 text-red-700 hover:bg-red-50"
+                        disabled={isLocked || busyDelete === s.id || editingId === s.id}
+                        onClick={() => deleteAnim(s.id)}
+                        title="Supprimer cette animation"
+                      >
+                        {busyDelete === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1520,6 +1659,84 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
               Forcer le stand
             </Button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// =======================================================
+// 🏘️ AdminSecondarySitesField — sites secondaires en multi-select
+// =======================================================
+function AdminSecondarySitesField({ currentSites, allVenues, primaryVenueId, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(currentSites || []);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setDraft(currentSites || []); }, [currentSites?.join(',')]);
+
+  const availableVenues = allVenues.filter((v) =>
+    v.is_available_2026 !== false && v.id !== primaryVenueId
+  );
+
+  const toggle = (venueName) => {
+    if (draft.includes(venueName)) {
+      setDraft(draft.filter((s) => s !== venueName));
+    } else {
+      setDraft([...draft, venueName]);
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (e) { toast.error(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="py-1.5 border-b border-slate-100">
+      <div className="text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Sites secondaires (souhaits)</div>
+      {editing ? (
+        <div className="space-y-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
+            {availableVenues.length === 0 ? (
+              <div className="text-[11px] italic text-slate-400 col-span-3">Aucun autre site disponible</div>
+            ) : availableVenues.map((v) => (
+              <label key={v.id} className={`flex items-center gap-1.5 rounded border px-1.5 py-1 cursor-pointer text-[11px] ${draft.includes(v.name) ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                <input
+                  type="checkbox"
+                  checked={draft.includes(v.name)}
+                  onChange={() => toggle(v.name)}
+                  className="w-3 h-3"
+                />
+                <span>📍 {v.name}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-1 justify-end">
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => { setEditing(false); setDraft(currentSites || []); }} disabled={saving}>Annuler</Button>
+            <Button size="sm" className="h-6 px-2 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs truncate flex-1">
+            {(currentSites || []).length === 0 ? (
+              <span className="italic text-slate-400">Non renseigné</span>
+            ) : (
+              (currentSites || []).map((s) => <Badge key={s} variant="outline" className="text-[10px] mr-1 bg-blue-50 border-blue-200 text-blue-800">📍 {s}</Badge>)
+            )}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="h-7 px-2 text-[11px] shrink-0">
+            <Pencil className="w-3 h-3 mr-1" />
+            {(currentSites || []).length === 0 ? 'Ajouter' : 'Modifier'}
+          </Button>
         </div>
       )}
     </div>
