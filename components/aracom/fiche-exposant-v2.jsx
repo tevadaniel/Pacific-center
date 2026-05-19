@@ -475,7 +475,7 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Nom de la structure" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
         <EditableField label="Nom du représentant" value={org.contact_name} placeholder="Prénom Nom" onSave={(v) => saveOrg({ contact_name: v })} />
         <EditableField label="Fonction" value={org.position} placeholder="ex: Président, Directeur, Responsable…" onSave={(v) => saveOrg({ position: v })} />
-        <EditableField label="Secteur / Discipline" value={org.discipline} placeholder="ex: Sport, Artisanat, Santé..." onSave={(v) => saveOrg({ discipline: v })} />
+        <AdminDisciplineField value={org.discipline} onSave={(v) => saveOrg({ discipline: v })} />
         <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
       </CollapsibleSection>
 
@@ -1736,6 +1736,140 @@ function AdminSecondarySitesField({ currentSites, allVenues, primaryVenueId, onS
           <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="h-7 px-2 text-[11px] shrink-0">
             <Pencil className="w-3 h-3 mr-1" />
             {(currentSites || []).length === 0 ? 'Ajouter' : 'Modifier'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// =======================================================
+// 🎯 AdminDisciplineField — dropdown exhaustif avec catégories
+// =======================================================
+const DISCIPLINE_GROUPS = [
+  { label: '🥋 Arts martiaux & combat', items: [
+    'Aïkido', 'Arts martiaux', 'Boxe anglaise', 'Boxe française (savate)', 'Boxe thaï',
+    'Capoeira', 'Escrime', 'Hapkido', 'Judo', 'Judo / Jujitsu', 'Judo / Kendo',
+    'Judo / MMA', 'Jujitsu', 'Karaté', 'Kendo', 'Kickboxing', 'Krav-Maga', 'MMA',
+    'Taekwondo', 'Taekwondo / Jujitsu', 'Viet Vo Dao', 'Wushu / Kung-fu',
+  ]},
+  { label: '🏃 Sports collectifs & individuels', items: [
+    'Athlétisme', 'Badminton', 'Basket-ball', 'Cyclisme / BMX', 'Football',
+    'Football américain', 'Futsal', 'Golf', 'Gymnastique', 'Handball', 'Hockey',
+    'Multisports', 'Pétanque', 'Rugby', 'Tennis', 'Tennis de table', 'Triathlon',
+    'Ultimate frisbee', 'Volleyball',
+  ]},
+  { label: '🌊 Sports nautiques', items: [
+    'Aviron', 'Kitesurf / Voile', 'Natation', 'Natation / Sauvetage', 'Plongée / Permis bateau',
+    'Surf', 'Stand-up paddle (SUP)', 'Va\'a', 'Voile', 'Water-polo', 'Wakeboard',
+  ]},
+  { label: '💃 Danse & expression corporelle', items: [
+    'Danse', 'Danse classique', 'Danse contemporaine', 'Danse Polynésienne',
+    'Danse / Bien-être', 'Hip-hop', 'Modern jazz', 'Ori Tahiti', 'Ori Tahiti / Danse feu',
+    'Salsa / Bachata', 'Zumba',
+  ]},
+  { label: '🧘 Bien-être & forme', items: [
+    'Bien-être', 'Coaching sportif', 'Crossfit', 'Fitness', 'Méditation',
+    'Pilates', 'Sophrologie', 'Yoga', 'Éveil sportif bébés',
+  ]},
+  { label: '🎨 Arts plastiques & créatifs', items: [
+    'Art', 'Anglais / Dessin', 'Arts plastiques', 'Couture / Broderie',
+    'Dessin / Peinture', 'Fabrication / DIY', 'Origami / Art / Japonais', 'Photographie',
+    'Poterie / Céramique', 'Sculpture', 'Tatouage traditionnel',
+  ]},
+  { label: '🎵 Musique & spectacle', items: [
+    'Musique', 'Chant / Chorale', 'Cinéma / Vidéo', 'Cirque', 'Magie',
+    'Piano / Clavier', 'Théâtre', 'Ukulélé / Guitare', 'Percussions',
+  ]},
+  { label: '🧪 Sciences & numérique', items: [
+    'Astronomie', 'Échecs', 'Informatique / Code', 'Jeux vidéo / Ateliers', 'Mathématiques',
+    'Robotique', 'Robotique / Soutien', 'Sciences', 'Sciences de la nature',
+  ]},
+  { label: '📚 Langues & culture', items: [
+    'Cours de japonais', 'Langue anglaise', 'Langue chinoise',
+    'Langue espagnole', 'Langue allemande', 'Reo Tahiti', 'FLE (Français)',
+  ]},
+  { label: '🎓 Éducation & soutien', items: [
+    'Activités', 'Activités enfants', 'Éducation', 'Lecture / Dons livres',
+    'Méthodologie / Bullet journal', 'Soutien scolaire', 'Tutorat',
+  ]},
+  { label: '🍔 Restauration', items: [
+    'Boulangerie / Pâtisserie', 'Café / Salon de thé', 'Cuisine', 'Food truck',
+    'Glacier', 'Pâtisserie', 'Restauration rapide', 'Restaurant',
+  ]},
+  { label: '🏢 Services & autres', items: [
+    'Assurance', 'Banque', 'Beauté / Coiffure', 'Coaching / Conseil',
+    'Commerce / Boutique', 'Communication / Marketing', 'Énergie / Solaire',
+    'Immobilier', 'Information / Presse', 'Santé / Paramédical', 'Tourisme',
+    'Transport',
+  ]},
+  { label: '❓ Autre', items: ['Autre'] },
+];
+
+function AdminDisciplineField({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+  const [customMode, setCustomMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Détecte si la valeur actuelle est dans la liste, sinon active le mode "autre/personnalisé"
+  const allItems = DISCIPLINE_GROUPS.flatMap((g) => g.items);
+  useEffect(() => {
+    setDraft(value || '');
+    setCustomMode(value && !allItems.includes(value));
+  }, [value]);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(draft); setEditing(false); }
+    catch (e) { toast.error(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="py-1.5 border-b border-slate-100">
+      <div className="text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Secteur / Discipline</div>
+      {editing ? (
+        <div className="space-y-1">
+          {!customMode ? (
+            <select
+              value={draft}
+              onChange={(e) => {
+                if (e.target.value === '__custom__') { setCustomMode(true); setDraft(''); }
+                else setDraft(e.target.value);
+              }}
+              className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+            >
+              <option value="">— Sélectionner —</option>
+              {DISCIPLINE_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.items.map((it) => <option key={it} value={it}>{it}</option>)}
+                </optgroup>
+              ))}
+              <option value="__custom__">✏️ Saisir une discipline personnalisée…</option>
+            </select>
+          ) : (
+            <div className="flex gap-1">
+              <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Discipline personnalisée…" className="h-8 text-xs flex-1" />
+              <Button size="sm" variant="ghost" className="h-8 px-2 text-[11px]" onClick={() => { setCustomMode(false); setDraft(''); }} type="button">↩ Liste</Button>
+            </div>
+          )}
+          <div className="flex gap-1 justify-end">
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => { setEditing(false); setDraft(value || ''); setCustomMode(value && !allItems.includes(value)); }} disabled={saving}>Annuler</Button>
+            <Button size="sm" className="h-7 px-2 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs truncate flex-1">
+            {value ? <span>{value}</span> : <span className="italic text-slate-400">Non renseigné</span>}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="h-7 px-2 text-[11px] shrink-0">
+            <Pencil className="w-3 h-3 mr-1" />
+            {value ? 'Modifier' : 'Choisir'}
           </Button>
         </div>
       )}
