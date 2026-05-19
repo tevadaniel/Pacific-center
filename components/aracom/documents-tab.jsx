@@ -215,6 +215,7 @@ export default function DocumentsTab({ registration, organization, deposit, docu
   const recuDoc = findDoc('recu_caution');
   const remboursementDoc = findDoc('attestation_remboursement');
   const badgeDoc = findDoc('badge_exposant');
+  const guideDoc = findDoc('guide_participant');
   const assuranceDoc = findDoc('assurance');
   const identiteDoc = findDoc('identite');
   const immatDoc = findDoc('immatriculation');
@@ -337,6 +338,20 @@ export default function DocumentsTab({ registration, organization, deposit, docu
             onGenerate={() => generate('badge_exposant')}
             onDownload={() => download(badgeDoc)}
             onSend={() => sendByMail('badge_exposant', badgeDoc)}
+          />
+          {/* 🆕 SESSION 37 — Guide du participant (template charte ARACOM) */}
+          <AutoGenCard
+            icon={FileText}
+            iconBg="bg-orange-600"
+            title="Guide du participant"
+            subtitle="Guide complet : programme, infos pratiques, contacts, accès stand"
+            statusLabel={guideDoc ? 'Généré' : 'À générer'}
+            statusTone={guideDoc ? 'emerald' : 'slate'}
+            generating={generating.guide_participant}
+            hasFile={!!guideDoc}
+            onGenerate={() => generate('guide_participant')}
+            onDownload={() => download(guideDoc)}
+            onSend={() => sendByMail('guide_participant', guideDoc)}
           />
         </div>
       </div>

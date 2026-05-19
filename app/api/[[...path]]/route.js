@@ -2705,7 +2705,8 @@ export async function POST(request, { params }) {
     if (route === 'documents/generate') {
       const { registration_id, doc_type } = body;
       if (!registration_id || !doc_type) return err('registration_id et doc_type requis', 400);
-      const validTypes = ['convention', 'recu_caution', 'attestation_remboursement', 'badge_exposant'];
+      // 🆕 SESSION 37 — Ajout 'guide_participant' (rich) + routage vers document-generator.js (charte ARACOM)
+      const validTypes = ['convention', 'recu_caution', 'attestation_remboursement', 'badge_exposant', 'guide_participant'];
       if (!validTypes.includes(doc_type)) return err(`doc_type doit être l'un de ${validTypes.join(', ')}`, 400);
 
       const reg = await db.collection('registrations').findOne({ id: registration_id });
@@ -2713,8 +2714,20 @@ export async function POST(request, { params }) {
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
       const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
       const deposit = await db.collection('deposit_transactions').findOne({ registration_id, type: 'caution_received' });
+      // 🆕 Récupère les animations pour Convention et Guide (templates riches)
+      const slots = await db.collection('slots').find({ registration_id }).sort({ start_time: 1 }).toArray();
+      const animations = slots.map(s => ({
+        title: s.title || s.activity_title || s.activity || 'Animation',
+        day: s.day_label || s.day || s.event_date,
+        start_time: s.start_time || s.startTime,
+        end_time: s.end_time || s.endTime,
+        location: s.location || s.zone || (s.location_type === 'stand' ? 'Stand' : (s.location_type === 'zone' ? 'Zone d\'exposition' : '')),
+        location_type: s.location_type,
+        description: s.description || '',
+      }));
 
-      // Génère le PDF
+      // Génère le PDF — routage selon le type
+      const richGen = await import('@/lib/document-generator');
       const pdfGen = await import('@/lib/pdf-generators');
       let buf;
       // URL portail pour le QR code du badge
@@ -2725,10 +2738,20 @@ export async function POST(request, { params }) {
         }
       } catch {}
       try {
-        if (doc_type === 'convention') buf = await pdfGen.generateConventionPDF({ org, reg, venue });
-        else if (doc_type === 'recu_caution') buf = await pdfGen.generateRecuCautionPDF({ org, reg, venue, deposit });
-        else if (doc_type === 'attestation_remboursement') buf = await pdfGen.generateAttestationRemboursementPDF({ org, reg, venue, deposit });
-        else if (doc_type === 'badge_exposant') buf = await pdfGen.generateBadgePDF({ org, reg, venue, portalUrl });
+        if (doc_type === 'convention') {
+          // 🆕 Template ENRICHI (charte ARACOM : bandeau noir + or, beiges, sections stylisées)
+          buf = await richGen.generateConventionPDF({ registration: reg, organization: org, venue, animations, deposit });
+        } else if (doc_type === 'recu_caution') {
+          // 🆕 Template ENRICHI
+          buf = await richGen.generateReceiptPDF({ registration: reg, organization: org, venue, deposit });
+        } else if (doc_type === 'guide_participant') {
+          // 🆕 Nouveau document
+          buf = await richGen.generateGuidePDF({ registration: reg, organization: org, venue, animations });
+        } else if (doc_type === 'attestation_remboursement') {
+          buf = await pdfGen.generateAttestationRemboursementPDF({ org, reg, venue, deposit });
+        } else if (doc_type === 'badge_exposant') {
+          buf = await pdfGen.generateBadgePDF({ org, reg, venue, portalUrl });
+        }
       } catch (e) {
         console.error('[pdf-generate]', e);
         return err(`Erreur génération PDF: ${e.message}`, 500);
