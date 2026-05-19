@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ChevronDown, ChevronUp, Pencil, Plus, X, Check, Loader2,
+  ChevronDown, ChevronUp, Pencil, Plus, X, Check, CheckCircle2, Loader2,
   User, Phone, FileText, MapPin, History, ListChecks, Wallet,
   FileBox, Sparkles, Activity, StickyNote, AlertTriangle, Trash2,
   Mail, ExternalLink, Building2, Users as UsersIcon, CalendarClock,
@@ -466,22 +466,11 @@ export default function FicheExposantV2({ id, onClose }) {
 
       {/* ═══════════════════ SECTION 1 : IDENTITÉ ═══════════════════ */}
       <CollapsibleSection icon={User} title="Identité" defaultOpen>
-        <EditableField label="Prénom" value={org.first_name} onSave={(v) => saveOrg({ first_name: v })} />
-        <EditableField label="Nom" value={org.last_name} onSave={(v) => saveOrg({ last_name: v })} />
         <EditableField label="Raison sociale" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
         <EditableField label="Poste / Fonction" value={org.position} onSave={(v) => saveOrg({ position: v })} />
         <EditableField label="Secteur / Discipline" value={org.discipline} placeholder="ex: Sport, Artisanat, Santé..." onSave={(v) => saveOrg({ discipline: v })} />
         <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
-        <EditableField
-          label="Représentants sur stand"
-          type="select"
-          options={['1', '2']}
-          value={org.representants_count != null ? String(org.representants_count) : ''}
-          onSave={(v) => saveOrg({ representants_count: v ? Number(v) : null })}
-          format={(v) => `${v} (max 2)`}
-        />
         <EditableField label="Président(e)" value={org.president_name} placeholder="Si association — laisser vide sinon" onSave={(v) => saveOrg({ president_name: v })} />
-        <EditableField label="Nb membres" type="number" value={org.members_count} placeholder="Si association" onSave={(v) => saveOrg({ members_count: v ? Number(v) : null })} />
       </CollapsibleSection>
 
       {/* ═══════════════════ SECTION 2 : CONTACT ═══════════════════ */}
@@ -545,6 +534,15 @@ export default function FicheExposantV2({ id, onClose }) {
           format={(v) => v || '—'}
         />
         <EditableField label="N° stand" value={reg.stand_code} onSave={(v) => saveReg({ stand_code: v })} />
+        {/* 🆕 SESSION 43-d — Sélecteur visuel de stands libres (réplique du portail exposant) */}
+        <AdminStandPicker
+          registrationId={reg.id}
+          venueId={reg.venue_id}
+          venueName={venue?.name}
+          currentStandCode={reg.stand_code}
+          isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme'}
+          onReload={load}
+        />
         <EditableField
           label="Taille stand"
           type="select"
@@ -994,16 +992,18 @@ function AdminMultiSitesPanel({ organizationId, currentRegId, onReload, onSwitch
       {showAdd && (
         <div className="mt-2 rounded-md border-2 border-blue-400 bg-white p-2 space-y-2">
           <div className="text-xs font-semibold text-blue-900">Choisir un site à ajouter :</div>
-          <Select value={addVenueId} onValueChange={setAddVenueId}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sélectionner un site disponible…" /></SelectTrigger>
-            <SelectContent>
-              {availableVenues.length === 0 ? (
-                <SelectItem value="__none__" disabled>Aucun site disponible</SelectItem>
-              ) : availableVenues.map((v) => (
-                <SelectItem key={v.id} value={v.id}>📍 {v.name} ({v.capacity_stands} stands)</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <select
+            value={addVenueId}
+            onChange={(e) => setAddVenueId(e.target.value)}
+            className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+          >
+            <option value="">Sélectionner un site disponible…</option>
+            {availableVenues.length === 0 ? (
+              <option value="" disabled>Aucun site disponible</option>
+            ) : availableVenues.map((v) => (
+              <option key={v.id} value={v.id}>📍 {v.name} ({v.capacity_stands} stands)</option>
+            ))}
+          </select>
           <p className="text-[10px] text-slate-600 leading-snug">
             💡 Une nouvelle inscription sera créée (statut « à confirmer »). Une caution séparée de 20 000 XPF sera demandée pour ce site.
           </p>
@@ -1191,7 +1191,7 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                         <span className="text-[10px] font-mono font-semibold text-slate-700">{s.start_time}–{s.end_time}</span>
                       </div>
                       <div className="font-medium text-slate-800 mt-0.5 truncate">{s.title || '—'}</div>
-                      {s.description && <div className="text-[10px] text-slate-500 truncate">{s.description}</div>}
+                      {s.description && <div className="text-[10px] text-slate-600 mt-0.5 whitespace-pre-wrap break-words">{s.description}</div>}
                     </div>
                     <Button
                       size="sm"
@@ -1227,40 +1227,43 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Jour</label>
-              <Select value={form.day} onValueChange={(v) => setForm((f) => ({ ...f, day: v, slot_index: 0 }))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="vendredi">Vendredi 14 août</SelectItem>
-                  <SelectItem value="samedi">Samedi 15 août</SelectItem>
-                </SelectContent>
-              </Select>
+              <select
+                value={form.day}
+                onChange={(e) => setForm((f) => ({ ...f, day: e.target.value, slot_index: 0 }))}
+                className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+              >
+                <option value="vendredi">Vendredi 14 août</option>
+                <option value="samedi">Samedi 15 août</option>
+              </select>
             </div>
             <div>
               <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Type</label>
-              <Select value={form.location_type} onValueChange={(v) => setForm((f) => ({ ...f, location_type: v, slot_index: 0 }))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sur_stand">🟦 Sur stand (1h)</SelectItem>
-                  <SelectItem value="zone_demo">🟧 Zone démo (30 min)</SelectItem>
-                </SelectContent>
-              </Select>
+              <select
+                value={form.location_type}
+                onChange={(e) => setForm((f) => ({ ...f, location_type: e.target.value, slot_index: 0 }))}
+                className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+              >
+                <option value="sur_stand">🟦 Sur stand (1h)</option>
+                <option value="zone_demo">🟧 Zone démo (30 min)</option>
+              </select>
             </div>
           </div>
           <div>
             <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Créneau horaire</label>
-            <Select value={String(form.slot_index)} onValueChange={(v) => setForm((f) => ({ ...f, slot_index: Number(v) }))}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {slotChoicesForCurrent().map((s, i) => {
-                  const taken = form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, s.start, s.end);
-                  return (
-                    <SelectItem key={`${s.start}-${s.end}`} value={String(i)} disabled={taken}>
-                      {s.start}–{s.end} {taken ? '🚫 (déjà pris)' : ''}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+            <select
+              value={String(form.slot_index)}
+              onChange={(e) => setForm((f) => ({ ...f, slot_index: Number(e.target.value) }))}
+              className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+            >
+              {slotChoicesForCurrent().map((s, i) => {
+                const taken = form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, s.start, s.end);
+                return (
+                  <option key={`${s.start}-${s.end}`} value={String(i)} disabled={taken}>
+                    {s.start}–{s.end} {taken ? '🚫 (déjà pris)' : ''}
+                  </option>
+                );
+              })}
+            </select>
           </div>
           <div>
             <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Titre *</label>
@@ -1272,12 +1275,12 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Description</label>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Descriptif</label>
             <Textarea
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="Détails (optionnel)…"
-              rows={2}
+              placeholder="Détails de l'animation (visible par les visiteurs)…"
+              rows={3}
               className="text-xs"
             />
           </div>
@@ -1295,3 +1298,140 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     </div>
   );
 }
+
+// =======================================================
+// 🏠 AdminStandPicker — sélection visuelle de stand depuis l'admin
+//   (réplique le portail exposant : grille stands libres + pré-réservation/libération)
+// =======================================================
+function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode, isLocked, onReload }) {
+  const [stands, setStands] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    if (!venueId) { setStands([]); return; }
+    try {
+      const data = await api(`/api/venues/${venueId}/stands`);
+      setStands(Array.isArray(data) ? data : []);
+    } catch { setStands([]); }
+  };
+  useEffect(() => { load(); }, [venueId]);
+
+  if (!venueId) return null;
+  if (stands === null) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-400 text-center">
+        <Loader2 className="w-3 h-3 inline animate-spin mr-1" /> Chargement des stands…
+      </div>
+    );
+  }
+
+  const reserve = async (stand) => {
+    if (isLocked) return toast.error('Inscription verrouillée — modification impossible');
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registrationId}/pre-reserve-stand`, {
+        method: 'POST',
+        body: JSON.stringify({ stand_id: stand.id }),
+      });
+      toast.success(`✅ Stand ${stand.stand_code} attribué`);
+      await load();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const release = async () => {
+    if (isLocked) return toast.error('Inscription verrouillée');
+    if (!confirm(`Libérer le stand ${currentStandCode} ? L'exposant pourra en choisir un autre.`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/registrations/${registrationId}/release-stand`, { method: 'POST', body: '{}' });
+      toast.success('Stand libéré');
+      await load();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const freeStands = stands.filter((s) => !s.organization);
+  const occupiedStands = stands.filter((s) => s.organization);
+  const myStand = stands.find((s) => s.stand_code === currentStandCode);
+
+  return (
+    <div className="rounded-md border-2 border-emerald-200 bg-emerald-50/30 p-2.5 my-2">
+      <div className="text-xs font-bold text-emerald-900 mb-1.5 flex items-center justify-between flex-wrap gap-1">
+        <span className="flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5" />
+          Attribution de stand · {venueName || '—'}
+        </span>
+        <Badge variant="outline" className="text-[10px] bg-white">
+          {freeStands.length} libre{freeStands.length > 1 ? 's' : ''} / {stands.length}
+        </Badge>
+      </div>
+
+      {/* État actuel */}
+      {myStand ? (
+        <div className="bg-blue-50 border border-blue-300 rounded p-2 mb-2 flex items-center gap-2 flex-wrap">
+          <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
+          <div className="text-xs flex-1">
+            <span className="font-bold text-blue-900">Stand attribué :</span>
+            <span className="font-mono font-bold text-blue-700 ml-1">{currentStandCode}</span>
+            <span className="text-[10px] text-slate-500 ml-2">{myStand.row ? `Rangée ${myStand.row}` : ''} {myStand.col ? `· Col ${myStand.col}` : ''}</span>
+          </div>
+          {!isLocked && (
+            <Button size="sm" variant="outline" className="h-6 px-2 text-[11px] border-red-300 text-red-700 hover:bg-red-50" onClick={release} disabled={busy}>
+              <Trash2 className="w-3 h-3 mr-1" /> Libérer
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 text-xs text-amber-800 flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Aucun stand attribué — cliquez sur un stand libre ci-dessous
+        </div>
+      )}
+
+      {/* Grille stands libres */}
+      {!isLocked && freeStands.length > 0 && (
+        <>
+          <div className="text-[10px] uppercase text-slate-500 font-semibold mb-1">Stands libres ({freeStands.length})</div>
+          <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-1 mb-2">
+            {freeStands.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                disabled={busy}
+                onClick={() => reserve(s)}
+                className="border border-emerald-300 bg-white hover:bg-emerald-100 hover:border-emerald-500 rounded text-center transition disabled:opacity-50 py-1 px-0.5"
+                title={`Attribuer le stand ${s.stand_code}`}
+              >
+                <div className="font-mono font-bold text-[10px] text-emerald-700">{s.stand_code}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Stands occupés (info) */}
+      {occupiedStands.length > 0 && (
+        <details className="text-[10px] text-slate-500">
+          <summary className="cursor-pointer hover:text-slate-700">Voir les {occupiedStands.length} stand{occupiedStands.length > 1 ? 's' : ''} occupé{occupiedStands.length > 1 ? 's' : ''}</summary>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 mt-1">
+            {occupiedStands.map((s) => (
+              <div key={s.id} className={`rounded border bg-slate-100 px-1.5 py-0.5 text-[10px] flex items-center gap-1 ${s.stand_code === currentStandCode ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
+                <span className="font-mono font-bold text-slate-700">{s.stand_code}</span>
+                <span className="text-slate-500 truncate" title={s.organization?.name}>{s.organization?.name || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {isLocked && (
+        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5 mt-1">
+          🔒 Inscription verrouillée — modification du stand impossible
+        </div>
+      )}
+    </div>
+  );
+}
+
