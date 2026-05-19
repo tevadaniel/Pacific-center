@@ -6072,6 +6072,103 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true, animation_slot: out });
     }
 
+    // 🆕 SESSION 45 — ADMIN annule complètement une réservation (soft-cancel)
+    //   POST /api/admin/registrations/:id/cancel
+    //   Body: { reason?: string, notify?: boolean (défaut true) }
+    //   Effet : status=annule, vide venue_id+stand_code+attending_days, supprime animation_slots,
+    //           libère assignment stand, envoie un email à l'exposant (sauf si notify=false).
+    if (route.match(/^admin\/registrations\/[^/]+\/cancel$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const regId = p[2];
+      const { reason, notify } = body || {};
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const oldVenueId = reg.venue_id;
+      const oldStand = reg.stand_code;
+
+      // 1) Libère le stand_assignment
+      try {
+        await db.collection('stand_assignments').updateMany(
+          { registration_id: regId, status: { $nin: ['annule', 'cancelled'] } },
+          { $set: { status: 'annule', cancelled_at: new Date(), cancelled_by: 'admin_cancel_reservation', cancel_reason: reason || null, updated_at: new Date() } }
+        );
+      } catch (e) { console.error('[cancel-free-stand]', e.message); }
+
+      // 2) Supprime toutes les animations
+      let deletedAnims = 0;
+      try {
+        const r = await db.collection('animation_slots').deleteMany({ registration_id: regId });
+        deletedAnims = r.deletedCount || 0;
+      } catch (e) { console.error('[cancel-del-anims]', e.message); }
+
+      // 3) Vide la réservation
+      const cancelPatch = {
+        status: 'annule',
+        venue_id: null,
+        stand_code: null,
+        attending_days: [],
+        stand_size: null,
+        block_locked_at: null,
+        candidature_locked: false,
+        cancelled_at: new Date(),
+        cancelled_by: ctx.userId || 'admin',
+        cancel_reason: reason || null,
+        updated_at: new Date(),
+      };
+      await db.collection('registrations').updateOne({ id: regId }, { $set: cancelPatch });
+      await logActivity(db, ctx.userId, 'registration', regId, 'cancel_reservation', reg, { ...cancelPatch, _deleted_animations: deletedAnims, _freed_stand: oldStand });
+
+      // 4) Notifie l'exposant (sauf si notify=false explicite)
+      let mailSent = false;
+      if (notify !== false) {
+        try {
+          const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+          if (org?.main_email) {
+            const venue = oldVenueId ? await db.collection('venues').findOne({ id: oldVenueId }) : null;
+            const baseUrl = getPublicBaseUrl(request);
+            const { sendMailAuto } = await import('@/lib/mail-config');
+            await sendMailAuto({
+              to: org.main_email,
+              subject: `❌ Annulation de votre réservation — Forum de la Rentrée 2026`,
+              html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;color:#1f2937">
+<h2 style="color:#b91c1c">❌ Votre réservation a été annulée</h2>
+<p>Bonjour <b>${org.contact_name || org.name}</b>,</p>
+<p>L'équipe ARACOM a procédé à l'annulation de votre réservation pour le <b>Forum de la Rentrée 2026</b>.</p>
+<div style="background:#fef2f2;border-left:4px solid #b91c1c;padding:12px 18px;border-radius:6px;margin:16px 0">
+  <div style="font-size:13px;color:#7f1d1d"><b>Détails annulés :</b></div>
+  <ul style="margin:6px 0 0 0;padding-left:18px;color:#7f1d1d">
+    ${venue ? `<li>Site : <b>${venue.name}</b></li>` : ''}
+    ${oldStand ? `<li>Stand : <b>${oldStand}</b> (libéré)</li>` : ''}
+    ${deletedAnims > 0 ? `<li>Animations : <b>${deletedAnims}</b> créneau(x) supprimé(s)</li>` : ''}
+  </ul>
+  ${reason ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid #fecaca;font-size:12px"><b>Motif :</b> ${reason}</div>` : ''}
+</div>
+<p>Si vous souhaitez vous réinscrire, vous pouvez accéder à votre portail :</p>
+<p><a href="${baseUrl}/exposant" style="display:inline-block;padding:10px 20px;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">👉 Accéder à mon portail</a></p>
+<p style="font-size:12px;color:#64748b;margin-top:20px">Pour toute question, contactez-nous à <a href="mailto:agence@aracom-conseil.fr">agence@aracom-conseil.fr</a>.</p>
+<p style="font-size:11px;color:#94a3b8;margin-top:8px">— ARACOM · Forum de la Rentrée 2026</p>
+</div>`,
+              replyTo: 'agence@aracom-conseil.fr',
+            });
+            mailSent = true;
+          }
+        } catch (e) { console.error('[cancel-notify]', e.message); }
+      }
+
+      const updatedReg = await db.collection('registrations').findOne({ id: regId });
+      if (updatedReg) delete updatedReg._id;
+      return json({
+        ok: true,
+        registration: updatedReg,
+        cascade: {
+          freed_stand: oldStand || null,
+          old_venue_id: oldVenueId || null,
+          deleted_animations: deletedAnims,
+        },
+        mail_sent: mailSent,
+      });
+    }
+
     // ============================================================
     // 🆕 CONFIG ARACOM — RIB + Templates documents officiels (admin only)
     // ============================================================
@@ -8916,8 +9013,46 @@ export async function PUT(request, { params }) {
       const upd = {};
       for (const k of allowed) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();
+
+      // 🆕 SESSION 45 — CASCADE AUTOMATIQUE si le SITE change (logique métier)
+      //   Si l'admin déplace l'exposant sur un autre site OU vide le site,
+      //   on doit purger les éléments dépendants (stand, jours, animations) qui n'ont plus de sens.
+      const venueChanged = 'venue_id' in upd && upd.venue_id !== old.venue_id;
+      let cascadeReport = null;
+      if (venueChanged) {
+        cascadeReport = { freed_stand: null, deleted_animations: 0, cleared_days: false };
+        // 1) Libère l'ancien stand (si assigné)
+        if (old.stand_code && old.venue_id) {
+          try {
+            await db.collection('stand_assignments').updateMany(
+              { registration_id: id, status: { $nin: ['annule', 'cancelled'] } },
+              { $set: { status: 'annule', cancelled_at: new Date(), cancelled_by: 'admin_cascade', updated_at: new Date() } }
+            );
+            cascadeReport.freed_stand = `${old.stand_code} (${old.venue_id})`;
+          } catch (e) { console.error('[cascade-free-stand]', e.message); }
+        }
+        // 2) Vide le stand_code (incohérent avec le nouveau site)
+        upd.stand_code = null;
+        // 3) Supprime toutes les animations (créneaux liés à l'ancien site)
+        try {
+          const animRes = await db.collection('animation_slots').deleteMany({ registration_id: id });
+          cascadeReport.deleted_animations = animRes.deletedCount || 0;
+        } catch (e) { console.error('[cascade-del-anims]', e.message); }
+        // 4) Vide les jours de présence (à reconfirmer après changement de site)
+        if (Array.isArray(old.attending_days) && old.attending_days.length > 0) {
+          upd.attending_days = [];
+          cascadeReport.cleared_days = true;
+        }
+        // 5) Reset du verrou si l'inscription était confirmée
+        if (old.block_locked_at || old.candidature_locked) {
+          upd.block_locked_at = null;
+          upd.candidature_locked = false;
+          upd.status = upd.status || 'a_confirmer';
+        }
+      }
+
       await db.collection('registrations').updateOne({ id }, { $set: upd });
-      await logActivity(db, ctx.userId, 'registration', id, 'update', old, upd);
+      await logActivity(db, ctx.userId, 'registration', id, venueChanged ? 'update_cascade' : 'update', old, { ...upd, _cascade: cascadeReport });
 
       // 🆕 SESSION 43-j — PHASE 3/4 : Si l'admin modifie un BLOC VERROUILLÉ (réservation après confirmation),
       //   on notifie automatiquement l'exposant par email avec le détail des changements.

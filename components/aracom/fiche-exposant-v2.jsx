@@ -627,6 +627,9 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField label="Réponse reçue" type="select" options={[{ value: 'oui', label: 'Oui' }, { value: 'non', label: 'Non' }, { value: 'en_attente', label: 'En attente' }]} value={reg.reply_status} onSave={(v) => saveReg({ reply_status: v })} />
       </CollapsibleSection>
 
+      {/* 🆕 SESSION 45 — ZONE DANGEREUSE : annulation totale avec cascade */}
+      <CancelReservationPanel reg={reg} org={org} venue={venue} slots={slots} onCancelled={load} />
+
       {/* ═══════════════════ SECTION 7 : CAUTION ═══════════════════ */}
       <CollapsibleSection icon={Wallet} title="Caution">
         <EditableField label="Montant (XPF)" type="number" value={dep?.amount_xpf || reg.caution_amount_xpf} onSave={(v) => saveReg({ caution_amount_xpf: Number(v) })} />
@@ -1002,6 +1005,136 @@ function AdminMultiSitesPanel({ organizationId, currentRegId, onReload, onSwitch
 // 🎭 AdminAnimationsPanel — CRUD animations depuis l'admin
 //   (réplique le portail exposant : liste + ajout + suppression)
 // =======================================================
+// 🆕 SESSION 45 — Panneau "Zone Dangereuse" pour annuler une réservation (avec cascade et email)
+function CancelReservationPanel({ reg, org, venue, slots, onCancelled }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [notify, setNotify] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [confirmTxt, setConfirmTxt] = useState('');
+  const isAlreadyCancelled = reg.status === 'annule' || reg.status === 'cancelled';
+  const hasBookings = !!reg.venue_id || !!reg.stand_code || (Array.isArray(reg.attending_days) && reg.attending_days.length > 0) || (slots && slots.length > 0);
+  const expectedConfirm = (org?.name || 'CONFIRMER').toUpperCase().slice(0, 20);
+
+  const doCancel = async () => {
+    if (confirmTxt.trim().toUpperCase() !== expectedConfirm) {
+      toast.error(`Tapez exactement « ${expectedConfirm} » pour confirmer`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/admin/registrations/${reg.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin' },
+        body: JSON.stringify({ reason: reason.trim() || null, notify }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || 'Échec annulation');
+      toast.success(
+        `🗑️ Réservation annulée — ${data.cascade?.freed_stand ? `stand ${data.cascade.freed_stand} libéré, ` : ''}${data.cascade?.deleted_animations || 0} animation(s) supprimée(s)${data.mail_sent ? ' · ✉ mail envoyé' : ''}`
+      );
+      setOpen(false);
+      setConfirmTxt('');
+      setReason('');
+      onCancelled && onCancelled();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (isAlreadyCancelled) {
+    return (
+      <div className="rounded-xl border-2 border-slate-300 bg-slate-50 p-3">
+        <div className="text-xs font-semibold text-slate-600">⛔ Réservation déjà annulée</div>
+        {reg.cancel_reason && <div className="text-[11px] text-slate-500 mt-1">Motif : {reg.cancel_reason}</div>}
+        {reg.cancelled_at && <div className="text-[10px] text-slate-400 mt-0.5">Annulée le {new Date(reg.cancelled_at).toLocaleString('fr-FR')}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-red-300 bg-red-50/40 p-3 space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-red-700"
+      >
+        <span className="flex items-center gap-2">⚠️ Zone dangereuse — Annuler la réservation</span>
+        <span>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="space-y-2 bg-white rounded-md p-3 border border-red-200">
+          <div className="text-[11px] text-slate-700 leading-snug">
+            Cette action va <b>annuler complètement</b> la réservation de <b>{org?.name || '—'}</b>.
+            La cascade suivante sera appliquée automatiquement :
+          </div>
+          <ul className="text-[11px] text-red-700 list-disc list-inside space-y-0.5 bg-red-50 p-2 rounded">
+            {reg.stand_code && <li>Stand <b>{reg.stand_code}</b> ({venue?.name || ''}) → <b>libéré</b></li>}
+            {Array.isArray(reg.attending_days) && reg.attending_days.length > 0 && <li>Jours de présence ({reg.attending_days.join(' + ')}) → <b>effacés</b></li>}
+            {slots && slots.length > 0 && <li><b>{slots.length}</b> créneau(x) d&apos;animation → <b>supprimé(s)</b></li>}
+            <li>Site sélectionné → <b>retiré</b></li>
+            <li>Statut → <b>annulé</b></li>
+          </ul>
+
+          <div>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Motif (optionnel, inclus dans l&apos;email)</label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="ex : Désistement de l'exposant, doublon, paiement non reçu…"
+              rows={2}
+              className="text-xs"
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={notify}
+              onChange={(e) => setNotify(e.target.checked)}
+              className="rounded"
+            />
+            <span>✉ Envoyer l&apos;email d&apos;annulation à <b>{org?.main_email || '(pas d\'email)'}</b></span>
+          </label>
+
+          <div>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">
+              Pour confirmer, tapez : <code className="bg-slate-100 px-1.5 py-0.5 rounded text-red-700">{expectedConfirm}</code>
+            </label>
+            <Input
+              value={confirmTxt}
+              onChange={(e) => setConfirmTxt(e.target.value)}
+              placeholder={expectedConfirm}
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button size="sm" variant="ghost" className="h-8 text-xs" disabled={busy} onClick={() => { setOpen(false); setConfirmTxt(''); setReason(''); }}>
+              Annuler
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white"
+              disabled={busy || !hasBookings || confirmTxt.trim().toUpperCase() !== expectedConfirm}
+              onClick={doCancel}
+            >
+              {busy ? '…' : '🗑️ Confirmer l\'annulation'}
+            </Button>
+          </div>
+          {!hasBookings && (
+            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5">
+              ℹ️ Aucun élément à annuler (pas de site, pas de stand, pas d&apos;animation).
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDays, slots, isLocked, onReload }) {
   const [allSlotsVenue, setAllSlotsVenue] = useState([]);
   const [showForm, setShowForm] = useState(false);
