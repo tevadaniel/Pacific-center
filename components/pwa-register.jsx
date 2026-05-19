@@ -9,11 +9,52 @@ import { Download, X } from 'lucide-react';
 //     2. Le SW est désinscrit (forceUnregister)
 //     3. La page est rechargée pour servir le HTML+JS le plus récent
 //     → L'utilisateur voit AUTOMATIQUEMENT la dernière version max 60s après déploiement.
+//
+// 🛡️ SESSION 43-fix — Anti-boucle de rechargement :
+//     - Si on a déjà rechargé 2 fois en moins de 5min, on arrête de poll (garde-fou).
+//     - Grâce de 30s post-reload : on n'enclenche pas un nouveau reload trop vite.
 const VERSION_KEY = 'fr26_build_version';
+const RELOAD_HISTORY_KEY = 'fr26_reload_history';
 const VERSION_POLL_INTERVAL_MS = 60 * 1000;
+const RELOAD_LOOP_WINDOW_MS = 5 * 60 * 1000; // 5 min
+const RELOAD_LOOP_MAX = 2; // max 2 reloads dans la fenêtre avant blocage
+const RELOAD_GRACE_MS = 30 * 1000; // 30 s après un reload, on ne re-déclenche pas
+
+function getReloadHistory() {
+  try {
+    const raw = sessionStorage.getItem(RELOAD_HISTORY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const now = Date.now();
+    return arr.filter((t) => typeof t === 'number' && now - t < RELOAD_LOOP_WINDOW_MS);
+  } catch { return []; }
+}
+function pushReloadHistory() {
+  try {
+    const arr = getReloadHistory();
+    arr.push(Date.now());
+    sessionStorage.setItem(RELOAD_HISTORY_KEY, JSON.stringify(arr));
+  } catch {/* ignore */}
+}
 
 async function checkBuildVersion() {
   try {
+    // Garde-fou anti-boucle : si on a déjà rechargé trop de fois récemment, on stoppe.
+    const history = getReloadHistory();
+    if (history.length >= RELOAD_LOOP_MAX) {
+      // On log une seule fois et on n'agit plus dans cette session.
+      if (!window.__pwa_loop_blocked_logged) {
+        console.warn('[pwa] ⚠️ Boucle de rechargement détectée (' + history.length + ' reloads en <5min). Auto-reload désactivé pour cette session.');
+        window.__pwa_loop_blocked_logged = true;
+      }
+      return;
+    }
+    // Grâce post-reload : ne pas déclencher dans les 30s qui suivent un reload
+    if (history.length > 0) {
+      const lastReload = Math.max(...history);
+      if (Date.now() - lastReload < RELOAD_GRACE_MS) return;
+    }
     const r = await fetch('/api/version', { cache: 'no-store' });
     if (!r.ok) return;
     const data = await r.json();
@@ -29,6 +70,7 @@ async function checkBuildVersion() {
       // 🚨 Nouvelle version détectée — on clear tout et on reload
       console.info('[pwa] Nouvelle version détectée :', knownVersion, '→', currentVersion);
       localStorage.setItem(VERSION_KEY, currentVersion);
+      pushReloadHistory(); // tracking anti-boucle
       // 1) Clear caches du SW
       try {
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {

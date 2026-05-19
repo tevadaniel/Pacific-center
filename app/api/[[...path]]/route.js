@@ -19,11 +19,33 @@ import { handleCautionReceiptsPost } from '@/lib/api/handlers/caution-receipts';
 import { handleExposantDocumentsGet } from '@/lib/api/handlers/exposant-documents';
 import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handlers/dashboard';
 
-// 🛡️ SESSION 28s — Build version unique pour cache-busting PWA
-//     Calculée une fois au boot du module Next.js → différente à chaque redéploiement.
-//     Exposée via GET /api/version (utilisée par le client PWA pour détecter une nouvelle version
-//     et clear le cache + recharger automatiquement).
-const BUILD_VERSION = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// 🛡️ SESSION 28s/43-fix — Build version STABLE par déploiement (plus de Date.now() qui change à chaque HMR/instance)
+//     Source : .next/BUILD_ID (Next.js l'écrit une fois par build, stable) + fallback hash de package.json.
+//     → Identique sur toutes les instances scalées + identique entre reloads HMR du même build.
+//     → Ne change QUE lors d'un vrai redéploiement → plus de boucle de rechargement.
+function computeBuildVersion() {
+  try {
+    // 1) Priorité : .next/BUILD_ID (stable par build de production)
+    const fs = require('fs');
+    const path = require('path');
+    const buildIdPath = path.join(process.cwd(), '.next', 'BUILD_ID');
+    if (fs.existsSync(buildIdPath)) {
+      const id = fs.readFileSync(buildIdPath, 'utf8').trim();
+      if (id) return `build-${id}`;
+    }
+    // 2) Fallback : hash du package.json (stable tant que les deps ne changent pas)
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const crypto = require('crypto');
+      const content = fs.readFileSync(pkgPath, 'utf8');
+      const hash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
+      return `pkg-${hash}`;
+    }
+  } catch {/* ignore */}
+  // 3) Dernier recours : version statique (pas de cache-bust, mais pas de boucle non plus)
+  return 'static-v1';
+}
+const BUILD_VERSION = computeBuildVersion();
 const BUILD_BOOT_ISO = new Date().toISOString();
 console.log(`[boot] 🆔 BUILD_VERSION=${BUILD_VERSION} at ${BUILD_BOOT_ISO}`);
 
