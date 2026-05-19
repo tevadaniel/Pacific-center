@@ -756,6 +756,18 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
       <CardContent className="p-6 space-y-6">
         <SectionHeader icon="🗺️" title={`Mon stand sur le plan de ${selectedVenue.name}`} desc="Cliquez sur un stand libre pour le sélectionner. Les stands grisés sont déjà pris." />
 
+        {/* 🆕 SESSION 44 — Alerte pré-validation ARACOM */}
+        <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg flex items-start gap-3">
+          <span className="text-2xl shrink-0">⚠️</span>
+          <div className="flex-1">
+            <div className="font-bold text-amber-900 text-base mb-1">Stands déjà attribués = verrouillés</div>
+            <div className="text-sm text-amber-800 leading-snug">
+              Tout stand <b>déjà pris par un autre exposant</b> est <b>pré-validé par ARACOM</b> et ne pourra pas être modifié.
+              Seuls les stands marqués <b>« Libre »</b> sur le plan sont disponibles. En cas de besoin spécifique, contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.
+            </div>
+          </div>
+        </div>
+
         {loadingStands ? (
           <div className="py-8 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Chargement du plan…</div>
         ) : stands.length === 0 ? (
@@ -913,6 +925,18 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
           title="Animations — obligatoire pour tous les exposants"
           desc={`Chaque exposant doit proposer une animation par jour de présence (${attendingDays.length} jour${attendingDays.length > 1 ? 's' : ''} coché${attendingDays.length > 1 ? 's' : ''}). Les créneaux sont calculés automatiquement en fonction du nombre d'exposants attendus.`}
         />
+
+        {/* 🆕 SESSION 44 — Alerte pré-validation ARACOM sur les créneaux pris */}
+        <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg flex items-start gap-3">
+          <span className="text-2xl shrink-0">⚠️</span>
+          <div className="flex-1">
+            <div className="font-bold text-amber-900 text-base mb-1">Créneaux déjà attribués = verrouillés</div>
+            <div className="text-sm text-amber-800 leading-snug">
+              Tout créneau d&apos;animation <b>déjà pris par un autre exposant</b> est <b>pré-validé par ARACOM</b> et ne pourra pas être modifié.
+              Seuls les créneaux marqués <b>« Libre »</b> sont sélectionnables. En cas de besoin spécifique, contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.
+            </div>
+          </div>
+        </div>
 
         {anims.map((a, idx) => (
           <AnimationBlock

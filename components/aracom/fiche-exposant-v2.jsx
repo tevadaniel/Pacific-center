@@ -1010,12 +1010,16 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
   const [editingId, setEditingId] = useState(null); // id de l'animation en cours d'édition
   const [editDraft, setEditDraft] = useState({});
   const [allVenuesList, setAllVenuesList] = useState([]);
+  // 🆕 SESSION 44 — Récupérer le nom de l'organisation pour affichage
+  const [orgInfo, setOrgInfo] = useState({ name: null, discipline: null, description: null, contact_name: null });
   const [form, setForm] = useState({
     day: 'vendredi',
     location_type: 'sur_stand',
     slot_index: 0,
     title: '',
     description: '',
+    material_needs: '',
+    target_audience: '',
   });
 
   const EVENT_DATES_LOCAL = [
@@ -1060,6 +1064,28 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     } catch { /* ignore */ }
   };
   useEffect(() => { loadAllVenueSlots(); loadAllVenues(); }, [venueId, slots.length]);
+  // 🆕 SESSION 44 — Charger les infos de l'association (nom, discipline, description)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const reg = await api(`/api/registrations/${registrationId}`);
+        const r = reg?.registration || reg;
+        if (!r?.organization_id) return;
+        const orgs = await api('/api/organizations');
+        const o = (Array.isArray(orgs) ? orgs : []).find(x => x.id === r.organization_id);
+        if (!cancelled && o) {
+          setOrgInfo({
+            name: o.name || null,
+            discipline: o.discipline || null,
+            description: o.stand_description || o.description || null,
+            contact_name: o.contact_name || null,
+          });
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [registrationId]);
 
   const normalizeLoc = (v) => (v === 'zone_demo' || v === 'zone_animation' || v === 'scene') ? 'zone_demo' : 'sur_stand';
 
@@ -1097,13 +1123,15 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           duration_minutes: form.location_type === 'zone_demo' ? 30 : 60,
           title: form.title,
           description: form.description || null,
+          material_needs: form.material_needs || null,
+          target_audience: form.target_audience || null,
           slot_type: form.location_type,
           location_type: form.location_type,
         }),
       });
       toast.success(`✨ Animation ${slot.start}–${slot.end} créée`);
       setShowForm(false);
-      setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '' });
+      setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '' });
       await loadAllVenueSlots();
       onReload?.();
     } catch (e) { toast.error(e.message); }
@@ -1133,6 +1161,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
       venue_id: s.venue_id || venueId,
       title: s.title || '',
       description: s.description || '',
+      material_needs: s.material_needs || '',
+      target_audience: s.target_audience || '',
     });
     setEditingId(s.id);
   };
@@ -1170,6 +1200,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           duration_minutes: editDraft.location_type === 'zone_demo' ? 30 : 60,
           title: editDraft.title,
           description: editDraft.description || null,
+          material_needs: editDraft.material_needs || null,
+          target_audience: editDraft.target_audience || null,
           slot_type: editDraft.location_type,
           location_type: editDraft.location_type,
           venue_id: editDraft.venue_id,
@@ -1199,6 +1231,24 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
 
   return (
     <div className="space-y-2">
+      {/* 🆕 SESSION 44 — En-tête association (nom + discipline + description) */}
+      {(orgInfo.name || orgInfo.discipline || orgInfo.description) && (
+        <div className="rounded-md bg-violet-50 border-2 border-violet-200 p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-lg shrink-0">🎭</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-violet-900">{orgInfo.name || '—'}</div>
+              {orgInfo.discipline && <div className="text-[11px] text-violet-700 mt-0.5">📂 {orgInfo.discipline}{orgInfo.contact_name ? ` · 👤 ${orgInfo.contact_name}` : ''}</div>}
+              {orgInfo.description && (
+                <div className="text-[11px] text-slate-700 mt-1.5 whitespace-pre-wrap break-words border-l-2 border-violet-300 pl-2 italic">
+                  {orgInfo.description}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-2 leading-relaxed">
         📍 Site : <b>{venueName || '—'}</b>
         {attendingDays.length > 0 && <> · Jours prévus : <b>{attendingDays.includes('vendredi') ? 'Ven' : ''}{attendingDays.length === 2 ? ' + ' : ''}{attendingDays.includes('samedi') ? 'Sam' : ''}</b></>}
@@ -1273,6 +1323,32 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                       <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">Descriptif</label>
                       <Textarea value={editDraft.description} onChange={(e) => setEditDraft((f) => ({ ...f, description: e.target.value }))} rows={2} className="text-[11px]" />
                     </div>
+                    {/* 🆕 SESSION 44 — Public cible + Besoins matériels (notes exposant) */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">🎯 Public cible</label>
+                        <select
+                          value={editDraft.target_audience || ''}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, target_audience: e.target.value }))}
+                          className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
+                        >
+                          <option value="">— Non précisé —</option>
+                          <option value="enfants">Enfants</option>
+                          <option value="adultes">Adultes</option>
+                          <option value="tous_publics">Tous publics</option>
+                          <option value="familles">Familles</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase text-slate-500 font-semibold mb-0.5">📦 Besoins matériels (notes)</label>
+                        <Input
+                          value={editDraft.material_needs || ''}
+                          onChange={(e) => setEditDraft((f) => ({ ...f, material_needs: e.target.value }))}
+                          placeholder="ex: 2 tapis, sono, projecteur…"
+                          className="h-7 text-[11px]"
+                        />
+                      </div>
+                    </div>
                     <div className="flex gap-1 justify-end">
                       <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={busy} onClick={() => { setEditingId(null); setEditDraft({}); }}>Annuler</Button>
                       <Button size="sm" className="h-6 px-2 text-[11px] bg-violet-600 hover:bg-violet-700 text-white" disabled={busy || !editDraft.title?.trim()} onClick={saveEdit}>
@@ -1294,6 +1370,21 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                       </div>
                       <div className="font-medium text-slate-800 mt-0.5 truncate">{s.title || '—'}</div>
                       {s.description && <div className="text-[10px] text-slate-600 mt-0.5 whitespace-pre-wrap break-words">{s.description}</div>}
+                      {/* 🆕 SESSION 44 — Public cible + besoins matériels visibles côté admin */}
+                      {(s.target_audience || s.material_needs) && (
+                        <div className="mt-1 flex flex-wrap gap-2 text-[10px]">
+                          {s.target_audience && (
+                            <span className="bg-blue-50 border border-blue-200 text-blue-800 px-1.5 py-0.5 rounded">
+                              🎯 Public : <b>{s.target_audience}</b>
+                            </span>
+                          )}
+                          {s.material_needs && (
+                            <span className="bg-amber-50 border border-amber-200 text-amber-800 px-1.5 py-0.5 rounded">
+                              📦 Besoins : <span className="font-medium">{s.material_needs}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-1 shrink-0">
                       <Button
@@ -1398,8 +1489,34 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
               className="text-xs"
             />
           </div>
+          {/* 🆕 SESSION 44 — Public cible + Besoins matériels */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">🎯 Public cible</label>
+              <select
+                value={form.target_audience || ''}
+                onChange={(e) => setForm((f) => ({ ...f, target_audience: e.target.value }))}
+                className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+              >
+                <option value="">— Non précisé —</option>
+                <option value="enfants">Enfants</option>
+                <option value="adultes">Adultes</option>
+                <option value="tous_publics">Tous publics</option>
+                <option value="familles">Familles</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">📦 Besoins matériels</label>
+              <Input
+                value={form.material_needs || ''}
+                onChange={(e) => setForm((f) => ({ ...f, material_needs: e.target.value }))}
+                placeholder="ex: 2 tapis, sono, projecteur…"
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
           <div className="flex gap-1 justify-end pt-1">
-            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => { setShowForm(false); setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '' }); }}>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => { setShowForm(false); setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '' }); }}>
               Annuler
             </Button>
             <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white gap-1" disabled={busy || !form.title.trim()} onClick={addAnim}>
