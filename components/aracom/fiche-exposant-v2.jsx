@@ -110,17 +110,18 @@ function EditableField({ label, value, type = 'text', options, placeholder, onSa
                 placeholder={placeholder}
               />
             ) : type === 'select' ? (
-              <Select value={draft || '_none'} onValueChange={(v) => setDraft(v === '_none' ? '' : v)}>
-                <SelectTrigger className="h-8 text-xs flex-1 min-w-0"><SelectValue placeholder={placeholder} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">—</SelectItem>
-                  {(options || []).map((o) => (
-                    <SelectItem key={typeof o === 'string' ? o : o.value} value={typeof o === 'string' ? o : o.value}>
-                      {typeof o === 'string' ? o : (o.label || o.value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                value={draft || ''}
+                onChange={(e) => setDraft(e.target.value)}
+                className="h-8 text-xs flex-1 min-w-0 rounded-md border border-input bg-white px-2"
+              >
+                <option value="">{placeholder || '—'}</option>
+                {(options || []).map((o) => {
+                  const val = typeof o === 'string' ? o : o.value;
+                  const lbl = typeof o === 'string' ? o : (o.label || o.value);
+                  return <option key={val} value={val}>{lbl}</option>;
+                })}
+              </select>
             ) : (
               <Input
                 type={type}
@@ -158,6 +159,7 @@ function EditableField({ label, value, type = 'text', options, placeholder, onSa
 export default function FicheExposantV2({ id, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [allVenues, setAllVenues] = useState([]);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [showDelete2Step, setShowDelete2Step] = useState(false);
@@ -169,8 +171,12 @@ export default function FicheExposantV2({ id, onClose }) {
     if (!id) return;
     setLoading(true);
     try {
-      const d = await api(`/api/registrations/${id}`);
+      const [d, v] = await Promise.all([
+        api(`/api/registrations/${id}`),
+        api('/api/venues').catch(() => []),
+      ]);
       setData(d);
+      setAllVenues(Array.isArray(v) ? v : []);
     } catch (e) {
       toast.error(e.message || 'Erreur de chargement');
     } finally {
@@ -528,10 +534,16 @@ export default function FicheExposantV2({ id, onClose }) {
         <EditableField
           label="Site principal"
           type="select"
-          options={['Faaa', 'Punaauia', 'Arue', 'Taravao', 'Moorea', 'Mahina']}
-          value={venue?.name}
-          onSave={(v) => saveReg({ venue_id: data.venues_lookup_by_name?.[v] || reg.venue_id })}
-          format={(v) => v || '—'}
+          options={allVenues
+            .filter((v) => v.is_available_2026 !== false)
+            .map((v) => ({ value: v.id, label: `📍 ${v.name}${v.is_available_2026 === false ? ' (indisponible)' : ''}` }))
+          }
+          value={reg.venue_id || ''}
+          onSave={(newVenueId) => saveReg({ venue_id: newVenueId })}
+          format={(vid) => {
+            const v = allVenues.find((x) => x.id === vid);
+            return v ? `📍 ${v.name}` : (venue?.name || '—');
+          }}
         />
         <EditableField label="N° stand" value={reg.stand_code} onSave={(v) => saveReg({ stand_code: v })} />
         {/* 🆕 SESSION 43-d — Sélecteur visuel de stands libres (réplique du portail exposant) */}
@@ -1306,6 +1318,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
 function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode, isLocked, onReload }) {
   const [stands, setStands] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [swapTarget, setSwapTarget] = useState(null); // stand object pour confirm swap
+  const [forceTarget, setForceTarget] = useState(null); // stand object pour force-attribute en mode locked
 
   const load = async () => {
     if (!venueId) { setStands([]); return; }
@@ -1325,15 +1339,43 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
     );
   }
 
+  // Standard reservation (admin, non-locked)
   const reserve = async (stand) => {
-    if (isLocked) return toast.error('Inscription verrouillée — modification impossible');
     setBusy(true);
     try {
-      await api(`/api/registrations/${registrationId}/pre-reserve-stand`, {
+      if (isLocked) {
+        // Admin force-attribute même si verrouillé
+        await api(`/api/admin/registrations/${registrationId}/force-stand`, {
+          method: 'POST',
+          body: JSON.stringify({ stand_id: stand.id }),
+        });
+        toast.success(`⚡ Stand ${stand.stand_code} forcé par admin (inscription verrouillée)`);
+      } else {
+        await api(`/api/registrations/${registrationId}/pre-reserve-stand`, {
+          method: 'POST',
+          body: JSON.stringify({ stand_id: stand.id }),
+        });
+        toast.success(`✅ Stand ${stand.stand_code} attribué`);
+      }
+      await load();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  // Swap stand with another exposant (works even when locked)
+  const swap = async (otherStand) => {
+    if (!otherStand?.organization) return;
+    const otherRegId = otherStand.assignment?.registration_id;
+    if (!otherRegId) return toast.error('Impossible d\'identifier l\'inscription liée à ce stand');
+    setBusy(true);
+    try {
+      await api(`/api/admin/registrations/${registrationId}/swap-stand`, {
         method: 'POST',
-        body: JSON.stringify({ stand_id: stand.id }),
+        body: JSON.stringify({ other_registration_id: otherRegId }),
       });
-      toast.success(`✅ Stand ${stand.stand_code} attribué`);
+      toast.success(`🔄 Stands échangés : ${currentStandCode || '—'} ↔ ${otherStand.stand_code}`);
+      setSwapTarget(null);
       await load();
       onReload?.();
     } catch (e) { toast.error(e.message); }
@@ -1341,7 +1383,7 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
   };
 
   const release = async () => {
-    if (isLocked) return toast.error('Inscription verrouillée');
+    if (isLocked) return toast.error('Inscription verrouillée — utilisez "échanger" plutôt que libérer');
     if (!confirm(`Libérer le stand ${currentStandCode} ? L'exposant pourra en choisir un autre.`)) return;
     setBusy(true);
     try {
@@ -1356,6 +1398,7 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
   const freeStands = stands.filter((s) => !s.organization);
   const occupiedStands = stands.filter((s) => s.organization);
   const myStand = stands.find((s) => s.stand_code === currentStandCode);
+  const otherOccupiedStands = occupiedStands.filter((s) => s.stand_code !== currentStandCode);
 
   return (
     <div className="rounded-md border-2 border-emerald-200 bg-emerald-50/30 p-2.5 my-2">
@@ -1377,6 +1420,7 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
             <span className="font-bold text-blue-900">Stand attribué :</span>
             <span className="font-mono font-bold text-blue-700 ml-1">{currentStandCode}</span>
             <span className="text-[10px] text-slate-500 ml-2">{myStand.row ? `Rangée ${myStand.row}` : ''} {myStand.col ? `· Col ${myStand.col}` : ''}</span>
+            {isLocked && <Badge className="ml-2 text-[9px] bg-violet-100 text-violet-800 border-violet-300" variant="outline">🔒 verrouillé</Badge>}
           </div>
           {!isLocked && (
             <Button size="sm" variant="outline" className="h-6 px-2 text-[11px] border-red-300 text-red-700 hover:bg-red-50" onClick={release} disabled={busy}>
@@ -1390,19 +1434,25 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
         </div>
       )}
 
-      {/* Grille stands libres */}
-      {!isLocked && freeStands.length > 0 && (
+      {isLocked && (
+        <div className="text-[11px] text-violet-800 bg-violet-50 border border-violet-200 rounded p-1.5 mb-2 leading-relaxed">
+          🔒 <b>Inscription verrouillée</b> — vous pouvez quand même <b>modifier le stand</b> (admin force) ou <b>échanger</b> avec un autre exposant en cliquant ci-dessous.
+        </div>
+      )}
+
+      {/* Grille stands libres — cliquables admin (force si verrouillé) */}
+      {freeStands.length > 0 && (
         <>
-          <div className="text-[10px] uppercase text-slate-500 font-semibold mb-1">Stands libres ({freeStands.length})</div>
+          <div className="text-[10px] uppercase text-slate-500 font-semibold mb-1">Stands libres ({freeStands.length}) — cliquer pour attribuer</div>
           <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-1 mb-2">
             {freeStands.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 disabled={busy}
-                onClick={() => reserve(s)}
+                onClick={() => isLocked ? setForceTarget(s) : reserve(s)}
                 className="border border-emerald-300 bg-white hover:bg-emerald-100 hover:border-emerald-500 rounded text-center transition disabled:opacity-50 py-1 px-0.5"
-                title={`Attribuer le stand ${s.stand_code}`}
+                title={isLocked ? `Forcer le stand ${s.stand_code} (admin)` : `Attribuer le stand ${s.stand_code}`}
               >
                 <div className="font-mono font-bold text-[10px] text-emerald-700">{s.stand_code}</div>
               </button>
@@ -1411,24 +1461,65 @@ function AdminStandPicker({ registrationId, venueId, venueName, currentStandCode
         </>
       )}
 
-      {/* Stands occupés (info) */}
-      {occupiedStands.length > 0 && (
-        <details className="text-[10px] text-slate-500">
-          <summary className="cursor-pointer hover:text-slate-700">Voir les {occupiedStands.length} stand{occupiedStands.length > 1 ? 's' : ''} occupé{occupiedStands.length > 1 ? 's' : ''}</summary>
+      {/* Stands occupés — cliquables pour SWAP */}
+      {otherOccupiedStands.length > 0 && (
+        <details className="text-[10px] text-slate-500" open={isLocked}>
+          <summary className="cursor-pointer hover:text-slate-700 font-semibold uppercase">
+            🔄 Échanger avec un stand occupé ({otherOccupiedStands.length}) — cliquer pour swap
+          </summary>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 mt-1">
-            {occupiedStands.map((s) => (
-              <div key={s.id} className={`rounded border bg-slate-100 px-1.5 py-0.5 text-[10px] flex items-center gap-1 ${s.stand_code === currentStandCode ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
-                <span className="font-mono font-bold text-slate-700">{s.stand_code}</span>
-                <span className="text-slate-500 truncate" title={s.organization?.name}>{s.organization?.name || '—'}</span>
-              </div>
+            {otherOccupiedStands.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                disabled={busy || !myStand}
+                onClick={() => setSwapTarget(s)}
+                title={myStand ? `Échanger ${currentStandCode} ↔ ${s.stand_code}` : 'Vous devez avoir un stand attribué pour pouvoir échanger'}
+                className="rounded border border-blue-200 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 px-1.5 py-1 text-left text-[10px] flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="font-mono font-bold text-blue-700 shrink-0">🔄 {s.stand_code}</span>
+                <span className="text-slate-600 truncate" title={s.organization?.name}>{s.organization?.name || '—'}</span>
+              </button>
             ))}
           </div>
         </details>
       )}
 
-      {isLocked && (
-        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5 mt-1">
-          🔒 Inscription verrouillée — modification du stand impossible
+      {/* Confirmation swap modal inline */}
+      {swapTarget && (
+        <div className="mt-2 rounded-md border-2 border-blue-500 bg-blue-50 p-2.5">
+          <div className="text-xs font-bold text-blue-900 mb-1">🔄 Confirmer l&apos;échange de stands</div>
+          <div className="text-[11px] text-slate-700 mb-2 leading-relaxed">
+            <b>{venueName}</b> :<br />
+            • Votre stand <b className="font-mono">{currentStandCode}</b> → ira à <b>{swapTarget.organization?.name || '—'}</b><br />
+            • Le stand <b className="font-mono">{swapTarget.stand_code}</b> (de {swapTarget.organization?.name}) → vous reviendra<br />
+            <span className="text-amber-700">⚠️ L&apos;autre exposant verra son numéro de stand changer.</span>
+          </div>
+          <div className="flex gap-1 justify-end">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => setSwapTarget(null)}>Annuler</Button>
+            <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white" disabled={busy} onClick={() => swap(swapTarget)}>
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
+              Confirmer l&apos;échange
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation force-stand (mode verrouillé) */}
+      {forceTarget && (
+        <div className="mt-2 rounded-md border-2 border-violet-500 bg-violet-50 p-2.5">
+          <div className="text-xs font-bold text-violet-900 mb-1">⚡ Forcer le stand (admin override)</div>
+          <div className="text-[11px] text-slate-700 mb-2 leading-relaxed">
+            L&apos;inscription est verrouillée mais l&apos;admin peut quand même changer le stand.<br />
+            Stand actuel <b className="font-mono">{currentStandCode || 'aucun'}</b> → nouveau <b className="font-mono">{forceTarget.stand_code}</b>
+          </div>
+          <div className="flex gap-1 justify-end">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => setForceTarget(null)}>Annuler</Button>
+            <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white" disabled={busy} onClick={() => { reserve(forceTarget); setForceTarget(null); }}>
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
+              Forcer le stand
+            </Button>
+          </div>
         </div>
       )}
     </div>
