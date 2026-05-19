@@ -19,6 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { ChatbotFloating } from '@/components/chatbot-widget';
+import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import ExposantPasswordGate, { ExposantPasswordManager } from '@/components/exposant-password-gate';
 import SatisfactionSurvey from '@/components/satisfaction-survey';
 import { toast } from 'sonner';
@@ -613,6 +614,7 @@ export default function ExposantPortal() {
         </Tabs>
       </div>
       <ChatbotFloating role="exposant" />
+      <LiveAvailabilityFloater />
       </ExposantPasswordGate>
     </Shell>
   );
