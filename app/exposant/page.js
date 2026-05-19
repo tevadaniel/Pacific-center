@@ -658,8 +658,44 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
   const incompleteSite = allSites.find(s => !s.is_complete);
   const canAddMore = allSites.length < maxSites && availableVenues.length > 0 && allCurrentSitesComplete;
 
+  // 🆕 SESSION 34 — Cascade lock : si le Site 1 (prioritaire) devient incomplet,
+  // tous les sites secondaires sont automatiquement gelés tant que Site 1 n'est pas re-complété.
+  const primarySite = allSites.find(s => (s.site_priority || 1) === 1) || allSites[0];
+  const isPrimaryComplete = primarySite?.is_complete === true;
+  const isSiteFrozen = (s) => {
+    // Site 1 (prioritaire) jamais gelé
+    if ((s.site_priority || 1) === 1) return false;
+    // Si pas de site primaire identifié, on ne gèle pas
+    if (!primarySite || primarySite.id === s.id) return false;
+    // Site secondaire gelé tant que le site 1 n'est pas complet
+    return !isPrimaryComplete;
+  };
+
+  // 🆕 SESSION 34 — Si l'exposant est actuellement sur un site gelé (Site 1 a été régressé),
+  // on le redirige automatiquement vers Site 1 pour qu'il le complète d'abord.
+  useEffect(() => {
+    if (!allSites.length || !currentRegId) return;
+    const current = allSites.find(s => s.id === currentRegId);
+    if (current && isSiteFrozen(current) && primarySite && primarySite.id !== currentRegId) {
+      toast.warning(`🔒 ${current.venue?.name || 'Ce site'} est gelé. Bascule automatique vers Site 1 — ${primarySite.venue?.name || 'prioritaire'} (à compléter d'abord).`);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('reg', primarySite.id);
+        window.history.replaceState({}, '', url);
+      }
+      onRefresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSites, currentRegId, isPrimaryComplete]);
+
   const switchTo = (regId) => {
     if (regId === currentRegId) return;
+    // 🆕 SESSION 34 — Empêche la bascule vers un site secondaire si le Site 1 est incomplet
+    const target = allSites.find(s => s.id === regId);
+    if (target && isSiteFrozen(target)) {
+      toast.error(`🔒 Complétez d'abord le Site 1 (${primarySite?.venue?.name || 'prioritaire'}) avant de travailler sur ce site.`);
+      return;
+    }
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('reg', regId);
@@ -739,12 +775,28 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
           // 🆕 SESSION 33 — Position du site dans la liste triée (1=★ prioritaire)
           const siteRank = s.site_priority || (idx + 1);
           const isPrimary = siteRank === 1;
+          // 🆕 SESSION 34 — Gel cascade : site secondaire gelé tant que Site 1 incomplet
+          const isFrozen = isSiteFrozen(s);
+          const isDisabledForEdit = isLocked || isFrozen;
           return (
-            <div key={s.id} className={`rounded-md border-2 p-3 transition ${isActive ? 'bg-white border-blue-500 shadow-sm' : 'bg-white/50 border-slate-200 hover:border-blue-300'}`}>
+            <div
+              key={s.id}
+              className={`rounded-md border-2 p-3 transition ${
+                isFrozen ? 'bg-slate-100/70 border-slate-300 opacity-70'
+                  : isActive ? 'bg-white border-blue-500 shadow-sm'
+                  : 'bg-white/50 border-slate-200 hover:border-blue-300'
+              }`}
+            >
+              {isFrozen && (
+                <div className="mb-2 text-[11px] flex items-center gap-1.5 text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+                  <Lock className="w-3 h-3" />
+                  <span><b>Site gelé.</b> Complétez d&apos;abord <b>Site 1 — {primarySite?.venue?.name || 'prioritaire'}</b> (dates + animations) pour réactiver ce site.</span>
+                </div>
+              )}
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 flex-1 min-w-[180px]">
-                  <Select value={String(s.site_priority || 1)} onValueChange={(v) => setPriority(s.id, parseInt(v, 10))} disabled={isLocked}>
-                    <SelectTrigger className="w-[110px] h-8 text-xs" title="Définir la priorité de ce site"><SelectValue /></SelectTrigger>
+                  <Select value={String(s.site_priority || 1)} onValueChange={(v) => setPriority(s.id, parseInt(v, 10))} disabled={isDisabledForEdit}>
+                    <SelectTrigger className="w-[110px] h-8 text-xs" title={isFrozen ? 'Gelé' : 'Définir la priorité de ce site'}><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: Math.max(maxSites, allSites.length) }, (_, i) => i + 1).map((n) => (
                         <SelectItem key={n} value={String(n)}>
@@ -761,7 +813,8 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                       <span className="text-slate-900">{s.venue?.name || '— site à choisir —'}</span>
                       {isActive && <Badge className="bg-blue-600 text-white text-[10px]">Actif</Badge>}
                       {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
-                      {s.is_complete && !isLocked && !valReq && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
+                      {isFrozen && <Badge className="bg-amber-500 text-white text-[10px]">❄ Gelé</Badge>}
+                      {s.is_complete && !isLocked && !valReq && !isFrozen && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
                       {/* 🆕 SESSION 28l — Badge statut soumission */}
                       {valReq?.status === 'en_attente' && <Badge className="bg-amber-500 text-white text-[10px]">⏳ Soumis · en attente</Badge>}
                       {valReq?.status === 'rdv_fixe' && <Badge className="bg-blue-500 text-white text-[10px]">📅 RDV fixé</Badge>}
@@ -774,13 +827,18 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                   </div>
                 </div>
                 <div className="flex gap-1 flex-wrap items-center">
-                  {!isActive && (
+                  {!isActive && !isFrozen && (
                     <Button size="sm" variant="outline" onClick={() => switchTo(s.id)} className="text-xs gap-1 h-8">
                       → Travailler sur ce site
                     </Button>
                   )}
+                  {isFrozen && (
+                    <Button size="sm" variant="outline" disabled className="text-xs gap-1 h-8 opacity-60 cursor-not-allowed">
+                      🔒 Site gelé
+                    </Button>
+                  )}
                   {/* 🆕 SESSION 28l — Bouton "Soumettre ce site" par-site */}
-                  {canSubmit && (
+                  {canSubmit && !isFrozen && (
                     <Button
                       size="sm"
                       onClick={() => submitSingleSite(s)}
