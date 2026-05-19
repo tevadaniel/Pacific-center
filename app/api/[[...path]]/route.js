@@ -1138,6 +1138,12 @@ export async function GET(request, { params }) {
         const has_samedi = regSlots.some(s => s.day_label === 'samedi');
         delete r._id;
         const valReq = valReqByReg[r.id] || null;
+        // 🆕 SESSION 33 — Critères de complétion = dates de présence + animation pour chaque jour choisi
+        // (PAS le stand_code : l'exposant peut animer sur "stand" OU "zone d'exposition")
+        const attendingDays = Array.isArray(r.attending_days) ? r.attending_days : [];
+        const hasDatesChosen = attendingDays.length > 0;
+        const animationsCoverChosenDays = attendingDays.length === 0 ? false : attendingDays.every(d => regSlots.some(s => s.day_label === d));
+        const isComplete = !!r.venue_id && hasDatesChosen && animationsCoverChosenDays && regSlots.length > 0;
         return {
           ...r,
           is_locked: r.is_locked ?? false,
@@ -1148,10 +1154,14 @@ export async function GET(request, { params }) {
           animations_count: regSlots.length,
           has_vendredi_animation: has_vendredi,
           has_samedi_animation: has_samedi,
-          is_complete: has_vendredi && has_samedi && !!r.venue_id && !!r.stand_code,
+          // 🆕 Champs nécessaires au gating UI multi-site
+          attending_days: attendingDays,
+          has_dates_chosen: hasDatesChosen,
+          animations_cover_chosen_days: animationsCoverChosenDays,
+          is_complete: isComplete,
           // 🆕 SESSION 28l — Statut de soumission par-site
           validation_request: valReq ? { id: valReq.id, status: valReq.status, requested_at: valReq.created_at, rdv_date: valReq.rdv_date || null } : null,
-          can_submit: has_vendredi && has_samedi && !!r.venue_id && !!r.stand_code && !valReq && !r.candidature_locked && !r.is_locked,
+          can_submit: isComplete && !valReq && !r.candidature_locked && !r.is_locked,
         };
       }).sort((a, b) => (a.site_priority || 99) - (b.site_priority || 99));
       return json(out);

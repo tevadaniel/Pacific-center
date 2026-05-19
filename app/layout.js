@@ -41,7 +41,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v33-2026-05-19-sort-created-at-fix';
+                var APP_VERSION = 'v34-2026-05-19-multisite-gating-bizcard';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif

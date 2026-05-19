@@ -483,6 +483,8 @@ export default function ExposantPortal() {
               checks={checks}
               deposit={d}
               progress={completion}
+              sitePriority={r?.site_priority || 1}
+              totalSites={(data.allSites || []).length || 1}
             />
             <ProfilBlock organization={o} registration={r} onRefresh={load} />
             <div className="grid md:grid-cols-2 gap-4">
@@ -649,13 +651,11 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
   const usedVenueIds = new Set(allSites.map(s => s.venue_id));
   const availableVenues = venues.filter(v => !usedVenueIds.has(v.id));
 
-  // 🆕 SESSION 28k — Vérifie que TOUS les sites existants sont complets (stand + animations)
-  // avant d'autoriser l'ajout d'un nouveau site. C'est la demande explicite de l'utilisateur :
-  // flow séquentiel = on complète le site courant AVANT d'en ajouter un nouveau.
-  const allCurrentSitesComplete = allSites.length === 0 || allSites.every(s =>
-    s.stand_code && s.has_vendredi_animation && s.has_samedi_animation
-  );
-  const incompleteSite = allSites.find(s => !s.stand_code || !s.has_vendredi_animation || !s.has_samedi_animation);
+  // 🆕 SESSION 33 — Critères de complétion alignés avec le backend (is_complete)
+  // = dates de présence choisies + venue + 1 animation par jour choisi (PAS le stand)
+  // Le flow est séquentiel : on complète le site courant AVANT d'en ajouter un nouveau.
+  const allCurrentSitesComplete = allSites.length === 0 || allSites.every(s => s.is_complete);
+  const incompleteSite = allSites.find(s => !s.is_complete);
   const canAddMore = allSites.length < maxSites && availableVenues.length > 0 && allCurrentSitesComplete;
 
   const switchTo = (regId) => {
@@ -730,31 +730,35 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
         </p>
       </CardHeader>
       <CardContent className="space-y-2">
-        {allSites.map((s) => {
+        {allSites.map((s, idx) => {
           const isActive = s.id === currentRegId;
           const isLocked = s.is_locked || s.is_deposit_received || s.candidature_locked;
           // 🆕 SESSION 28l — Statut soumission par site
           const valReq = s.validation_request;
           const canSubmit = !!s.can_submit;
+          // 🆕 SESSION 33 — Position du site dans la liste triée (1=★ prioritaire)
+          const siteRank = s.site_priority || (idx + 1);
+          const isPrimary = siteRank === 1;
           return (
             <div key={s.id} className={`rounded-md border-2 p-3 transition ${isActive ? 'bg-white border-blue-500 shadow-sm' : 'bg-white/50 border-slate-200 hover:border-blue-300'}`}>
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 flex-1 min-w-[180px]">
                   <Select value={String(s.site_priority || 1)} onValueChange={(v) => setPriority(s.id, parseInt(v, 10))} disabled={isLocked}>
-                    <SelectTrigger className="w-20 h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-[110px] h-8 text-xs" title="Définir la priorité de ce site"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1">⭐ 1</SelectItem>
-                      <SelectItem value="2">2</SelectItem>
-                      <SelectItem value="3">3</SelectItem>
-                      <SelectItem value="4">4</SelectItem>
-                      <SelectItem value="5">5</SelectItem>
-                      <SelectItem value="6">6</SelectItem>
+                      {Array.from({ length: Math.max(maxSites, allSites.length) }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n === 1 ? '★ Site 1' : `Site ${n}`}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <div className="flex-1">
                     <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
-                      {s.site_priority === 1 && <span className="text-amber-500" title="Site principal">⭐</span>}
-                      {s.venue?.name || '— site à choisir —'}
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${isPrimary ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
+                        {isPrimary ? '★ Site 1 — Prioritaire' : `Site ${siteRank}`}
+                      </span>
+                      <span className="text-slate-900">{s.venue?.name || '— site à choisir —'}</span>
                       {isActive && <Badge className="bg-blue-600 text-white text-[10px]">Actif</Badge>}
                       {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
                       {s.is_complete && !isLocked && !valReq && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
@@ -804,15 +808,16 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
           </Button>
         )}
 
-        {/* 🆕 SESSION 28k — Message si bouton bloqué car site courant incomplet */}
+        {/* 🆕 SESSION 33 — Message clair sur les critères de complétion mis à jour */}
         {!allCurrentSitesComplete && allSites.length < maxSites && availableVenues.length > 0 && incompleteSite && (
           <div className="text-xs text-amber-900 bg-amber-50 border-2 border-amber-200 rounded-md px-3 py-2 flex items-start gap-2">
             <span className="text-base">⏳</span>
             <div>
-              <b>Complétez d&apos;abord le site « {incompleteSite.venue?.name || 'en cours'} »</b> avant d&apos;en ajouter un nouveau.<br />
-              Il manque : {!incompleteSite.stand_code && <span className="text-red-700 font-semibold">stand · </span>}
-              {!incompleteSite.has_vendredi_animation && <span className="text-red-700 font-semibold">animation vendredi · </span>}
-              {!incompleteSite.has_samedi_animation && <span className="text-red-700 font-semibold">animation samedi · </span>}
+              <b>Complétez d&apos;abord le site « {incompleteSite.venue?.name || 'en cours'} »</b> avant d&apos;en ajouter un autre.<br />
+              Il vous manque :
+              {!incompleteSite.has_dates_chosen && <span className="text-red-700 font-semibold"> · jours de présence</span>}
+              {incompleteSite.has_dates_chosen && !incompleteSite.animations_cover_chosen_days && incompleteSite.attending_days?.includes('vendredi') && !incompleteSite.has_vendredi_animation && <span className="text-red-700 font-semibold"> · une animation vendredi (sur stand ou zone)</span>}
+              {incompleteSite.has_dates_chosen && !incompleteSite.animations_cover_chosen_days && incompleteSite.attending_days?.includes('samedi') && !incompleteSite.has_samedi_animation && <span className="text-red-700 font-semibold"> · une animation samedi (sur stand ou zone)</span>}
             </div>
           </div>
         )}
