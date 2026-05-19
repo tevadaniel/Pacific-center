@@ -32,6 +32,7 @@ import SendExposantMailDialog from './send-exposant-mail-dialog';
 import DocumentsTab from './documents-tab';
 import PortalTab from './portal-tab';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
+import { useExposantPanel } from './exposant-panel-context';
 
 // =======================================================
 // 🧰 Helpers : EditableField, CollapsibleSection, etc.
@@ -162,6 +163,7 @@ export default function FicheExposantV2({ id, onClose }) {
   const [showDelete2Step, setShowDelete2Step] = useState(false);
   const [showMailDialog, setShowMailDialog] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const { open: openExposantPanel } = useExposantPanel();
 
   const load = async () => {
     if (!id) return;
@@ -527,6 +529,13 @@ export default function FicheExposantV2({ id, onClose }) {
 
       {/* ═══════════════════ SECTION 4 : STAND & SITE ═══════════════════ */}
       <CollapsibleSection icon={MapPin} title="Stand & Site" defaultOpen>
+        {/* 🆕 SESSION 43 — Gestion multi-sites depuis l'admin (réplique du portail exposant) */}
+        <AdminMultiSitesPanel
+          organizationId={org.id}
+          currentRegId={reg.id}
+          onReload={load}
+          onSwitchSite={(newRegId) => openExposantPanel(newRegId)}
+        />
         <EditableField
           label="Site principal"
           type="select"
@@ -785,3 +794,250 @@ export default function FicheExposantV2({ id, onClose }) {
     </div>
   );
 }
+
+// =======================================================
+// 🌐 AdminMultiSitesPanel — gestion multi-sites depuis l'admin
+//   (réplique le portail exposant : liste, switch, add, remove, priorité)
+// =======================================================
+function AdminMultiSitesPanel({ organizationId, currentRegId, onReload, onSwitchSite }) {
+  const [sites, setSites] = useState(null);
+  const [venues, setVenues] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState(null); // ex: `remove:${regId}` ou `prio:${regId}`
+  const [showAdd, setShowAdd] = useState(false);
+  const [addVenueId, setAddVenueId] = useState('');
+  const [removeConfirmId, setRemoveConfirmId] = useState(null); // regId à supprimer (étape 2)
+
+  const load = async () => {
+    if (!organizationId) return;
+    try {
+      const [s, v] = await Promise.all([
+        api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(organizationId)}`).catch(() => []),
+        api('/api/venues').catch(() => []),
+      ]);
+      setSites(Array.isArray(s) ? s : []);
+      setVenues(Array.isArray(v) ? v : []);
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { load(); }, [organizationId]);
+
+  if (!sites) return (
+    <div className="py-3 text-center text-xs text-slate-400">
+      <Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Chargement des sites…
+    </div>
+  );
+
+  const usedVenueIds = new Set(sites.map((s) => s.venue_id));
+  const maxSites = 3;
+  const canAddMore = sites.length < maxSites;
+  const availableVenues = venues.filter((v) =>
+    !usedVenueIds.has(v.id)
+    && v.is_available_2026 !== false
+    && v.exposant_visible !== false
+  );
+
+  const addSite = async () => {
+    if (!addVenueId) return toast.error('Choisissez un site');
+    setBusy(true);
+    try {
+      const res = await api('/api/exposant/sites/add', {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: organizationId, venue_id: addVenueId }),
+      });
+      toast.success('🎉 Nouveau site ajouté');
+      setShowAdd(false);
+      setAddVenueId('');
+      await load();
+      onReload?.();
+      // Basculer sur le nouveau site pour permettre de le compléter
+      const newRegId = res?.registration?.id;
+      if (newRegId) onSwitchSite?.(newRegId);
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const removeSite = async (regId) => {
+    setBusyAction(`remove:${regId}`);
+    try {
+      await api(`/api/exposant/sites/${regId}/remove`, { method: 'POST', body: '{}' });
+      toast.success('Site retiré de l\'inscription');
+      setRemoveConfirmId(null);
+      await load();
+      onReload?.();
+      // Si on a retiré le site courant, basculer sur un autre
+      if (regId === currentRegId) {
+        const remaining = sites.find((s) => s.id !== regId);
+        if (remaining) onSwitchSite?.(remaining.id);
+      }
+    } catch (e) { toast.error(e.message); }
+    setBusyAction(null);
+  };
+
+  const setPriority = async (regId, priority) => {
+    setBusyAction(`prio:${regId}`);
+    try {
+      await api(`/api/exposant/sites/${regId}/priority`, {
+        method: 'POST',
+        body: JSON.stringify({ priority }),
+      });
+      toast.success(priority === 1 ? '★ Site prioritaire défini' : 'Priorité retirée');
+      await load();
+      onReload?.();
+    } catch (e) { toast.error(e.message); }
+    setBusyAction(null);
+  };
+
+  return (
+    <div className="rounded-lg border-2 border-blue-200 bg-blue-50/40 p-3 mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-bold text-blue-900 uppercase tracking-wide flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5" />
+          Sites de cet exposant
+          <Badge variant="secondary" className="text-[10px] ml-1">{sites.length}/{maxSites}</Badge>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {sites.map((s) => {
+          const isCurrent = s.id === currentRegId;
+          const isLocked = s.is_locked || s.is_deposit_received;
+          const isStar = s.is_user_priority === true;
+          const canRemove = sites.length > 1 && !isLocked;
+          const statusColor = {
+            confirme: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+            a_confirmer: 'bg-amber-100 text-amber-800 border-amber-300',
+            a_relancer: 'bg-orange-100 text-orange-800 border-orange-300',
+            prospect: 'bg-slate-100 text-slate-700 border-slate-300',
+            verrouille: 'bg-violet-100 text-violet-800 border-violet-300',
+          }[s.status] || 'bg-slate-100 text-slate-700 border-slate-300';
+
+          return (
+            <div
+              key={s.id}
+              className={`rounded-md border bg-white p-2 flex items-center gap-2 flex-wrap ${
+                isCurrent ? 'border-blue-500 ring-1 ring-blue-300' : 'border-slate-200'
+              }`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {isStar && <span title="Site prioritaire désigné par l'exposant" className="text-amber-500">★</span>}
+                  <span className="font-semibold text-sm text-slate-900 truncate">📍 {s.venue?.name || '—'}</span>
+                  {s.stand_code && (
+                    <Badge variant="outline" className="text-[10px] font-mono">{s.stand_code}</Badge>
+                  )}
+                  <Badge className={`text-[10px] ${statusColor}`} variant="outline">{s.status}</Badge>
+                  {isLocked && <Badge className="text-[10px] bg-violet-100 text-violet-800 border-violet-300" variant="outline">🔒 verrouillé</Badge>}
+                  {isCurrent && <Badge className="text-[10px] bg-blue-600 text-white">vue actuelle</Badge>}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {s.is_complete ? '✅ complet' : '⏳ incomplet'} · {s.animations_count || 0} animation{(s.animations_count || 0) > 1 ? 's' : ''}
+                  {s.deposit?.status && ` · caution: ${s.deposit.status}`}
+                </div>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                {!isCurrent && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] px-2"
+                    onClick={() => onSwitchSite?.(s.id)}
+                  >
+                    Ouvrir
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant={isStar ? 'default' : 'outline'}
+                  className={`h-7 text-[11px] px-2 ${isStar ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'border-amber-300 text-amber-700 hover:bg-amber-50'}`}
+                  disabled={busyAction === `prio:${s.id}`}
+                  onClick={() => setPriority(s.id, isStar ? 0 : 1)}
+                  title={isStar ? 'Retirer la priorité' : 'Définir comme site prioritaire'}
+                >
+                  {busyAction === `prio:${s.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : '★'}
+                </Button>
+                {canRemove && removeConfirmId !== s.id && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] px-2 border-red-300 text-red-700 hover:bg-red-50"
+                    onClick={() => setRemoveConfirmId(s.id)}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                )}
+                {canRemove && removeConfirmId === s.id && (
+                  <>
+                    <Button
+                      size="sm"
+                      className="h-7 text-[11px] px-2 bg-red-600 hover:bg-red-700 text-white"
+                      disabled={busyAction === `remove:${s.id}`}
+                      onClick={() => removeSite(s.id)}
+                    >
+                      {busyAction === `remove:${s.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirmer'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] px-2"
+                      onClick={() => setRemoveConfirmId(null)}
+                    >
+                      Annuler
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Ajouter un site */}
+      {canAddMore && !showAdd && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full mt-2 border-dashed border-2 border-blue-300 text-blue-700 hover:bg-blue-100 gap-2 h-8 text-xs"
+          onClick={() => setShowAdd(true)}
+        >
+          <Plus className="w-3.5 h-3.5" /> Ajouter un autre site ({sites.length}/{maxSites})
+        </Button>
+      )}
+      {showAdd && (
+        <div className="mt-2 rounded-md border-2 border-blue-400 bg-white p-2 space-y-2">
+          <div className="text-xs font-semibold text-blue-900">Choisir un site à ajouter :</div>
+          <Select value={addVenueId} onValueChange={setAddVenueId}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sélectionner un site disponible…" /></SelectTrigger>
+            <SelectContent>
+              {availableVenues.length === 0 ? (
+                <SelectItem value="__none__" disabled>Aucun site disponible</SelectItem>
+              ) : availableVenues.map((v) => (
+                <SelectItem key={v.id} value={v.id}>📍 {v.name} ({v.capacity_stands} stands)</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-slate-600 leading-snug">
+            💡 Une nouvelle inscription sera créée (statut « à confirmer »). Une caution séparée de 20 000 XPF sera demandée pour ce site.
+          </p>
+          <div className="flex gap-1 justify-end">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowAdd(false); setAddVenueId(''); }} disabled={busy}>Annuler</Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1"
+              onClick={addSite}
+              disabled={busy || !addVenueId}
+            >
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Ajouter
+            </Button>
+          </div>
+        </div>
+      )}
+      {!canAddMore && (
+        <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+          🚫 Limite atteinte ({maxSites} sites maximum par exposant).
+        </div>
+      )}
+    </div>
+  );
+}
+
