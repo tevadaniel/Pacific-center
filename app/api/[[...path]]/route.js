@@ -1347,13 +1347,16 @@ export async function GET(request, { params }) {
       const regs = await db.collection('registrations').find(q).toArray();
       const orgIds = [...new Set(regs.map(r => r.organization_id))];
       const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      // 🛡️ SESSION 43-e — LEDGER : exclure orgs définitivement supprimées (même si réinsérées par bug)
+      const blacklisted = await db.collection('deleted_org_ledger').find({ org_id: { $in: orgIds } }).project({ org_id: 1 }).toArray();
+      const blacklistedSet = new Set(blacklisted.map(b => b.org_id));
       // 🆕 Filtrer les registrations liées à des organisations archivées (sauf si include_archived=true)
       const includeArchived = url.searchParams.get('include_archived') === 'true';
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const allVenuesMap = allVenues;
-      let regsFiltered = regs;
+      let regsFiltered = regs.filter(r => !blacklistedSet.has(r.organization_id));
       if (!includeArchived) {
-        regsFiltered = regs.filter(r => {
+        regsFiltered = regsFiltered.filter(r => {
           const o = orgById[r.organization_id];
           return !o || !o.archived_at;
         });
@@ -1579,8 +1582,22 @@ export async function GET(request, { params }) {
         // Par défaut, on exclut les exposants archivés (sauf si demandé explicitement)
         q.$or = [{ archived_at: null }, { archived_at: { $exists: false } }];
       }
-      const orgs = await db.collection('organizations').find(q).sort({ name: 1 }).toArray();
+      let orgs = await db.collection('organizations').find(q).sort({ name: 1 }).toArray();
+      // 🛡️ SESSION 43-e — LEDGER : exclure orgs définitivement supprimées (même si réinsérées par bug)
+      const blacklisted = await db.collection('deleted_org_ledger').find({}).project({ org_id: 1 }).toArray();
+      const blacklistedSet = new Set(blacklisted.map(b => b.org_id));
+      orgs = orgs.filter(o => !blacklistedSet.has(o.id));
       return json(orgs.map(o => { delete o._id; return o; }));
+    }
+
+    // 🛡️ SESSION 43-e — LEDGER DES SUPPRESSIONS DÉFINITIVES (admin only)
+    //   GET /api/admin/deletions-ledger → liste de toutes les orgs définitivement supprimées
+    //   Donne preuve persistante : chaque delete laisse une trace, vous pouvez vérifier
+    //   après un redéploiement que vos suppressions sont toujours présentes.
+    if (route === 'admin/deletions-ledger') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const items = await db.collection('deleted_org_ledger').find({}).sort({ deleted_at: -1 }).toArray();
+      return json(items.map(i => { delete i._id; return i; }));
     }
 
     // 🆕 SESSION 28g — GET /api/admin/users-without-org
@@ -2700,6 +2717,22 @@ export async function POST(request, { params }) {
     // ═══════════════════════════════════════════════════════════════════
     const adminDeleteResetResp = await handleAdminDeleteResetPost({ db, request, route, p, body });
     if (adminDeleteResetResp) return adminDeleteResetResp;
+
+
+    // 🛡️ SESSION 43-e — LEDGER : restaurer un exposant supprimé par erreur
+    //   POST /api/admin/deletions-ledger/:org_id/forgive
+    //   Retire l'org_id du ledger. Si l'org existe encore en DB (re-insérée par bug),
+    //   elle redevient visible. Sinon, il faut la recréer manuellement.
+    if (route.match(/^admin\/deletions-ledger\/[^/]+\/forgive$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const orgId = p[2];
+      const entry = await db.collection('deleted_org_ledger').findOne({ org_id: orgId });
+      if (!entry) return err('Aucune entrée de suppression pour cet org_id', 404);
+      await db.collection('deleted_org_ledger').deleteOne({ org_id: orgId });
+      const stillExists = await db.collection('organizations').findOne({ id: orgId });
+      await logActivity(db, ctx.userId, 'organization', orgId, 'restore_from_ledger', { name: entry.org_name, was_in_db: !!stillExists });
+      return json({ ok: true, action: 'forgiven', org_id: orgId, still_in_db: !!stillExists, message: stillExists ? 'Exposant retiré du ledger et redevient visible' : 'Entrée retirée du ledger (org absente de la DB — à recréer manuellement)' });
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // 🗓️ Handler caution-appointments (RDV restitution caution)
