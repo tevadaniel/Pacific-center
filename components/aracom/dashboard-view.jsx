@@ -145,7 +145,7 @@ function DashboardView({ onGoto }) {
                 </div>
                 <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-center">
                   <div className="text-2xl font-extrabold text-slate-700">{loyalty.edition_buckets.e0}</div>
-                  <div className="text-[10px] uppercase text-slate-600 font-medium">🆕 0</div>
+                  <div className="text-[10px] uppercase text-slate-600 font-medium">🆕 0× (nouveau)</div>
                 </div>
               </div>
             </div>
