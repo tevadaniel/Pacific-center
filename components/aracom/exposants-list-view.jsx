@@ -14,7 +14,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Search, Plus, Download, Trash2, Send, ExternalLink, Check,
-  X, AlertTriangle, Loader2, ChevronDown,
+  X, AlertTriangle, Loader2, ChevronDown, ChevronUp, ArrowUpDown,
+  ArrowDownUp,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,23 @@ const PRIO_OPTS = [
   { key: 'prospect', label: 'Prospect', cls: 'bg-violet-100 text-violet-800 border-violet-300' },
 ];
 
+// ─── 🔽 OPTIONS DE TRI — combinaison dropdown + en-têtes cliquables ───
+const SORT_OPTS = [
+  { key: 'name',         label: '🔤 Nom (A → Z)',              dir: 'asc'  },
+  { key: 'name',         label: '🔤 Nom (Z → A)',              dir: 'desc' },
+  { key: 'created_at',   label: '📅 Profil — plus récent',     dir: 'desc' },
+  { key: 'created_at',   label: '📅 Profil — plus ancien',     dir: 'asc'  },
+  { key: 'priority',     label: '🏷 Priorité (A → C)',          dir: 'asc'  },
+  { key: 'status',       label: '⏱ Statut (À conf. → Annulé)', dir: 'asc'  },
+  { key: 'venue',        label: '📍 Site (A → Z)',             dir: 'asc'  },
+  { key: 'discipline',   label: '🎯 Discipline (A → Z)',       dir: 'asc'  },
+  { key: 'caution',      label: '💰 Caution (croissant)',      dir: 'asc'  },
+  { key: 'caution',      label: '💰 Caution (décroissant)',    dir: 'desc' },
+  { key: 'convention',   label: '📝 Convention (signée d\'abord)', dir: 'desc' },
+];
+const PRIO_ORDER = { A: 0, B: 1, C: 2, prospect: 3, '': 4, null: 4, undefined: 4 };
+const STATUS_ORDER = { contacte: 0, liste_attente: 1, confirme: 2, annule: 3 };
+
 const getStatusOpt = (s) => STATUS_OPTS.find((o) => o.key === s) || STATUS_OPTS[0];
 const getPrioOpt = (p) => PRIO_OPTS.find((o) => o.key === p) || null;
 
@@ -48,6 +66,9 @@ export default function ExposantsListView() {
   const [filterSite, setFilterSite] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPrio, setFilterPrio] = useState('');
+  // 🔽 TRI — clé + direction (synchronisé avec dropdown + en-têtes cliquables)
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
   const [selected, setSelected] = useState(new Set());
   const [showNew, setShowNew] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
@@ -100,7 +121,7 @@ export default function ExposantsListView() {
   // 🔎 Filtrage en mémoire
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
+    const base = rows.filter((r) => {
       if (filterSite && r.venue_id !== filterSite) return false;
       if (filterStatus && r.status !== filterStatus) return false;
       if (filterPrio) {
@@ -113,7 +134,56 @@ export default function ExposantsListView() {
       const stand = (r.stand_code || '').toLowerCase();
       return name.includes(q) || email.includes(q) || stand.includes(q);
     });
-  }, [rows, search, filterSite, filterStatus, filterPrio]);
+
+    // 🔽 TRI appliqué après le filtrage
+    const venueNameOf = (r) => (venues.find((v) => v.id === r.venue_id)?.name || '').toLowerCase();
+    const prioOf = (r) => r.organization?.priority_level || (r.organization?.status === 'prospect' ? 'prospect' : null);
+    const sortValue = (r) => {
+      switch (sortKey) {
+        case 'name':       return (r.organization?.name || '').toLowerCase();
+        case 'created_at': return r.organization?.created_at ? new Date(r.organization.created_at).getTime() : 0;
+        case 'priority':   return PRIO_ORDER[prioOf(r)] ?? 99;
+        case 'status':     return STATUS_ORDER[r.status] ?? 99;
+        case 'venue':      return venueNameOf(r);
+        case 'discipline': return (r.organization?.discipline || '').toLowerCase();
+        case 'caution':    return r.deposit?.amount_xpf || 0;
+        case 'convention': return r.is_convention_signed ? 1 : 0;
+        default:           return 0;
+      }
+    };
+    const sorted = [...base].sort((a, b) => {
+      const va = sortValue(a);
+      const vb = sortValue(b);
+      let cmp;
+      if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+      else cmp = String(va).localeCompare(String(vb), 'fr', { numeric: true, sensitivity: 'base' });
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+    return sorted;
+  }, [rows, search, filterSite, filterStatus, filterPrio, sortKey, sortDir, venues]);
+
+  // 🔽 Helpers tri : toggle on header click + sync dropdown
+  const toggleSort = (key, defaultDir = 'asc') => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(defaultDir);
+    }
+  };
+  const SortIcon = ({ col }) => {
+    if (sortKey !== col) return <ArrowUpDown className="inline w-3 h-3 ml-1 text-slate-300" />;
+    return sortDir === 'asc'
+      ? <ChevronUp className="inline w-3 h-3 ml-1 text-slate-700" />
+      : <ChevronDown className="inline w-3 h-3 ml-1 text-slate-700" />;
+  };
+  // Valeur sérialisée pour le dropdown : "key|dir"
+  const sortDropdownValue = `${sortKey}|${sortDir}`;
+  const applySortDropdown = (val) => {
+    const [k, d] = (val || '').split('|');
+    if (k) setSortKey(k);
+    if (d) setSortDir(d);
+  };
 
   // 📊 Métriques
   const metrics = useMemo(() => {
@@ -351,6 +421,20 @@ export default function ExposantsListView() {
             {PRIO_OPTS.map((o) => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}
           </SelectContent>
         </Select>
+        {/* 🔽 Dropdown TRI */}
+        <Select value={sortDropdownValue} onValueChange={applySortDropdown}>
+          <SelectTrigger className="w-52 h-9 text-xs gap-1">
+            <ArrowDownUp className="w-3.5 h-3.5 text-slate-500" />
+            <SelectValue placeholder="Trier par…" />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTS.map((o, i) => (
+              <SelectItem key={`${o.key}-${o.dir}-${i}`} value={`${o.key}|${o.dir}`}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ═══════════════ ACTIONS GLOBALES ═══════════════ */}
@@ -376,12 +460,24 @@ export default function ExposantsListView() {
                 <th className="p-2 w-8">
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} className="rounded" />
                 </th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Exposant</th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Prio</th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Site</th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Statut</th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Conv.</th>
-                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600">Caution</th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('name', 'asc')} title="Trier par nom">
+                  Exposant<SortIcon col="name" />
+                </th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('priority', 'asc')} title="Trier par priorité">
+                  Prio<SortIcon col="priority" />
+                </th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('venue', 'asc')} title="Trier par site">
+                  Site<SortIcon col="venue" />
+                </th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('status', 'asc')} title="Trier par statut">
+                  Statut<SortIcon col="status" />
+                </th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('convention', 'desc')} title="Trier par convention">
+                  Conv.<SortIcon col="convention" />
+                </th>
+                <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 cursor-pointer select-none hover:bg-slate-100" onClick={() => toggleSort('caution', 'desc')} title="Trier par caution">
+                  Caution<SortIcon col="caution" />
+                </th>
                 <th className="p-2 font-medium uppercase tracking-wider text-[10px] text-slate-600 text-right">Actions</th>
               </tr>
             </thead>
@@ -405,7 +501,14 @@ export default function ExposantsListView() {
                     <td className="p-2">
                       <button onClick={() => openExposant(r.id)} className="text-left">
                         <div className="font-semibold text-slate-900 hover:underline">{r.organization?.name || '—'}</div>
-                        <div className="text-[10px] text-slate-500">{r.organization?.discipline || '—'}</div>
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                          <span>{r.organization?.discipline || '—'}</span>
+                          {r.organization?.created_at && (
+                            <span className="text-slate-400" title={new Date(r.organization.created_at).toLocaleString('fr-FR')}>
+                              · créé le {new Date(r.organization.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
                       </button>
                     </td>
                     <td className="p-2">
