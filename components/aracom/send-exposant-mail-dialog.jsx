@@ -1,31 +1,37 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
 import { toast } from 'sonner';
-import { Mail, Loader2, X, Send, Sparkles } from 'lucide-react';
+import { Mail, Loader2, Send } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 
 /**
- * SEND EXPOSANT MAIL DIALOG
+ * SEND EXPOSANT MAIL DIALOG (v2 - Radix Dialog)
  * Composer un mail libre à un exposant depuis sa fiche admin.
- * - Choix d'un template pré-rempli (ou vide)
- * - Variables disponibles : [[NOM_EXPOSANT]] [[CONTACT_NAME]] [[DISCIPLINE]] [[STAND]] [[SITE]]
- * - Action [[MON_ESPACE]] insère un bouton « Mon espace exposant »
+ * Variables : [[NOM_EXPOSANT]] [[CONTACT_NAME]] [[DISCIPLINE]] [[STAND]] [[SITE]] [[MON_ESPACE]] [[MON_ESPACE_DOCS]]
  *
- * Backend : POST /api/mailing/send avec { subject, body_html, registration_ids:[id], mail_type:'admin_direct' }
+ * ⚠️ Utilise Radix Dialog (et non createPortal custom) pour gérer le stacking de focus
+ *    avec le parent Radix <Sheet> qui contient la fiche exposant.
  */
 const TEMPLATES = {
-  vide: {
-    label: '— Mail vide —',
-    subject: '',
-    body: '',
-  },
+  vide: { label: '— Mail vide —', subject: '', body: '' },
   info: {
     label: '📩 Demande d\'information',
     subject: '[Forum 2026] Information complémentaire — [[NOM_EXPOSANT]]',
@@ -92,10 +98,6 @@ export default function SendExposantMailDialog({ registration, organization, ven
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
   const [sending, setSending] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  // 🔌 Mount detection pour Portal (SSR safety)
-  useEffect(() => { setMounted(true); }, []);
 
   const applyTemplate = (key) => {
     setTemplateKey(key);
@@ -144,42 +146,28 @@ export default function SendExposantMailDialog({ registration, organization, ven
     }
   };
 
-  return (!mounted || typeof document === 'undefined') ? null : createPortal(
-    <div
-      className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"
-      style={{ pointerEvents: 'auto' }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-        style={{ pointerEvents: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
-          <div className="flex items-center gap-2">
+  return (
+    <Dialog open={true} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0 z-[300]">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b">
+          <DialogTitle className="flex items-center gap-2 text-base">
             <Mail className="w-5 h-5 text-blue-600" />
-            <div>
-              <div className="font-bold text-base">Envoyer un mail à l'exposant</div>
-              <div className="text-xs text-slate-500">
-                Destinataire : <span className="font-mono text-slate-700">{organization?.main_email || '—'}</span>
-                {organization?.contact_name && <> · {organization.contact_name}</>}
-              </div>
-            </div>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+            Envoyer un mail à l'exposant
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Destinataire : <span className="font-mono text-slate-700">{organization?.main_email || '—'}</span>
+            {organization?.contact_name && <> · {organization.contact_name}</>}
+          </DialogDescription>
+        </DialogHeader>
 
         {/* Body */}
-        <div className="p-4 space-y-4">
+        <div className="px-5 py-4 space-y-4">
           {/* Template selector */}
           <div>
             <Label className="text-xs">Modèle</Label>
             <Select value={templateKey} onValueChange={applyTemplate}>
               <SelectTrigger className="h-9 mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[400]">
                 {Object.entries(TEMPLATES).map(([k, v]) => (
                   <SelectItem key={k} value={k}>{v.label}</SelectItem>
                 ))}
@@ -187,17 +175,17 @@ export default function SendExposantMailDialog({ registration, organization, ven
             </Select>
           </div>
 
-          {/* Subject */}
+          {/* Subject — input HTML natif (pas shadcn) pour éviter tout focus trap */}
           <div>
-            <Label className="text-xs">Sujet</Label>
+            <Label htmlFor="mail-subject" className="text-xs">Sujet</Label>
             <input
+              id="mail-subject"
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Sujet du mail…"
-              autoFocus
-              style={{ pointerEvents: 'auto' }}
-              className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              autoComplete="off"
+              className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             {subject !== previewSubject && (
               <div className="text-[11px] text-slate-500 mt-1 italic">
@@ -206,16 +194,16 @@ export default function SendExposantMailDialog({ registration, organization, ven
             )}
           </div>
 
-          {/* Body HTML */}
+          {/* Body HTML — textarea natif */}
           <div>
-            <Label className="text-xs">Corps du message (HTML accepté)</Label>
+            <Label htmlFor="mail-body" className="text-xs">Corps du message (HTML accepté)</Label>
             <textarea
+              id="mail-body"
               rows={12}
               value={bodyHtml}
               onChange={(e) => setBodyHtml(e.target.value)}
               placeholder="Bonjour,…"
-              style={{ pointerEvents: 'auto' }}
-              className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
             />
           </div>
 
@@ -234,8 +222,7 @@ export default function SendExposantMailDialog({ registration, organization, ven
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 p-4 border-t bg-slate-50/50">
+        <DialogFooter className="px-5 py-3 border-t bg-slate-50/50 gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={sending}>
             Annuler
           </Button>
@@ -248,9 +235,8 @@ export default function SendExposantMailDialog({ registration, organization, ven
             {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             Envoyer le mail
           </Button>
-        </div>
-      </div>
-    </div>,
-    document.body
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
