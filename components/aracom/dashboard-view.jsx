@@ -24,18 +24,20 @@ function DashboardView({ onGoto }) {
   const [sites, setSites] = useState([]);
   const [extended, setExtended] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+  const [loyalty, setLoyalty] = useState(null);
   const [loading, setLoading] = useState(true);
   const { open: openExposant } = useExposantPanel();
   const load = async () => {
     setLoading(true);
     try {
-      const [k, s, e, a] = await Promise.all([
+      const [k, s, e, a, l] = await Promise.all([
         api('/api/dashboard/kpis'),
         api('/api/dashboard/by-site'),
         api('/api/dashboard/extended').catch(() => null),
         api('/api/dashboard/analytics').catch(() => null),
+        api('/api/dashboard/loyalty').catch(() => null),
       ]);
-      setKpis(k); setSites(s); setExtended(e); setAnalytics(a);
+      setKpis(k); setSites(s); setExtended(e); setAnalytics(a); setLoyalty(l);
     } catch (e) { toast.error(e.message); }
     setLoading(false);
   };
@@ -99,6 +101,88 @@ function DashboardView({ onGoto }) {
         <KpiCard label="Cautions reçues" value={kpis.cautions_recues} hint={`${(kpis.xpf_encaisses || 0).toLocaleString('fr-FR')} XPF`} accent="emerald" icon={Wallet} />
         <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
       </div>
+
+      {/* 🆕 SESSION 42 — Fidélité des exposants */}
+      {loyalty && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">🏅 Fidélité des exposants <Badge variant="secondary" className="text-[10px]">{loyalty.total_orgs} organisations</Badge></span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { window.location.href = '/api/exports/fidelity-csv'; }}
+                className="gap-2 h-8 text-xs"
+              >
+                <Download className="w-3.5 h-3.5" /> Export CSV (trié par fidélité)
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+              <div className="rounded-md bg-gradient-to-br from-amber-100 to-orange-100 border-2 border-amber-300 p-3 text-center">
+                <div className="text-2xl font-extrabold text-orange-700">{loyalty.buckets.tres_fideles}</div>
+                <div className="text-[10px] uppercase text-orange-700 font-bold tracking-wider">🏆 Très fidèles</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">5+ éditions</div>
+              </div>
+              <div className="rounded-md bg-emerald-50 border-2 border-emerald-200 p-3 text-center">
+                <div className="text-2xl font-extrabold text-emerald-700">{loyalty.buckets.fideles}</div>
+                <div className="text-[10px] uppercase text-emerald-700 font-bold tracking-wider">🏅 Fidèles</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">3-4 éditions</div>
+              </div>
+              <div className="rounded-md bg-emerald-50 border border-emerald-100 p-3 text-center">
+                <div className="text-2xl font-extrabold text-emerald-600">{loyalty.buckets.recurrents}</div>
+                <div className="text-[10px] uppercase text-emerald-700 font-medium tracking-wider">Récurrents</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">2 éditions</div>
+              </div>
+              <div className="rounded-md bg-blue-50 border border-blue-100 p-3 text-center">
+                <div className="text-2xl font-extrabold text-blue-600">{loyalty.buckets.une_fois}</div>
+                <div className="text-[10px] uppercase text-blue-700 font-medium tracking-wider">Une fois</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">1 édition</div>
+              </div>
+              <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-center">
+                <div className="text-2xl font-extrabold text-slate-700">{loyalty.buckets.nouveaux}</div>
+                <div className="text-[10px] uppercase text-slate-600 font-medium tracking-wider">🆕 Nouveaux</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">0 édition</div>
+              </div>
+            </div>
+
+            {/* Top 10 plus fidèles */}
+            {loyalty.top && loyalty.top.length > 0 && (
+              <div>
+                <div className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-amber-600" />
+                  TOP {loyalty.top.length} — Plus fidèles
+                </div>
+                <div className="space-y-1">
+                  {loyalty.top.map((o, idx) => (
+                    <div
+                      key={o.id}
+                      onClick={() => openExposant(o.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === 'Enter' && openExposant(o.id)}
+                      className="flex items-center gap-3 px-3 py-2 rounded border bg-white hover:bg-amber-50 hover:border-amber-300 cursor-pointer transition"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-bold flex items-center justify-center">{idx + 1}</div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                        o.nb_editions >= 5 ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
+                        : o.nb_editions >= 3 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {o.nb_editions >= 5 ? '🏆' : '🏅'} {o.nb_editions}×
+                      </span>
+                      <span className="font-semibold text-sm text-slate-900 flex-1 truncate">{o.name}</span>
+                      <span className="text-xs text-slate-500 truncate hidden sm:inline">{o.discipline || ''}</span>
+                      {o.fidelity && <Badge variant="secondary" className="text-[9px] shrink-0">{o.fidelity}</Badge>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Top 5 at risk + Mailing engagement */}
       {extended && (

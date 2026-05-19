@@ -40,7 +40,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 if (typeof window === 'undefined') return;
-                var APP_VERSION = 'v42-2026-05-19-sort-loyalty-editions';
+                var APP_VERSION = 'v43-2026-05-19-loyalty-dashboard-export';
                 try {
                   var stored = localStorage.getItem('app_sw_version');
                   // Si la version stockée est différente (ou absente), on force un nettoyage agressif
