@@ -802,6 +802,24 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
+    // 🆕 SESSION 45 — Template exhaustif de la DB (ZIP : json skeletons + csv + markdown)
+    //   GET /api/admin/db-template?download=1
+    if (route === 'admin/db-template') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const { buildDbTemplate } = await import('@/lib/db-template-builder');
+      const buf = await buildDbTemplate({ db, includeSamples: url.searchParams.get('samples') !== '0' });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="db-template-forum-2026-${ts}.zip"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     // 📄📕📝📋 PDF EXPOSANTS — dispatcher modulaire (Convention, Guide, Questionnaire)
     // (extraits dans /app/lib/api/handlers/exposant-documents.js)
     const exposantDocsResp = await handleExposantDocumentsGet({ db, route, p });

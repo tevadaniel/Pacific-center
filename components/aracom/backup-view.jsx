@@ -185,6 +185,37 @@ export default function BackupView() {
         </CardContent>
       </Card>
 
+      {/* 🆕 SESSION 45 — Template exhaustif de la base de données (pour fusion / import) */}
+      <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+        <CardContent className="p-5 flex items-start gap-4 flex-wrap">
+          <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+            <FileText className="w-8 h-8 text-violet-600" />
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <h2 className="font-bold text-violet-900 text-lg">📦 Template exhaustif de la base de données</h2>
+            <p className="text-sm text-violet-800 mt-1">
+              Téléchargez un <b>ZIP</b> contenant la structure complète de la DB avec <b>tous les champs documentés</b> :
+              squelettes JSON vides à remplir, CSV vierges (un par collection) pour Excel/Sheets, documentation Markdown détaillée et schéma JSON machine-readable.
+            </p>
+            <p className="text-xs text-violet-700 mt-1 italic">
+              💡 Idéal pour <b>fusionner vos données existantes</b> avec celles de la plateforme : préparez vos fichiers selon le template, puis importez-les.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 shrink-0">
+            <a href="/api/admin/db-template" download>
+              <Button size="lg" className="bg-violet-600 hover:bg-violet-700 gap-2 shadow-md w-full">
+                <Download className="w-5 h-5" /> Télécharger le template DB (ZIP)
+              </Button>
+            </a>
+            <a href="/api/admin/db-template?samples=0" download>
+              <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-100 gap-1.5 w-full">
+                <Download className="w-4 h-4" /> Version vide (sans exemples)
+              </Button>
+            </a>
+          </div>
+        </CardContent>
+      </Card>
+
       {lastBackup && (
         <Card className="border-2 border-emerald-300 bg-emerald-50">
           <CardContent className="p-4 flex items-start gap-3">
