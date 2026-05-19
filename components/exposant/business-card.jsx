@@ -39,7 +39,7 @@ export default function BusinessCard({
   animationsCount = 0,
   deposit,
   progress = 0,
-  sitePriority = null,   // 🆕 numéro de site (1=★ prioritaire, 2, 3…)
+  isUserPriority = false,    // 🆕 SESSION 35 — vrai uniquement si l'exposant a cliqué "Définir prioritaire"
   totalSites = 1,
 }) {
   const fullName = [organization.first_name, organization.last_name].filter(Boolean).join(' ').trim()
@@ -60,7 +60,7 @@ export default function BusinessCard({
     ? registration.attending_days
     : (registration.days_present ? registration.days_present.split(',') : []);
 
-  const isPrimary = sitePriority === 1 || sitePriority === null;
+  const isPrimary = isUserPriority === true;
 
   return (
     <div className="relative overflow-hidden rounded-2xl border-2 border-orange-200 bg-gradient-to-br from-white via-orange-50/60 to-amber-50/80 shadow-md p-6">
@@ -82,9 +82,9 @@ export default function BusinessCard({
             <Badge className={`${status.color} border text-xs font-semibold gap-1 px-2 py-0.5`}>
               <StatusIcon className="w-3.5 h-3.5" /> {status.label}
             </Badge>
-            {totalSites > 1 && (
-              <Badge className={`text-xs font-semibold px-2 py-0.5 border ${isPrimary ? 'bg-amber-100 text-amber-900 border-amber-400' : 'bg-slate-100 text-slate-700 border-slate-300'}`} title={isPrimary ? 'Site prioritaire' : `Site secondaire ${sitePriority}`}>
-                {isPrimary ? <><Star className="w-3.5 h-3.5 inline -mt-0.5 fill-amber-500 text-amber-500" /> Site 1 — Prioritaire</> : `Site ${sitePriority}`}
+            {totalSites > 1 && isPrimary && (
+              <Badge className="bg-amber-100 text-amber-900 border-amber-400 text-xs font-semibold px-2 py-0.5 border" title="Site désigné prioritaire">
+                <Star className="w-3.5 h-3.5 inline -mt-0.5 fill-amber-500 text-amber-500" /> Site prioritaire
               </Badge>
             )}
           </div>

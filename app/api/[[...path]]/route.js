@@ -1149,6 +1149,9 @@ export async function GET(request, { params }) {
           is_locked: r.is_locked ?? false,
           is_deposit_received: r.is_deposit_received ?? false,
           site_priority: r.site_priority || 1,
+          // 🆕 SESSION 35 — Étoile désignée par l'utilisateur (pas de ★ auto)
+          // is_user_priority=true UNIQUEMENT si l'exposant a explicitement cliqué "Définir prioritaire"
+          is_user_priority: r.is_user_priority === true,
           venue: v ? { id: v.id, name: v.name, code: v.code, capacity_stands: v.capacity_stands } : null,
           deposit: depByReg[r.id] || null,
           animations_count: regSlots.length,
@@ -5737,21 +5740,33 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
       return json({ ok: true });
     }
 
-    // 🆕 POST /api/exposant/sites/:regId/priority — changer la priorité d'un site (1 = principal)
+    // 🆕 SESSION 35 — POST /api/exposant/sites/:regId/priority
+    //                 Bascule l'étoile ★ "Site prioritaire" sur ce site.
+    //                 body.priority === 1 → désigne ce site comme prioritaire (et retire ★ des autres)
+    //                 body.priority === 0 → retire ★ de ce site
     if (route.match(/^exposant\/sites\/[^/]+\/priority$/)) {
       const regId = p[2];
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
-      const newPriority = parseInt(body?.priority, 10) || 1;
-      // Décale les autres registrations de la même organisation si conflit
-      const others = await db.collection('registrations').find({ organization_id: reg.organization_id, edition_id: EDITION_ID, id: { $ne: regId } }).toArray();
-      const conflicting = others.find(r => (r.site_priority || 1) === newPriority);
-      if (conflicting) {
-        // Swap priorities
-        await db.collection('registrations').updateOne({ id: conflicting.id }, { $set: { site_priority: reg.site_priority || 1, updated_at: new Date() } });
+      const want = parseInt(body?.priority, 10);
+      if (want === 1) {
+        // Retire ★ de tous les autres sites de la même organisation
+        await db.collection('registrations').updateMany(
+          { organization_id: reg.organization_id, edition_id: EDITION_ID, id: { $ne: regId } },
+          { $set: { is_user_priority: false, updated_at: new Date() } }
+        );
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $set: { is_user_priority: true, site_priority: 1, updated_at: new Date() } }
+        );
+        return json({ ok: true, is_user_priority: true });
+      } else {
+        await db.collection('registrations').updateOne(
+          { id: regId },
+          { $set: { is_user_priority: false, updated_at: new Date() } }
+        );
+        return json({ ok: true, is_user_priority: false });
       }
-      await db.collection('registrations').updateOne({ id: regId }, { $set: { site_priority: newPriority, updated_at: new Date() } });
-      return json({ ok: true, priority: newPriority });
     }
 
     // POST /api/admin/document-templates — sauvegarde d'un template (textes + logo)
