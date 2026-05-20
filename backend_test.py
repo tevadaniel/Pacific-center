@@ -1,550 +1,517 @@
 #!/usr/bin/env python3
 """
-SESSION 46 — Test des deux endpoints RESET avec préservation des plans de salles
+SESSION 47 — E2E Simulation Backend Testing
+Tests the new simulation system endpoints and is_simulation flag propagation
 """
 
 import requests
 import json
 import time
-from typing import Dict, Any
+import sys
 
-# Configuration
+# Base URL from .env
 BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
+
+# Admin credentials
 ADMIN_HEADERS = {
     "x-user-role": "aracom_admin",
     "x-user-id": "u-admin",
     "Content-Type": "application/json"
 }
+
+# Non-admin credentials for permission tests
 EXPOSANT_HEADERS = {
     "x-user-role": "exposant",
     "x-user-id": "u-test-exposant",
     "Content-Type": "application/json"
 }
 
-def print_test(test_name: str):
-    """Print test header"""
-    print(f"\n{'='*80}")
-    print(f"TEST: {test_name}")
-    print('='*80)
+def log_test(test_name, passed, details=""):
+    """Log test results"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    print(f"{status} - {test_name}")
+    if details:
+        print(f"  Details: {details}")
+    return passed
 
-def print_result(success: bool, message: str):
-    """Print test result"""
-    status = "✅ PASS" if success else "❌ FAIL"
-    print(f"{status} - {message}")
-
-def seed_database():
-    """Seed the database with test data"""
-    print_test("PRE-TEST: Seeding database")
+def test_1_begin_without_admin():
+    """Test 1: POST /api/admin/simulation/begin without admin role → expect 403"""
+    print("\n=== TEST 1: Begin simulation without admin role ===")
     try:
         response = requests.post(
-            f"{BASE_URL}/seed",
-            json={"force": True},
+            f"{BASE_URL}/admin/simulation/begin",
+            headers=EXPOSANT_HEADERS,
+            json={},
+            timeout=10
+        )
+        passed = response.status_code == 403
+        return log_test("Begin without admin → 403", passed, f"Status: {response.status_code}")
+    except Exception as e:
+        return log_test("Begin without admin → 403", False, f"Error: {str(e)}")
+
+def test_2_begin_with_admin():
+    """Test 2: POST /api/admin/simulation/begin with admin → expect 200 with session_id"""
+    print("\n=== TEST 2: Begin simulation with admin role ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/begin",
+            headers=ADMIN_HEADERS,
+            json={},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Begin with admin → 200", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        
+        # Check required fields
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("session_id starts with 'sim-'", str(data.get("session_id", "")).startswith("sim-")))
+        checks.append(("redirect_to is gerosteva@gmail.com", data.get("redirect_to") == "gerosteva@gmail.com"))
+        checks.append(("message field present", "message" in data))
+        
+        all_passed = all(check[1] for check in checks)
+        details = ", ".join([f"{check[0]}: {check[1]}" for check in checks])
+        
+        return log_test("Begin with admin → 200 with correct fields", all_passed, details)
+    except Exception as e:
+        return log_test("Begin with admin → 200", False, f"Error: {str(e)}")
+
+def test_3_verify_simulation_active():
+    """Test 3: Verify app_settings.mail_config has simulation_active=true"""
+    print("\n=== TEST 3: Verify simulation_active in mail_config ===")
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/simulation/status",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Verify simulation_active", False, f"Status: {response.status_code}")
+        
+        data = response.json()
+        passed = data.get("simulation_active") == True
+        return log_test("simulation_active is true", passed, f"simulation_active: {data.get('simulation_active')}")
+    except Exception as e:
+        return log_test("Verify simulation_active", False, f"Error: {str(e)}")
+
+def test_4_end_without_admin():
+    """Test 4: POST /api/admin/simulation/end without admin → expect 403"""
+    print("\n=== TEST 4: End simulation without admin role ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/end",
+            headers=EXPOSANT_HEADERS,
+            json={},
+            timeout=10
+        )
+        passed = response.status_code == 403
+        return log_test("End without admin → 403", passed, f"Status: {response.status_code}")
+    except Exception as e:
+        return log_test("End without admin → 403", False, f"Error: {str(e)}")
+
+def test_5_status_without_admin():
+    """Test 5: GET /api/admin/simulation/status without admin → expect 403"""
+    print("\n=== TEST 5: Status without admin role ===")
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/simulation/status",
+            headers=EXPOSANT_HEADERS,
+            timeout=10
+        )
+        passed = response.status_code == 403
+        return log_test("Status without admin → 403", passed, f"Status: {response.status_code}")
+    except Exception as e:
+        return log_test("Status without admin → 403", False, f"Error: {str(e)}")
+
+def test_6_status_initial_counts():
+    """Test 6: GET /api/admin/simulation/status → initial counts should be 0"""
+    print("\n=== TEST 6: Status endpoint initial counts ===")
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/simulation/status",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Status initial counts", False, f"Status: {response.status_code}")
+        
+        data = response.json()
+        counts = data.get("counts", {})
+        
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("simulation_active present", "simulation_active" in data))
+        checks.append(("simulation_redirect present", "simulation_redirect" in data))
+        checks.append(("simulation_session_id present", "simulation_session_id" in data))
+        checks.append(("counts.organizations present", "organizations" in counts))
+        checks.append(("counts.registrations present", "registrations" in counts))
+        checks.append(("counts.animation_slots present", "animation_slots" in counts))
+        checks.append(("counts.stand_assignments present", "stand_assignments" in counts))
+        checks.append(("counts.validation_requests present", "validation_requests" in counts))
+        
+        all_passed = all(check[1] for check in checks)
+        details = f"Counts: orgs={counts.get('organizations')}, regs={counts.get('registrations')}, anims={counts.get('animation_slots')}, stands={counts.get('stand_assignments')}, val_reqs={counts.get('validation_requests')}"
+        
+        return log_test("Status endpoint structure correct", all_passed, details)
+    except Exception as e:
+        return log_test("Status initial counts", False, f"Error: {str(e)}")
+
+def test_7_self_register_with_simulation_flag():
+    """Test 7: POST /api/auth/self-register with x-simulation:1 → creates org+reg with is_simulation:true"""
+    print("\n=== TEST 7: Self-register with simulation flag ===")
+    try:
+        sim_headers = ADMIN_HEADERS.copy()
+        sim_headers["x-simulation"] = "1"
+        sim_headers["x-sim-session"] = "test-session-001"
+        
+        email = f"sim+e2e1@simulation.local"
+        
+        response = requests.post(
+            f"{BASE_URL}/auth/self-register",
+            headers=sim_headers,
+            json={"email": email},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Self-register with sim flag", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("is_simulation is true", data.get("is_simulation") == True))
+        checks.append(("registration_id present", "registration_id" in data))
+        checks.append(("organization_id present", "organization_id" in data))
+        
+        all_passed = all(check[1] for check in checks)
+        details = f"is_simulation: {data.get('is_simulation')}, reg_id: {data.get('registration_id')}, org_id: {data.get('organization_id')}"
+        
+        # Store for later tests
+        global sim_registration_id, sim_organization_id
+        sim_registration_id = data.get("registration_id")
+        sim_organization_id = data.get("organization_id")
+        
+        return log_test("Self-register with sim flag → is_simulation:true", all_passed, details)
+    except Exception as e:
+        return log_test("Self-register with sim flag", False, f"Error: {str(e)}")
+
+def test_8_self_register_without_simulation_flag():
+    """Test 8: POST /api/auth/self-register without x-simulation → creates org+reg with is_simulation:false"""
+    print("\n=== TEST 8: Self-register without simulation flag ===")
+    try:
+        email = f"normal+e2e@example.com"
+        
+        response = requests.post(
+            f"{BASE_URL}/auth/self-register",
             headers={"Content-Type": "application/json"},
-            timeout=30
-        )
-        if response.status_code == 200:
-            data = response.json()
-            print_result(True, f"Database seeded: {data.get('associations', 0)} associations, {data.get('stands_planned', 0)} stands")
-            return True
-        else:
-            print_result(False, f"Seed failed: {response.status_code} - {response.text[:200]}")
-            return False
-    except Exception as e:
-        print_result(False, f"Seed error: {str(e)}")
-        return False
-
-def get_counts() -> Dict[str, int]:
-    """Get current counts of all collections"""
-    counts = {}
-    try:
-        # Organizations
-        resp = requests.get(f"{BASE_URL}/organizations", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            counts['organizations'] = len(resp.json())
-        
-        # Registrations
-        resp = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            counts['registrations'] = len(resp.json())
-        
-        # Animation slots
-        resp = requests.get(f"{BASE_URL}/animation-slots", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            counts['animation_slots'] = len(resp.json())
-        
-        # Documents
-        resp = requests.get(f"{BASE_URL}/documents", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            counts['documents'] = len(resp.json())
-        
-        # Venues
-        resp = requests.get(f"{BASE_URL}/venues", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            venues = resp.json()
-            counts['venues'] = len(venues)
-            
-            # Count venue stands with positions
-            venue_stands_with_positions = 0
-            for venue in venues:
-                venue_id = venue.get('id') or venue.get('venue_id')
-                if venue_id:
-                    stands_resp = requests.get(f"{BASE_URL}/venues/{venue_id}/stands", headers=ADMIN_HEADERS, timeout=10)
-                    if stands_resp.status_code == 200:
-                        stands = stands_resp.json()
-                        for stand in stands:
-                            if stand.get('pos_x') is not None and stand.get('pos_y') is not None:
-                                venue_stands_with_positions += 1
-            counts['venue_stands_with_positions'] = venue_stands_with_positions
-        
-        # Users (non-admin)
-        resp = requests.get(f"{BASE_URL}/admin/users-without-org", headers=ADMIN_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            counts['users_non_admin'] = len(resp.json())
-        
-        print(f"Current counts: {counts}")
-        return counts
-    except Exception as e:
-        print(f"Error getting counts: {str(e)}")
-        return counts
-
-def test_1_authentication():
-    """TEST 1 — Authentication (both endpoints should return 403 without admin role)"""
-    print_test("TEST 1 — Authentication")
-    
-    # Test reset-for-new-edition without admin
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-for-new-edition",
-            json={"confirm": "RESET-NOUVELLE-EDITION-2026"},
-            headers=EXPOSANT_HEADERS,
+            json={"email": email},
             timeout=10
-        )
-        if response.status_code == 403:
-            print_result(True, "reset-for-new-edition returns 403 without admin role")
-        else:
-            print_result(False, f"reset-for-new-edition returned {response.status_code} instead of 403")
-    except Exception as e:
-        print_result(False, f"reset-for-new-edition auth test error: {str(e)}")
-    
-    # Test reset-total without admin
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-total",
-            json={"confirm": "RESET-TOTAL-DEFINITIF"},
-            headers=EXPOSANT_HEADERS,
-            timeout=10
-        )
-        if response.status_code == 403:
-            print_result(True, "reset-total returns 403 without admin role")
-        else:
-            print_result(False, f"reset-total returned {response.status_code} instead of 403")
-    except Exception as e:
-        print_result(False, f"reset-total auth test error: {str(e)}")
-
-def test_2_confirmation_validation():
-    """TEST 2 — Confirmation string validation"""
-    print_test("TEST 2 — Confirmation string validation")
-    
-    # Test reset-for-new-edition with missing confirm
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-for-new-edition",
-            json={},
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        if response.status_code == 400:
-            print_result(True, "reset-for-new-edition returns 400 with missing confirm")
-        else:
-            print_result(False, f"reset-for-new-edition returned {response.status_code} instead of 400 (missing confirm)")
-    except Exception as e:
-        print_result(False, f"reset-for-new-edition missing confirm test error: {str(e)}")
-    
-    # Test reset-for-new-edition with wrong confirm
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-for-new-edition",
-            json={"confirm": "WRONG"},
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        if response.status_code == 400:
-            print_result(True, "reset-for-new-edition returns 400 with wrong confirm")
-        else:
-            print_result(False, f"reset-for-new-edition returned {response.status_code} instead of 400 (wrong confirm)")
-    except Exception as e:
-        print_result(False, f"reset-for-new-edition wrong confirm test error: {str(e)}")
-    
-    # Test reset-total with missing confirm
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-total",
-            json={},
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        if response.status_code == 400:
-            print_result(True, "reset-total returns 400 with missing confirm")
-        else:
-            print_result(False, f"reset-total returned {response.status_code} instead of 400 (missing confirm)")
-    except Exception as e:
-        print_result(False, f"reset-total missing confirm test error: {str(e)}")
-    
-    # Test reset-total with wrong confirm
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-total",
-            json={"confirm": "WRONG"},
-            headers=ADMIN_HEADERS,
-            timeout=10
-        )
-        if response.status_code == 400:
-            print_result(True, "reset-total returns 400 with wrong confirm")
-        else:
-            print_result(False, f"reset-total returned {response.status_code} instead of 400 (wrong confirm)")
-    except Exception as e:
-        print_result(False, f"reset-total wrong confirm test error: {str(e)}")
-
-def test_3_reset_for_new_edition():
-    """TEST 3 — Reset for new edition (SOFT reset)"""
-    print_test("TEST 3 — Reset for new edition (SOFT reset)")
-    
-    # Seed database first
-    if not seed_database():
-        print_result(False, "Failed to seed database before SOFT reset test")
-        return
-    
-    time.sleep(2)  # Wait for seed to complete
-    
-    # Get counts BEFORE
-    print("\n📊 Snapshot BEFORE reset-for-new-edition:")
-    before = get_counts()
-    
-    # Execute reset-for-new-edition
-    print("\n🔄 Executing reset-for-new-edition...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-for-new-edition",
-            json={"confirm": "RESET-NOUVELLE-EDITION-2026"},
-            headers=ADMIN_HEADERS,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            print_result(True, f"reset-for-new-edition returned 200")
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify response fields
-            required_fields = ['ok', 'registrations_reset', 'documents_archived', 'stand_assignments_cancelled', 'animations_archived', 'layouts_restored', 'message']
-            missing_fields = [f for f in required_fields if f not in data]
-            if missing_fields:
-                print_result(False, f"Missing response fields: {missing_fields}")
-            else:
-                print_result(True, "All required response fields present")
-        else:
-            print_result(False, f"reset-for-new-edition returned {response.status_code}: {response.text[:500]}")
-            return
-    except Exception as e:
-        print_result(False, f"reset-for-new-edition execution error: {str(e)}")
-        return
-    
-    time.sleep(2)  # Wait for reset to complete
-    
-    # Get counts AFTER
-    print("\n📊 Snapshot AFTER reset-for-new-edition:")
-    after = get_counts()
-    
-    # Verify AFTER state
-    print("\n🔍 Verifying AFTER state:")
-    
-    # Organizations count UNCHANGED
-    if before.get('organizations') == after.get('organizations'):
-        print_result(True, f"Organizations preserved: {after.get('organizations')}")
-    else:
-        print_result(False, f"Organizations changed: {before.get('organizations')} → {after.get('organizations')}")
-    
-    # Registrations count UNCHANGED (but status should be 'a_relancer')
-    if before.get('registrations') == after.get('registrations'):
-        print_result(True, f"Registrations count preserved: {after.get('registrations')}")
-    else:
-        print_result(False, f"Registrations count changed: {before.get('registrations')} → {after.get('registrations')}")
-    
-    # Documents should be EMPTY (archived)
-    if after.get('documents', 0) == 0:
-        print_result(True, "Documents archived (count = 0)")
-    else:
-        print_result(False, f"Documents not fully archived: {after.get('documents')} remaining")
-    
-    # Animation slots should be EMPTY (archived)
-    if after.get('animation_slots', 0) == 0:
-        print_result(True, "Animation slots archived (count = 0)")
-    else:
-        print_result(False, f"Animation slots not fully archived: {after.get('animation_slots')} remaining")
-    
-    # CRITICAL: Venue stands with positions should be preserved
-    if after.get('venue_stands_with_positions', 0) > 0:
-        print_result(True, f"✨ CRITICAL: Venue stands positions preserved: {after.get('venue_stands_with_positions')} stands with pos_x/pos_y")
-    else:
-        print_result(False, f"❌ CRITICAL: Venue stands positions LOST: {after.get('venue_stands_with_positions')} stands with positions")
-    
-    # Venues count should be UNCHANGED
-    if before.get('venues') == after.get('venues'):
-        print_result(True, f"Venues preserved: {after.get('venues')}")
-    else:
-        print_result(False, f"Venues changed: {before.get('venues')} → {after.get('venues')}")
-
-def test_4_reset_total():
-    """TEST 4 — Reset total (HARD reset)"""
-    print_test("TEST 4 — Reset total (HARD reset)")
-    
-    # Seed database first
-    if not seed_database():
-        print_result(False, "Failed to seed database before HARD reset test")
-        return
-    
-    time.sleep(2)  # Wait for seed to complete
-    
-    # Get counts BEFORE
-    print("\n📊 Snapshot BEFORE reset-total:")
-    before = get_counts()
-    
-    # Execute reset-total
-    print("\n🔄 Executing reset-total...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-total",
-            json={"confirm": "RESET-TOTAL-DEFINITIF"},
-            headers=ADMIN_HEADERS,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            print_result(True, f"reset-total returned 200")
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify response fields
-            required_fields = ['ok', 'deleted', 'layouts_restored', 'message']
-            missing_fields = [f for f in required_fields if f not in data]
-            if missing_fields:
-                print_result(False, f"Missing response fields: {missing_fields}")
-            else:
-                print_result(True, "All required response fields present")
-                
-            # Verify deleted object has expected fields
-            if 'deleted' in data:
-                deleted_fields = ['organizations', 'registrations', 'animations', 'documents', 'stand_assignments', 'deposits', 'users', 'access_tokens']
-                missing_deleted = [f for f in deleted_fields if f not in data['deleted']]
-                if missing_deleted:
-                    print_result(False, f"Missing deleted fields: {missing_deleted}")
-                else:
-                    print_result(True, "All deleted fields present")
-        else:
-            print_result(False, f"reset-total returned {response.status_code}: {response.text[:500]}")
-            return
-    except Exception as e:
-        print_result(False, f"reset-total execution error: {str(e)}")
-        return
-    
-    time.sleep(2)  # Wait for reset to complete
-    
-    # Get counts AFTER
-    print("\n📊 Snapshot AFTER reset-total:")
-    after = get_counts()
-    
-    # Verify AFTER state
-    print("\n🔍 Verifying AFTER state:")
-    
-    # Organizations should be EMPTY
-    if after.get('organizations', 0) == 0:
-        print_result(True, "Organizations deleted (count = 0)")
-    else:
-        print_result(False, f"Organizations not fully deleted: {after.get('organizations')} remaining")
-    
-    # Registrations should be EMPTY
-    if after.get('registrations', 0) == 0:
-        print_result(True, "Registrations deleted (count = 0)")
-    else:
-        print_result(False, f"Registrations not fully deleted: {after.get('registrations')} remaining")
-    
-    # Animation slots should be EMPTY
-    if after.get('animation_slots', 0) == 0:
-        print_result(True, "Animation slots deleted (count = 0)")
-    else:
-        print_result(False, f"Animation slots not fully deleted: {after.get('animation_slots')} remaining")
-    
-    # Documents should be EMPTY
-    if after.get('documents', 0) == 0:
-        print_result(True, "Documents deleted (count = 0)")
-    else:
-        print_result(False, f"Documents not fully deleted: {after.get('documents')} remaining")
-    
-    # CRITICAL: Venues count should be UNCHANGED
-    if before.get('venues') == after.get('venues'):
-        print_result(True, f"✨ CRITICAL: Venues preserved: {after.get('venues')}")
-    else:
-        print_result(False, f"❌ CRITICAL: Venues changed: {before.get('venues')} → {after.get('venues')}")
-    
-    # CRITICAL: Venue stands with positions should be preserved
-    if after.get('venue_stands_with_positions', 0) > 0:
-        print_result(True, f"✨ CRITICAL: Venue stands positions preserved: {after.get('venue_stands_with_positions')} stands with pos_x/pos_y")
-    else:
-        print_result(False, f"❌ CRITICAL: Venue stands positions LOST: {after.get('venue_stands_with_positions')} stands with positions")
-
-def test_5_layout_preservation():
-    """TEST 5 — Layout preservation verification (the KEY requirement)"""
-    print_test("TEST 5 — Layout preservation (KEY requirement)")
-    
-    # Seed database
-    if not seed_database():
-        print_result(False, "Failed to seed database before layout preservation test")
-        return
-    
-    time.sleep(2)
-    
-    # First, call reset-for-new-edition to ensure layouts are restored
-    print("\n🔄 First reset to ensure layouts are in place...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-for-new-edition",
-            json={"confirm": "RESET-NOUVELLE-EDITION-2026"},
-            headers=ADMIN_HEADERS,
-            timeout=30
-        )
-        if response.status_code != 200:
-            print_result(False, f"Initial reset failed: {response.status_code}")
-            return
-        print_result(True, "Initial reset completed, layouts should now be in place")
-    except Exception as e:
-        print_result(False, f"Initial reset error: {str(e)}")
-        return
-    
-    time.sleep(2)
-    
-    # Get a venue with stands BEFORE second reset
-    print("\n📊 Getting venue layout BEFORE reset-total:")
-    try:
-        venues_resp = requests.get(f"{BASE_URL}/venues", headers=ADMIN_HEADERS, timeout=10)
-        if venues_resp.status_code != 200:
-            print_result(False, f"Failed to get venues: {venues_resp.status_code}")
-            return
-        
-        venues = venues_resp.json()
-        if not venues:
-            print_result(False, "No venues found")
-            return
-        
-        # Pick first venue
-        venue = venues[0]
-        venue_id = venue.get('id') or venue.get('venue_id')
-        venue_name = venue.get('name') or venue.get('venue_name', 'Unknown')
-        
-        print(f"Testing with venue: {venue_name} ({venue_id})")
-        
-        # Get stands BEFORE
-        stands_resp = requests.get(f"{BASE_URL}/venues/{venue_id}/stands", headers=ADMIN_HEADERS, timeout=10)
-        if stands_resp.status_code != 200:
-            print_result(False, f"Failed to get stands: {stands_resp.status_code}")
-            return
-        
-        stands_before = stands_resp.json()
-        stands_with_positions_before = [s for s in stands_before if s.get('pos_x') is not None and s.get('pos_y') is not None]
-        
-        print(f"Stands BEFORE: {len(stands_before)} total, {len(stands_with_positions_before)} with positions")
-        
-        if len(stands_with_positions_before) == 0:
-            print_result(False, "No stands with positions found before reset (layouts not restored)")
-            return
-        
-        # Store a sample stand for comparison
-        sample_stand = stands_with_positions_before[0]
-        sample_stand_code = sample_stand.get('stand_code')
-        sample_x_before = sample_stand.get('pos_x')
-        sample_y_before = sample_stand.get('pos_y')
-        
-        print(f"Sample stand BEFORE: {sample_stand_code} at ({sample_x_before}, {sample_y_before})")
-        
-    except Exception as e:
-        print_result(False, f"Error getting layout before reset: {str(e)}")
-        return
-    
-    # Execute reset-total
-    print("\n🔄 Executing reset-total...")
-    try:
-        response = requests.post(
-            f"{BASE_URL}/admin/reset-total",
-            json={"confirm": "RESET-TOTAL-DEFINITIF"},
-            headers=ADMIN_HEADERS,
-            timeout=30
         )
         
         if response.status_code != 200:
-            print_result(False, f"reset-total failed: {response.status_code}")
-            return
+            return log_test("Self-register without sim flag", False, f"Status: {response.status_code}, Body: {response.text}")
         
-        print_result(True, "reset-total executed successfully")
+        data = response.json()
+        
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("is_simulation is false or absent", data.get("is_simulation") == False or "is_simulation" not in data))
+        checks.append(("registration_id present", "registration_id" in data))
+        checks.append(("organization_id present", "organization_id" in data))
+        
+        all_passed = all(check[1] for check in checks)
+        details = f"is_simulation: {data.get('is_simulation')}, reg_id: {data.get('registration_id')}, org_id: {data.get('organization_id')}"
+        
+        # Store for later tests
+        global normal_registration_id, normal_organization_id
+        normal_registration_id = data.get("registration_id")
+        normal_organization_id = data.get("organization_id")
+        
+        return log_test("Self-register without sim flag → is_simulation:false", all_passed, details)
     except Exception as e:
-        print_result(False, f"reset-total execution error: {str(e)}")
-        return
-    
-    time.sleep(2)
-    
-    # Get stands AFTER
-    print("\n📊 Getting venue layout AFTER reset-total:")
+        return log_test("Self-register without sim flag", False, f"Error: {str(e)}")
+
+def test_9_status_after_sim_creation():
+    """Test 9: GET /api/admin/simulation/status → counts should reflect new sim records"""
+    print("\n=== TEST 9: Status after simulation record creation ===")
     try:
-        stands_resp = requests.get(f"{BASE_URL}/venues/{venue_id}/stands", headers=ADMIN_HEADERS, timeout=10)
-        if stands_resp.status_code != 200:
-            print_result(False, f"Failed to get stands after reset: {stands_resp.status_code}")
-            return
+        response = requests.get(
+            f"{BASE_URL}/admin/simulation/status",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
         
-        stands_after = stands_resp.json()
-        stands_with_positions_after = [s for s in stands_after if s.get('pos_x') is not None and s.get('pos_y') is not None]
+        if response.status_code != 200:
+            return log_test("Status after sim creation", False, f"Status: {response.status_code}")
         
-        print(f"Stands AFTER: {len(stands_after)} total, {len(stands_with_positions_after)} with positions")
+        data = response.json()
+        counts = data.get("counts", {})
         
-        # Find the sample stand
-        sample_stand_after = next((s for s in stands_after if s.get('stand_code') == sample_stand_code), None)
+        # Should have at least 1 org and 1 registration from test 7
+        checks = []
+        checks.append(("organizations >= 1", counts.get("organizations", 0) >= 1))
+        checks.append(("registrations >= 1", counts.get("registrations", 0) >= 1))
         
-        if sample_stand_after:
-            sample_x_after = sample_stand_after.get('pos_x')
-            sample_y_after = sample_stand_after.get('pos_y')
-            print(f"Sample stand AFTER: {sample_stand_code} at ({sample_x_after}, {sample_y_after})")
-            
-            # Verify positions match
-            if sample_x_before == sample_x_after and sample_y_before == sample_y_after:
-                print_result(True, f"✨ CRITICAL: Stand positions PRESERVED ({sample_stand_code}: {sample_x_before},{sample_y_before})")
-            else:
-                print_result(False, f"❌ CRITICAL: Stand positions CHANGED ({sample_stand_code}: {sample_x_before},{sample_y_before} → {sample_x_after},{sample_y_after})")
-        else:
-            print_result(False, f"Sample stand {sample_stand_code} not found after reset")
+        all_passed = all(check[1] for check in checks)
+        details = f"Counts: orgs={counts.get('organizations')}, regs={counts.get('registrations')}"
         
-        # Verify count matches
-        if len(stands_with_positions_before) == len(stands_with_positions_after):
-            print_result(True, f"✨ CRITICAL: Stand count with positions PRESERVED ({len(stands_with_positions_after)} stands)")
-        else:
-            print_result(False, f"❌ CRITICAL: Stand count with positions CHANGED ({len(stands_with_positions_before)} → {len(stands_with_positions_after)})")
-        
+        return log_test("Status counts reflect sim records", all_passed, details)
     except Exception as e:
-        print_result(False, f"Error getting layout after reset: {str(e)}")
+        return log_test("Status after sim creation", False, f"Error: {str(e)}")
+
+def test_10_wizard_profile_with_sim():
+    """Test 10: POST /api/wizard/profile with simulation registration"""
+    print("\n=== TEST 10: Wizard profile step with simulation ===")
+    try:
+        if not sim_registration_id:
+            return log_test("Wizard profile with sim", False, "No sim_registration_id from previous test")
+        
+        sim_headers = ADMIN_HEADERS.copy()
+        sim_headers["x-simulation"] = "1"
+        
+        response = requests.post(
+            f"{BASE_URL}/wizard/profile",
+            headers=sim_headers,
+            json={
+                "registration_id": sim_registration_id,
+                "profile": {
+                    "name": "[SIM] E2E Test Org",
+                    "discipline": "Judo",
+                    "contact_name": "Test Contact",
+                    "main_email": "sim+e2e1@simulation.local",
+                    "representatives_count": 2
+                }
+            },
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Wizard profile with sim", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        passed = data.get("ok") == True and data.get("next_step") == 2
+        return log_test("Wizard profile step completed", passed, f"next_step: {data.get('next_step')}")
+    except Exception as e:
+        return log_test("Wizard profile with sim", False, f"Error: {str(e)}")
+
+def test_11_cleanup_without_admin():
+    """Test 11: POST /api/admin/simulation/cleanup without admin → expect 403"""
+    print("\n=== TEST 11: Cleanup without admin role ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/cleanup",
+            headers=EXPOSANT_HEADERS,
+            json={},
+            timeout=10
+        )
+        passed = response.status_code == 403
+        return log_test("Cleanup without admin → 403", passed, f"Status: {response.status_code}")
+    except Exception as e:
+        return log_test("Cleanup without admin → 403", False, f"Error: {str(e)}")
+
+def test_12_cleanup_with_admin():
+    """Test 12: POST /api/admin/simulation/cleanup with admin → deletes all sim records"""
+    print("\n=== TEST 12: Cleanup simulation records ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/cleanup",
+            headers=ADMIN_HEADERS,
+            json={},
+            timeout=15
+        )
+        
+        if response.status_code != 200:
+            return log_test("Cleanup with admin", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("deleted field present", "deleted" in data))
+        checks.append(("message field present", "message" in data))
+        
+        deleted = data.get("deleted", {})
+        details = f"Deleted: orgs={deleted.get('organizations')}, regs={deleted.get('registrations')}, users={deleted.get('users')}"
+        
+        all_passed = all(check[1] for check in checks)
+        return log_test("Cleanup executed successfully", all_passed, details)
+    except Exception as e:
+        return log_test("Cleanup with admin", False, f"Error: {str(e)}")
+
+def test_13_status_after_cleanup():
+    """Test 13: GET /api/admin/simulation/status → all counts should be 0"""
+    print("\n=== TEST 13: Status after cleanup ===")
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/simulation/status",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Status after cleanup", False, f"Status: {response.status_code}")
+        
+        data = response.json()
+        counts = data.get("counts", {})
+        
+        checks = []
+        checks.append(("organizations == 0", counts.get("organizations") == 0))
+        checks.append(("registrations == 0", counts.get("registrations") == 0))
+        checks.append(("animation_slots == 0", counts.get("animation_slots") == 0))
+        checks.append(("stand_assignments == 0", counts.get("stand_assignments") == 0))
+        checks.append(("validation_requests == 0", counts.get("validation_requests") == 0))
+        checks.append(("simulation_active is false", data.get("simulation_active") == False))
+        
+        all_passed = all(check[1] for check in checks)
+        details = f"Counts: orgs={counts.get('organizations')}, regs={counts.get('registrations')}, simulation_active={data.get('simulation_active')}"
+        
+        return log_test("All sim counts are 0 after cleanup", all_passed, details)
+    except Exception as e:
+        return log_test("Status after cleanup", False, f"Error: {str(e)}")
+
+def test_14_verify_normal_record_survives():
+    """Test 14: Verify normal (non-simulation) record from test 8 still exists"""
+    print("\n=== TEST 14: Verify normal record survives cleanup ===")
+    try:
+        if not normal_registration_id:
+            return log_test("Normal record survives", False, "No normal_registration_id from previous test")
+        
+        # Try to fetch the normal registration
+        response = requests.get(
+            f"{BASE_URL}/registrations/{normal_registration_id}",
+            headers=ADMIN_HEADERS,
+            timeout=10
+        )
+        
+        # If it returns 200, the record still exists
+        passed = response.status_code == 200
+        details = f"Status: {response.status_code}, normal_registration_id: {normal_registration_id}"
+        
+        return log_test("Normal record survives cleanup", passed, details)
+    except Exception as e:
+        return log_test("Normal record survives", False, f"Error: {str(e)}")
+
+def test_15_end_simulation():
+    """Test 15: POST /api/admin/simulation/end → sets simulation_active=false"""
+    print("\n=== TEST 15: End simulation ===")
+    try:
+        # First, start simulation again
+        requests.post(f"{BASE_URL}/admin/simulation/begin", headers=ADMIN_HEADERS, json={}, timeout=10)
+        
+        # Now end it
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/end",
+            headers=ADMIN_HEADERS,
+            json={},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("End simulation", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        
+        checks = []
+        checks.append(("ok field is true", data.get("ok") == True))
+        checks.append(("message contains 'désactivée'", "désactivée" in data.get("message", "").lower() or "desactivee" in data.get("message", "").lower()))
+        
+        all_passed = all(check[1] for check in checks)
+        
+        # Verify simulation_active is now false
+        status_response = requests.get(f"{BASE_URL}/admin/simulation/status", headers=ADMIN_HEADERS, timeout=10)
+        if status_response.status_code == 200:
+            status_data = status_response.json()
+            checks.append(("simulation_active is false", status_data.get("simulation_active") == False))
+        
+        all_passed = all(check[1] for check in checks)
+        details = ", ".join([f"{check[0]}: {check[1]}" for check in checks])
+        
+        return log_test("End simulation successful", all_passed, details)
+    except Exception as e:
+        return log_test("End simulation", False, f"Error: {str(e)}")
+
+def test_16_retest_begin_after_cleanup():
+    """Test 16: POST /api/admin/simulation/begin again after cleanup → should work"""
+    print("\n=== TEST 16: Re-test begin after cleanup ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/simulation/begin",
+            headers=ADMIN_HEADERS,
+            json={},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return log_test("Re-test begin after cleanup", False, f"Status: {response.status_code}, Body: {response.text}")
+        
+        data = response.json()
+        passed = data.get("ok") == True and str(data.get("session_id", "")).startswith("sim-")
+        
+        # End it again to clean up
+        requests.post(f"{BASE_URL}/admin/simulation/end", headers=ADMIN_HEADERS, json={}, timeout=10)
+        
+        return log_test("Begin works after cleanup", passed, f"session_id: {data.get('session_id')}")
+    except Exception as e:
+        return log_test("Re-test begin after cleanup", False, f"Error: {str(e)}")
 
 def main():
     """Run all tests"""
-    print("\n" + "="*80)
-    print("SESSION 46 — RESET ENDPOINTS TEST SUITE")
-    print("Testing two RESET endpoints with venue layout preservation")
-    print("="*80)
+    print("=" * 80)
+    print("SESSION 47 — E2E SIMULATION BACKEND TESTING")
+    print("=" * 80)
     
-    # Run tests
-    test_1_authentication()
-    test_2_confirmation_validation()
-    test_3_reset_for_new_edition()
-    test_4_reset_total()
-    test_5_layout_preservation()
+    # Initialize global variables
+    global sim_registration_id, sim_organization_id, normal_registration_id, normal_organization_id
+    sim_registration_id = None
+    sim_organization_id = None
+    normal_registration_id = None
+    normal_organization_id = None
     
-    print("\n" + "="*80)
-    print("TEST SUITE COMPLETE")
-    print("="*80 + "\n")
+    results = []
+    
+    # Run all tests
+    results.append(test_1_begin_without_admin())
+    results.append(test_2_begin_with_admin())
+    results.append(test_3_verify_simulation_active())
+    results.append(test_4_end_without_admin())
+    results.append(test_5_status_without_admin())
+    results.append(test_6_status_initial_counts())
+    results.append(test_7_self_register_with_simulation_flag())
+    results.append(test_8_self_register_without_simulation_flag())
+    results.append(test_9_status_after_sim_creation())
+    results.append(test_10_wizard_profile_with_sim())
+    results.append(test_11_cleanup_without_admin())
+    results.append(test_12_cleanup_with_admin())
+    results.append(test_13_status_after_cleanup())
+    results.append(test_14_verify_normal_record_survives())
+    results.append(test_15_end_simulation())
+    results.append(test_16_retest_begin_after_cleanup())
+    
+    # Summary
+    print("\n" + "=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
+    passed = sum(results)
+    total = len(results)
+    percentage = (passed / total * 100) if total > 0 else 0
+    
+    print(f"Total tests: {total}")
+    print(f"Passed: {passed}")
+    print(f"Failed: {total - passed}")
+    print(f"Success rate: {percentage:.1f}%")
+    
+    if passed == total:
+        print("\n🎉 ALL TESTS PASSED!")
+        return 0
+    else:
+        print(f"\n⚠️  {total - passed} TEST(S) FAILED")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

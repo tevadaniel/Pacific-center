@@ -20,6 +20,7 @@ import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
+import SimulationModal from '@/components/aracom/simulation-modal';
 import ExposantPasswordGate, { ExposantPasswordManager } from '@/components/exposant-password-gate';
 import SatisfactionSurvey from '@/components/satisfaction-survey';
 import { toast } from 'sonner';
@@ -64,6 +65,7 @@ export default function ExposantPortal() {
   const [postEvent, setPostEvent] = useState({ unlocked: false });
   const [validationRequest, setValidationRequest] = useState(null);
   const [passwordStatus, setPasswordStatus] = useState({ has_password: false });
+  const [simulationOpen, setSimulationOpen] = useState(false);
 
   // 🔐 Charge le statut du mot de passe (pour l'affichage du panneau de gestion)
   const loadPasswordStatus = async (orgId) => {
@@ -615,6 +617,19 @@ export default function ExposantPortal() {
       </div>
       <ChatbotFloating role="exposant" />
       <LiveAvailabilityFloater />
+      {/* 🆕 SESSION 47 — Bouton Simulation visible UNIQUEMENT pour aracom_admin */}
+      {user?.role === 'aracom_admin' && (
+        <>
+          <button
+            onClick={() => setSimulationOpen(true)}
+            title="🧪 Simulation E2E — lancer un parcours exposant fictif (admin uniquement)"
+            className="fixed bottom-24 right-4 z-40 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold px-3 py-2 shadow-lg transition-transform hover:scale-105 border-2 border-white"
+          >
+            🧪 Simuler parcours
+          </button>
+          <SimulationModal open={simulationOpen} onClose={() => setSimulationOpen(false)} />
+        </>
+      )}
       </ExposantPasswordGate>
     </Shell>
   );

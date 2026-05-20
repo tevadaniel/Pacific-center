@@ -57,6 +57,7 @@ import BilansView from '@/components/aracom/bilans-view';
 import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
+import SimulationModal from '@/components/aracom/simulation-modal';
 
 // 🎨 SESSION 29 — Menus intelligents : 6 groupes accordéon cohérents, Exposants en tête
 //    • Renaming : libellés explicites (ex: "Liste exposants" → "Liste & fiches")
@@ -133,6 +134,7 @@ const TAB_GROUPS = [
 export default function AracomPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mailStatus, setMailStatus] = useState({ test_mode_active: false, redirect_to: null });
+  const [simulationOpen, setSimulationOpen] = useState(false);
   // 🎯 Badges intelligents : compteurs affichés sur chaque item du menu
   const [menuBadges, setMenuBadges] = useState({});
   useEffect(() => {
@@ -227,6 +229,13 @@ export default function AracomPage() {
           <PushToggle />
           <AlertsBadge onGoto={setTab} />
           <IntegrityAuditButton />
+          <button
+            onClick={() => setSimulationOpen(true)}
+            title="Simulation E2E — Test des fonctions réelles avec exposants fictifs"
+            className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold px-2.5 py-1.5 shadow-sm transition-colors"
+          >
+            🧪 Simulation
+          </button>
           <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
         </div>
       }
@@ -252,6 +261,7 @@ export default function AracomPage() {
       {activeTab === 'corbeille' && <CorbeilleView />}
       {activeTab === 'orgs-sans-dossier' && <OrgsSansDossierView />}
       <ChatbotFloating role="aracom_admin" />
+      <SimulationModal open={simulationOpen} onClose={() => setSimulationOpen(false)} />
     </Shell>
     </ExposantPanelProvider>
   );

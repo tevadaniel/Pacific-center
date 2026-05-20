@@ -792,6 +792,38 @@ export async function GET(request, { params }) {
     const dashboardResp = await handleDashboardGet({ db, request, url, route });
     if (dashboardResp) return dashboardResp;
 
+    // 🆕 SESSION 47 — Status de la simulation (compteurs des records is_simulation:true)
+    if (route === 'admin/simulation/status') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const cfg = await getMailConfig(db);
+      const simOrgs = await db.collection('organizations').countDocuments({ is_simulation: true });
+      const orgsIds = await db.collection('organizations').find({ is_simulation: true }, { projection: { id: 1 } }).toArray();
+      const orgIdsArr = orgsIds.map(o => o.id);
+      const simRegs = await db.collection('registrations').countDocuments({
+        $or: [{ is_simulation: true }, { organization_id: { $in: orgIdsArr } }],
+      });
+      const regsList = await db.collection('registrations').find({
+        $or: [{ is_simulation: true }, { organization_id: { $in: orgIdsArr } }],
+      }, { projection: { id: 1 } }).toArray();
+      const regIdsArr = regsList.map(r => r.id);
+      const simAnims = await db.collection('animation_slots').countDocuments({ registration_id: { $in: regIdsArr } });
+      const simStands = await db.collection('stand_assignments').countDocuments({ registration_id: { $in: regIdsArr } });
+      const simValReqs = await db.collection('validation_requests').countDocuments({ registration_id: { $in: regIdsArr } });
+      return json({
+        ok: true,
+        simulation_active: Boolean(cfg.simulation_active),
+        simulation_redirect: cfg.simulation_redirect || null,
+        simulation_session_id: cfg.simulation_session_id || null,
+        counts: {
+          organizations: simOrgs,
+          registrations: simRegs,
+          animation_slots: simAnims,
+          stand_assignments: simStands,
+          validation_requests: simValReqs,
+        },
+      });
+    }
+
     // ════════════════════════════════════════════════════════════════
     // 🎯 WIZARD — Endpoints GET (disponibilités + état)
     // ════════════════════════════════════════════════════════════════
@@ -3567,6 +3599,9 @@ export async function POST(request, { params }) {
     if (route === 'auth/self-register') {
       const { email } = body;
       if (!email || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) return err('Email invalide');
+      // 🆕 SESSION 47 — SIMULATION : si header x-simulation:1 présent, stampe le flag
+      const isSim = request.headers.get('x-simulation') === '1';
+      const simSessionId = request.headers.get('x-sim-session') || null;
       // Si une org existe déjà sur cet email, réutiliser
       let org = await db.collection('organizations').findOne({ main_email: email.toLowerCase() });
       let reg;
@@ -3584,7 +3619,8 @@ export async function POST(request, { params }) {
             contact_name: '',
             main_phone: '',
             created_at: new Date(), updated_at: new Date(),
-            source: 'self_register',
+            source: isSim ? 'simulation' : 'self_register',
+            ...(isSim ? { is_simulation: true, sim_session_id: simSessionId } : {}),
           });
           org = await db.collection('organizations').findOne({ id: orgId });
         }
@@ -3598,12 +3634,13 @@ export async function POST(request, { params }) {
           status: 'prospect',
           completion_percent: 5,
           wizard_step: 1,
-          source: 'self_register',
+          source: isSim ? 'simulation' : 'self_register',
+          ...(isSim ? { is_simulation: true, sim_session_id: simSessionId } : {}),
           created_at: new Date(), updated_at: new Date(),
         });
         reg = await db.collection('registrations').findOne({ id: regId });
       }
-      return json({ ok: true, registration_id: reg.id, organization_id: org.id });
+      return json({ ok: true, registration_id: reg.id, organization_id: org.id, is_simulation: isSim });
     }
 
     // Seed des créneaux de passage (admin uniquement)
@@ -4529,6 +4566,107 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
     if (route === 'seed') {
       const result = await doSeed(body?.force || false);
       return json(result);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 47 — SIMULATION E2E (mode QA test des fonctions réelles)
+    // ═════════════════════════════════════════════════════════════════════════
+    // POST /api/admin/simulation/begin — Active la redirection email vers gerosteva@gmail.com
+    //   Body: { redirect_email?: string }  Returns: { session_id, redirect_to }
+    // POST /api/admin/simulation/end — Désactive la redirection email
+    // GET  /api/admin/simulation/status — Compte les records is_simulation:true
+    // POST /api/admin/simulation/cleanup — Supprime tous les records is_simulation:true en cascade
+    if (route === 'admin/simulation/begin') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const sessionId = `sim-${Date.now()}-${uuid().slice(0,8)}`;
+      const redirectTo = body?.redirect_email || 'gerosteva@gmail.com';
+      await db.collection('app_settings').updateOne(
+        { key: 'mail_config' },
+        { $set: {
+          key: 'mail_config',
+          simulation_active: true,
+          simulation_redirect: redirectTo,
+          simulation_session_id: sessionId,
+          simulation_started_at: new Date(),
+          simulation_started_by: ctx.userId || 'u-admin',
+          updated_at: new Date(),
+        } },
+        { upsert: true }
+      );
+      invalidateMailConfigCache();
+      return json({ ok: true, session_id: sessionId, redirect_to: redirectTo, message: `Simulation activée — emails redirigés vers ${redirectTo}` });
+    }
+    if (route === 'admin/simulation/end') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      await db.collection('app_settings').updateOne(
+        { key: 'mail_config' },
+        { $set: {
+          simulation_active: false,
+          simulation_ended_at: new Date(),
+          simulation_ended_by: ctx.userId || 'u-admin',
+          updated_at: new Date(),
+        } },
+        { upsert: true }
+      );
+      invalidateMailConfigCache();
+      return json({ ok: true, message: 'Simulation désactivée — redirection email coupée' });
+    }
+    if (route === 'admin/simulation/cleanup') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      // 1. Récupère tous les org_id et reg_id de simulation
+      const simOrgs = await db.collection('organizations').find({ is_simulation: true }, { projection: { id: 1 } }).toArray();
+      const orgIds = simOrgs.map(o => o.id);
+      const simRegs = await db.collection('registrations').find({
+        $or: [{ is_simulation: true }, { organization_id: { $in: orgIds } }],
+      }, { projection: { id: 1, organization_id: 1 } }).toArray();
+      const regIds = simRegs.map(r => r.id);
+      const allOrgIds = Array.from(new Set([...orgIds, ...simRegs.map(r => r.organization_id).filter(Boolean)]));
+      // 2. Cascade delete
+      const cascade = {};
+      const childCollections = [
+        'animation_slots', 'stand_assignments', 'validation_requests',
+        'modification_tokens', 'modification_requests', 'registration_documents',
+        'deposit_transactions', 'caution_appointments', 'attendance_sessions',
+        'attendance_events', 'registration_anomalies', 'field_comments',
+        'field_media', 'tasks_or_followups', 'email_messages',
+      ];
+      for (const c of childCollections) {
+        try {
+          const r = await db.collection(c).deleteMany({ registration_id: { $in: regIds } });
+          cascade[c] = r.deletedCount;
+        } catch { cascade[c] = 0; }
+      }
+      // 3. Delete registrations + organizations
+      const regDel = await db.collection('registrations').deleteMany({ id: { $in: regIds } });
+      const orgDel = await db.collection('organizations').deleteMany({ id: { $in: allOrgIds } });
+      // 4. Delete simulation users (créés via self-register)
+      const usrDel = await db.collection('users').deleteMany({ is_simulation: true });
+      // 5. Désactiver la simulation
+      await db.collection('app_settings').updateOne(
+        { key: 'mail_config' },
+        { $set: { simulation_active: false, simulation_ended_at: new Date(), updated_at: new Date() } },
+        { upsert: true }
+      );
+      invalidateMailConfigCache();
+      // 6. Activity log
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'SIMULATION_CLEANUP',
+        description: `Nettoyage simulation : ${orgDel.deletedCount} orgs, ${regDel.deletedCount} regs, ${usrDel.deletedCount} users`,
+        metadata: { cascade, orgs_deleted: orgDel.deletedCount, regs_deleted: regDel.deletedCount, users_deleted: usrDel.deletedCount },
+        created_at: new Date(),
+      });
+      return json({
+        ok: true,
+        deleted: {
+          organizations: orgDel.deletedCount,
+          registrations: regDel.deletedCount,
+          users: usrDel.deletedCount,
+          ...cascade,
+        },
+        message: `🧹 Nettoyage effectué : ${orgDel.deletedCount} orgs + ${regDel.deletedCount} inscriptions + ${usrDel.deletedCount} utilisateurs supprimés`,
+      });
     }
 
     // ============ DOCUMENTS OFFICIELS (admin upload) ============
