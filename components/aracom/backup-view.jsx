@@ -2,12 +2,145 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { RefreshCw, Download, MapPin, RotateCcw, CheckCircle2, AlertTriangle, FileText, Eye } from 'lucide-react';
-import { api } from '@/lib/auth-client';
+import { RefreshCw, Download, MapPin, RotateCcw, CheckCircle2, AlertTriangle, FileText, Eye, Loader2 } from 'lucide-react';
+import { api, getSession } from '@/lib/auth-client';
 import { KpiCard } from '@/components/app-shell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+
+/**
+ * 🆕 SESSION 45 — Carte Template & Extraction DB (boutons avec fetch authentifié).
+ *   Le bug précédent : <a href="/api/..."> n'envoyait pas les headers x-user-id/x-user-role
+ *   → le backend renvoyait 403 "Réservé aux admins". On remplace par fetch + Blob download.
+ */
+function DbTemplateAndExtractionCard() {
+  const [busy, setBusy] = useState(null); // null | 'tpl' | 'tpl-empty' | 'ext'
+
+  const downloadZip = async (path, filename, key) => {
+    try {
+      setBusy(key);
+      const session = getSession();
+      const headers = {};
+      if (session?.id) headers['x-user-id'] = session.id;
+      const role = session?.role || session?.role_code;
+      if (role) headers['x-user-role'] = role;
+
+      const res = await fetch(path, { cache: 'no-store', headers });
+      if (!res.ok) {
+        let msg = `Erreur HTTP ${res.status}`;
+        try { const j = await res.json(); msg = j.error || msg; } catch { /* */ }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      const sizeMo = (blob.size / 1024 / 1024).toFixed(2);
+      toast.success(`📦 ${filename} téléchargé (${sizeMo} Mo)`);
+    } catch (e) {
+      toast.error(`Échec : ${e.message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const ts = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  return (
+    <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+      <CardContent className="p-5 space-y-3">
+        <div className="flex items-start gap-4 flex-wrap">
+          <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
+            <FileText className="w-8 h-8 text-violet-600" />
+          </div>
+          <div className="flex-1 min-w-[280px]">
+            <h2 className="font-bold text-violet-900 text-lg">📦 Template & Extraction de la base de données</h2>
+            <p className="text-sm text-violet-800 mt-1">
+              Téléchargez la structure complète de la DB ou l&apos;<b>extraction de toutes les données</b> sous forme de ZIP exploitable :
+              squelettes JSON, CSV pour Excel/Sheets, documentation Markdown et schéma machine-readable.
+            </p>
+            <p className="text-xs text-violet-700 mt-1 italic">
+              💡 Idéal pour <b>fusionner vos données existantes</b> avec celles de la plateforme, archiver, ou migrer.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          {/* Template */}
+          <div className="rounded-md border-2 border-violet-300 bg-white p-3">
+            <div className="flex items-start gap-2">
+              <div className="w-10 h-10 rounded-md bg-violet-100 flex items-center justify-center shrink-0">
+                <FileText className="w-5 h-5 text-violet-700" />
+              </div>
+              <div className="flex-1">
+                <div className="font-bold text-violet-900 text-sm">Template vide (structure)</div>
+                <div className="text-[11px] text-slate-600 leading-snug mt-0.5">
+                  Squelettes JSON + CSV vides à remplir, avec la liste exhaustive des champs et leurs types. Documentation Markdown incluse.
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 mt-3">
+              <Button
+                size="sm"
+                disabled={!!busy}
+                onClick={() => downloadZip('/api/admin/db-template', `db-template-forum-2026-${ts()}.zip`, 'tpl')}
+                className="w-full bg-violet-600 hover:bg-violet-700 gap-1.5"
+              >
+                {busy === 'tpl' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Avec 1 ligne d&apos;exemple
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!!busy}
+                onClick={() => downloadZip('/api/admin/db-template?samples=0', `db-template-empty-${ts()}.zip`, 'tpl-empty')}
+                className="w-full border-violet-300 text-violet-700 hover:bg-violet-100 gap-1.5"
+              >
+                {busy === 'tpl-empty' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Version totalement vide
+              </Button>
+            </div>
+          </div>
+
+          {/* Extraction */}
+          <div className="rounded-md border-2 border-fuchsia-300 bg-white p-3">
+            <div className="flex items-start gap-2">
+              <div className="w-10 h-10 rounded-md bg-fuchsia-100 flex items-center justify-center shrink-0">
+                <Download className="w-5 h-5 text-fuchsia-700" />
+              </div>
+              <div className="flex-1">
+                <div className="font-bold text-fuchsia-900 text-sm">Extraction complète AVEC données</div>
+                <div className="text-[11px] text-slate-600 leading-snug mt-0.5">
+                  Toutes les collections + <b>tous les documents</b> (organisations, inscriptions, animations, etc.) en JSON natif + CSV peuplés. Réimportable via <code>mongoimport</code>.
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 mt-3">
+              <Button
+                size="sm"
+                disabled={!!busy}
+                onClick={() => downloadZip('/api/admin/db-extraction', `db-extraction-forum-2026-${ts()}.zip`, 'ext')}
+                className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 gap-1.5"
+              >
+                {busy === 'ext' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Extraire toute la base
+              </Button>
+              <div className="text-[10px] text-fuchsia-700 text-center italic">
+                Snapshot complet à l&apos;instant T · prêt pour fusion ou archive
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * BACKUP VIEW — Sauvegarde complète sur Google Drive + reset édition + restauration plans.
@@ -186,79 +319,7 @@ export default function BackupView() {
       </Card>
 
       {/* 🆕 SESSION 45 — Template + Extraction exhaustive de la base de données */}
-      <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
-        <CardContent className="p-5 space-y-3">
-          <div className="flex items-start gap-4 flex-wrap">
-            <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
-              <FileText className="w-8 h-8 text-violet-600" />
-            </div>
-            <div className="flex-1 min-w-[280px]">
-              <h2 className="font-bold text-violet-900 text-lg">📦 Template & Extraction de la base de données</h2>
-              <p className="text-sm text-violet-800 mt-1">
-                Téléchargez la structure complète de la DB ou l&apos;<b>extraction de toutes les données</b> sous forme de ZIP exploitable :
-                squelettes JSON, CSV pour Excel/Sheets, documentation Markdown et schéma machine-readable.
-              </p>
-              <p className="text-xs text-violet-700 mt-1 italic">
-                💡 Idéal pour <b>fusionner vos données existantes</b> avec celles de la plateforme, archiver, ou migrer.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-            {/* Template (vide / avec exemples) */}
-            <div className="rounded-md border-2 border-violet-300 bg-white p-3">
-              <div className="flex items-start gap-2">
-                <div className="w-10 h-10 rounded-md bg-violet-100 flex items-center justify-center shrink-0">
-                  <FileText className="w-5 h-5 text-violet-700" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-bold text-violet-900 text-sm">Template vide (structure)</div>
-                  <div className="text-[11px] text-slate-600 leading-snug mt-0.5">
-                    Squelettes JSON + CSV vides à remplir, avec la liste exhaustive des champs et leurs types. Documentation Markdown incluse.
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5 mt-3">
-                <a href="/api/admin/db-template" download>
-                  <Button size="sm" className="w-full bg-violet-600 hover:bg-violet-700 gap-1.5">
-                    <Download className="w-4 h-4" /> Avec 1 ligne d&apos;exemple
-                  </Button>
-                </a>
-                <a href="/api/admin/db-template?samples=0" download>
-                  <Button size="sm" variant="outline" className="w-full border-violet-300 text-violet-700 hover:bg-violet-100 gap-1.5">
-                    <Download className="w-4 h-4" /> Version totalement vide
-                  </Button>
-                </a>
-              </div>
-            </div>
-
-            {/* Extraction complète avec données */}
-            <div className="rounded-md border-2 border-fuchsia-300 bg-white p-3">
-              <div className="flex items-start gap-2">
-                <div className="w-10 h-10 rounded-md bg-fuchsia-100 flex items-center justify-center shrink-0">
-                  <Download className="w-5 h-5 text-fuchsia-700" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-bold text-fuchsia-900 text-sm">Extraction complète AVEC données</div>
-                  <div className="text-[11px] text-slate-600 leading-snug mt-0.5">
-                    Toutes les collections + <b>tous les documents</b> (organisations, inscriptions, animations, etc.) en JSON natif + CSV peuplés. Réimportable via <code>mongoimport</code>.
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5 mt-3">
-                <a href="/api/admin/db-extraction" download>
-                  <Button size="sm" className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 gap-1.5">
-                    <Download className="w-4 h-4" /> Extraire toute la base (~1.5 Mo)
-                  </Button>
-                </a>
-                <div className="text-[10px] text-fuchsia-700 text-center italic">
-                  Snapshot complet à l&apos;instant T · prêt pour fusion ou archive
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <DbTemplateAndExtractionCard />
 
       {lastBackup && (
         <Card className="border-2 border-emerald-300 bg-emerald-50">
