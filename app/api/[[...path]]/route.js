@@ -4381,6 +4381,18 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         archivedSlots = oldSlots.length;
         await db.collection('animation_slots').deleteMany({});
       }
+      // 🆕 SESSION 46 — Restauration AUTOMATIQUE des plans de salles depuis le dernier backup figé
+      //   Le dernier état verrouillé (preview ou prod) est embarqué dans /app/data/venue-layouts.backup.json
+      //   et restauré via restoreVenueLayoutsForce() pour repartir d'une base "plans bien rangés".
+      let layoutsRestore = null;
+      try {
+        const { restoreVenueLayoutsForce } = await import('@/lib/venue-layouts-restore');
+        layoutsRestore = await restoreVenueLayoutsForce(db);
+      } catch (e) {
+        console.error('[reset-edition-layouts]', e.message);
+        layoutsRestore = { error: e.message };
+      }
+
       // Note : on ne touche PAS aux cautions pour préserver l'historique financier.
       //        L'admin pourra remettre à "non_demandee" manuellement si besoin.
       //        On laisse internal_notes intacts (notes archivées d'ARACOM).
@@ -4391,17 +4403,8 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         id: uuid(),
         actor_user_id: ctx.userId || 'u-admin',
         action: 'RESET_NEW_EDITION',
-        description: `Reset global : ${regs.length} exposants remis à 'a_relancer', ${archivedDocs} documents archivés`,
-        metadata: { registrations_reset: regs.length, documents_archived: archivedDocs },
-        created_at: now,
-      });
-      // Log l'action
-      await db.collection('activity_logs').insertOne({
-        id: uuid(),
-        actor_user_id: ctx.userId || 'u-admin',
-        action: 'RESET_NEW_EDITION',
-        description: `Reset global : ${regs.length} exposants remis à 'a_relancer', ${archivedDocs} documents archivés, ${oldSlots.length} animations archivées`,
-        metadata: { registrations_reset: regs.length, documents_archived: archivedDocs, animations_archived: archivedSlots },
+        description: `Reset global : ${regs.length} exposants remis à 'a_relancer', ${archivedDocs} documents archivés, ${oldSlots.length} animations archivées, plans restaurés`,
+        metadata: { registrations_reset: regs.length, documents_archived: archivedDocs, animations_archived: archivedSlots, layouts_restored: layoutsRestore },
         created_at: now,
       });
       return json({
@@ -4410,8 +4413,116 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
         documents_archived: archivedDocs,
         stand_assignments_cancelled: assignResult.modifiedCount,
         animations_archived: archivedSlots,
+        layouts_restored: layoutsRestore,
         total_registrations_found: regs.length,
-        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). ${assignResult.modifiedCount} stand(s) libéré(s). ${archivedSlots} animation(s) archivée(s) — les exposants repartent sur les nouveaux créneaux 2026 (Ven 11-17h / Sam 9-17h). L'historique est préservé.`,
+        message: `✅ ${rUpd.modifiedCount} exposants remis en "à relancer". ${archivedDocs} document(s) archivé(s). ${assignResult.modifiedCount} stand(s) libéré(s). ${archivedSlots} animation(s) archivée(s). Plans de salles : ${layoutsRestore?.error ? '⚠ ' + layoutsRestore.error : 'restaurés depuis le dernier verrouillage'}. L'historique est préservé.`,
+      });
+    }
+
+    // 🆕 SESSION 46 — RESET TOTAL : suppression DÉFINITIVE des exposants
+    //   Endpoint distinct, séparé du reset édition. Détruit organisations + registrations + tout ce qui dépend.
+    //   Body : { confirm: "RESET-TOTAL-DEFINITIF" }
+    //   ⚠️ ATTENTION : action IRRÉVERSIBLE. Aucune archive — les exposants sont rayés du système.
+    if (route === 'admin/reset-total') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      if (body?.confirm !== 'RESET-TOTAL-DEFINITIF') {
+        return err('Confirmation requise : envoyer { confirm: "RESET-TOTAL-DEFINITIF" }', 400);
+      }
+      const now = new Date();
+      const beforeOrgs = await db.collection('organizations').countDocuments();
+      const beforeRegs = await db.collection('registrations').countDocuments();
+      const beforeAnims = await db.collection('animation_slots').countDocuments();
+      const beforeDocs = await db.collection('registration_documents').countDocuments();
+      const beforeAssigns = await db.collection('stand_assignments').countDocuments();
+      const beforeDeposits = await db.collection('deposit_transactions').countDocuments();
+      const beforeValReqs = await db.collection('validation_requests').countDocuments();
+      const beforeModReqs = await db.collection('modification_requests').countDocuments();
+      const beforeAccess = await db.collection('access_tokens').countDocuments();
+      const beforeUsers = await db.collection('users').countDocuments({ role_code: { $ne: 'aracom_admin' } });
+
+      // Snapshot des organization_id pour le ledger de suppression
+      const orgs = await db.collection('organizations').find({}, { projection: { id: 1, name: 1 } }).toArray();
+      // Inscription dans le ledger pour empêcher la résurrection (cf. SESSION 38)
+      try {
+        const ledgerEntries = orgs.map((o) => ({
+          id: uuid(),
+          organization_id: o.id,
+          organization_name: o.name || null,
+          deleted_at: now,
+          deleted_by: ctx.userId || 'u-admin',
+          reason: 'reset_total_definitif',
+          cascaded_counts: { regs: 0, anims: 0, docs: 0 },
+        }));
+        if (ledgerEntries.length > 0) {
+          await db.collection('deleted_records_ledger').insertMany(ledgerEntries).catch(() => null);
+          await db.collection('deleted_org_ledger').insertMany(ledgerEntries).catch(() => null);
+        }
+      } catch (e) { console.error('[reset-total-ledger]', e.message); }
+
+      // Suppression cascade (TOUT sauf admins ARACOM)
+      const r1 = await db.collection('registrations').deleteMany({});
+      const r2 = await db.collection('organizations').deleteMany({});
+      const r3 = await db.collection('animation_slots').deleteMany({});
+      const r4 = await db.collection('registration_documents').deleteMany({});
+      const r5 = await db.collection('stand_assignments').deleteMany({});
+      const r6 = await db.collection('deposit_transactions').deleteMany({});
+      const r7 = await db.collection('validation_requests').deleteMany({});
+      const r8 = await db.collection('modification_requests').deleteMany({});
+      const r9 = await db.collection('access_tokens').deleteMany({ purpose: { $ne: 'aracom_admin' } });
+      const r10 = await db.collection('users').deleteMany({ role_code: { $ne: 'aracom_admin' } });
+      const r11 = await db.collection('attendance_sessions').deleteMany({});
+      const r12 = await db.collection('attendance_events').deleteMany({});
+      const r13 = await db.collection('email_messages').deleteMany({});
+      const r14 = await db.collection('field_comments').deleteMany({});
+      const r15 = await db.collection('field_media').deleteMany({});
+      const r16 = await db.collection('caution_appointments').deleteMany({});
+      const r17 = await db.collection('organization_contacts').deleteMany({});
+      const r18 = await db.collection('organization_history').deleteMany({});
+      const r19 = await db.collection('organization_preferences').deleteMany({});
+      const r20 = await db.collection('registration_anomalies').deleteMany({});
+
+      // Restauration des plans de salles vierges
+      let layoutsRestore = null;
+      try {
+        const { restoreVenueLayoutsForce } = await import('@/lib/venue-layouts-restore');
+        layoutsRestore = await restoreVenueLayoutsForce(db);
+      } catch (e) { layoutsRestore = { error: e.message }; }
+
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'RESET_TOTAL_DEFINITIF',
+        description: `⚠ RESET TOTAL : suppression définitive de ${beforeOrgs} organisations, ${beforeRegs} inscriptions, ${beforeAnims} animations, ${beforeDocs} documents, ${beforeUsers} utilisateurs`,
+        metadata: {
+          deleted_counts: {
+            organizations: r2.deletedCount, registrations: r1.deletedCount, animations: r3.deletedCount,
+            documents: r4.deletedCount, stand_assignments: r5.deletedCount, deposits: r6.deletedCount,
+            validations: r7.deletedCount, modifications: r8.deletedCount, access_tokens: r9.deletedCount,
+            users: r10.deletedCount, attendance_sessions: r11.deletedCount, attendance_events: r12.deletedCount,
+            emails: r13.deletedCount, comments: r14.deletedCount, media: r15.deletedCount,
+            caution_appts: r16.deletedCount, org_contacts: r17.deletedCount, org_history: r18.deletedCount,
+            org_prefs: r19.deletedCount, anomalies: r20.deletedCount,
+          },
+          before_counts: { orgs: beforeOrgs, regs: beforeRegs, anims: beforeAnims, docs: beforeDocs, assigns: beforeAssigns, deposits: beforeDeposits, valReqs: beforeValReqs, modReqs: beforeModReqs, access: beforeAccess, users: beforeUsers },
+          layouts_restored: layoutsRestore,
+        },
+        created_at: now,
+      });
+
+      return json({
+        ok: true,
+        deleted: {
+          organizations: r2.deletedCount,
+          registrations: r1.deletedCount,
+          animations: r3.deletedCount,
+          documents: r4.deletedCount,
+          stand_assignments: r5.deletedCount,
+          deposits: r6.deletedCount,
+          users: r10.deletedCount,
+          access_tokens: r9.deletedCount,
+        },
+        layouts_restored: layoutsRestore,
+        message: `⚠ RESET TOTAL effectué — ${r2.deletedCount} organisations supprimées définitivement, ${r1.deletedCount} inscriptions, ${r3.deletedCount} animations, ${r10.deletedCount} utilisateurs. Plans restaurés. Les admins ARACOM ont été préservés.`,
       });
     }
 
