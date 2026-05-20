@@ -6,7 +6,7 @@ import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { MapPin, Sparkles, AlertTriangle, Users } from 'lucide-react';
+import { MapPin, Sparkles, AlertTriangle, Users, ClipboardCheck } from 'lucide-react';
 import { ExposantLink } from './exposant-panel-context';
 
 /**
@@ -18,20 +18,23 @@ export default function SiteAnimationsOverview() {
   const [data, setData] = useState(null);
   const [regs, setRegs] = useState([]);
   const [animSlots, setAnimSlots] = useState([]);
+  const [validations, setValidations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeSiteId, setActiveSiteId] = useState('overview');
 
   const load = async () => {
     setLoading(true);
     try {
-      const [av, rs, as] = await Promise.all([
+      const [av, rs, as, vr] = await Promise.all([
         api('/api/wizard/availability'),
         api('/api/registrations'),
         api('/api/animation-slots'),
+        api('/api/validation-requests').catch(() => []),
       ]);
       setData(av);
       setRegs(Array.isArray(rs) ? rs : []);
       setAnimSlots(Array.isArray(as) ? as : []);
+      setValidations(Array.isArray(vr) ? vr : []);
     } finally {
       setLoading(false);
     }
@@ -39,6 +42,25 @@ export default function SiteAnimationsOverview() {
   useEffect(() => { load(); }, []);
 
   const venues = useMemo(() => Array.isArray(data?.venues) ? data.venues : [], [data]);
+
+  // 🆕 SESSION 45 — Index des demandes de validation par venue, triées par date ASC.
+  //   Logique métier : les premières demandes (jusqu'à capacity_stands) = PRÉ-VALIDÉES.
+  //   Les suivantes = LISTE D'ATTENTE (le quota du site est dépassé).
+  const validationsByVenue = useMemo(() => {
+    const m = new Map();
+    for (const vr of validations) {
+      if (!vr.venue_id) continue;
+      // Skip ceux qui sont déjà finalisés (verrouille / refused / cancelled)
+      if (['verrouille', 'refused', 'cancelled', 'annule'].includes(vr.status)) continue;
+      if (!m.has(vr.venue_id)) m.set(vr.venue_id, []);
+      m.get(vr.venue_id).push(vr);
+    }
+    // Trier par date (les plus anciens en premier → priorité)
+    for (const arr of m.values()) {
+      arr.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    }
+    return m;
+  }, [validations]);
 
   // Index : registrations actives (hors annulé) par venue
   const regsByVenue = useMemo(() => {
@@ -93,6 +115,10 @@ export default function SiteAnimationsOverview() {
       const standsFree = Math.max(0, standsTotal - standsUsed);
       // Exposants sans animation sur ce site
       const noAnim = venueRegs.filter((r) => !regsWithAnim.has(r.id));
+      // 🆕 SESSION 45 — Demandes de validation par site, séparées en pré-validés (dans quota) / liste d'attente
+      const valReqs = validationsByVenue.get(v.id) || [];
+      const preValidated = valReqs.slice(0, standsTotal);
+      const waitlist = valReqs.slice(standsTotal);
       return {
         id: v.id,
         name: v.name,
@@ -106,9 +132,12 @@ export default function SiteAnimationsOverview() {
         anims: { ven, sam, ven_stand, ven_demo, sam_stand, sam_demo, total: ven.length + sam.length },
         noAnim,
         regsList: venueRegs,
+        valReqs,
+        preValidated,
+        waitlist,
       };
     });
-  }, [venues, regsByVenue, animsByVenue, regsWithAnim]);
+  }, [venues, regsByVenue, animsByVenue, regsWithAnim, validationsByVenue]);
 
   // Totaux globaux
   const totals = useMemo(() => venueStats.reduce(
@@ -124,9 +153,11 @@ export default function SiteAnimationsOverview() {
       acc.animOnStand += s.anims.ven_stand + s.anims.sam_stand;
       acc.animOnDemo += s.anims.ven_demo + s.anims.sam_demo;
       acc.noAnim += s.noAnim.length;
+      acc.preValidated += s.preValidated.length;
+      acc.waitlist += s.waitlist.length;
       return acc;
     },
-    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0 }
+    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0 }
   ), [venueStats]);
 
   if (loading) {
@@ -170,11 +201,13 @@ export default function SiteAnimationsOverview() {
           {/* ───────── OVERVIEW TAB ───────── */}
           <TabsContent value="overview" className="mt-4 space-y-3">
             {/* KPIs globaux */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <KpiMini label="Stands utilisés" value={`${totals.standsUsed} / ${totals.standsTotal}`} accent="blue" sub={`${totals.standsFree} libres`} />
               <KpiMini label="Exposants actifs" value={totals.regsCount} accent="emerald" sub={`Ven: ${totals.regsVen} · Sam: ${totals.regsSam}`} />
               <KpiMini label="Animations totales" value={totals.animVen + totals.animSam} accent="violet" sub={`Ven: ${totals.animVen} · Sam: ${totals.animSam}`} />
               <KpiMini label="Sans animation" value={totals.noAnim} accent={totals.noAnim > 0 ? 'amber' : 'slate'} sub="à relancer" />
+              <KpiMini label="✓ Pré-validés" value={totals.preValidated} accent="emerald" sub="dans quota" />
+              <KpiMini label="⏳ Liste d'attente" value={totals.waitlist} accent={totals.waitlist > 0 ? 'amber' : 'slate'} sub="quota dépassé" />
             </div>
 
             {/* Tableau récap par site */}
@@ -318,6 +351,53 @@ function SiteDetailPanel({ site }) {
         <KpiMini label="Sans animation" value={s.noAnim.length} accent={s.noAnim.length > 0 ? 'amber' : 'slate'} sub={s.noAnim.length > 0 ? 'à relancer' : 'tout est ok'} />
       </div>
 
+      {/* 🆕 SESSION 45 — Demandes de validation : pré-validés (dans quota) vs liste d'attente */}
+      {s.valReqs.length > 0 && (
+        <div className="rounded-md border-2 border-blue-200 bg-blue-50/40 p-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <ClipboardCheck className="w-4 h-4 text-blue-700" />
+            <div className="text-sm font-bold text-blue-900">Demandes de validation — {s.valReqs.length} au total</div>
+            <Badge className="text-[10px] bg-emerald-100 text-emerald-800 border-emerald-300 border">
+              ✓ {s.preValidated.length} pré-validé·s
+            </Badge>
+            {s.waitlist.length > 0 && (
+              <Badge className="text-[10px] bg-amber-100 text-amber-800 border-amber-300 border">
+                ⏳ {s.waitlist.length} en attente
+              </Badge>
+            )}
+            <span className="text-[10px] text-slate-500 ml-auto">
+              Quota site : <b>{s.standsTotal}</b> stands · les demandes prioritaires (les plus anciennes) entrent dans le quota.
+            </span>
+          </div>
+
+          {s.preValidated.length > 0 && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 mb-1">
+                ✓ Pré-validés (dans le quota de {s.standsTotal})
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                {s.preValidated.map((vr, idx) => (
+                  <ValidationRow key={vr.id} vr={vr} rank={idx + 1} kind="prevalidated" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {s.waitlist.length > 0 && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800 mb-1">
+                ⏳ Liste d&apos;attente — quota dépassé · {s.waitlist.length} exposant·s à recontacter pour verrouillage manuel
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                {s.waitlist.map((vr, idx) => (
+                  <ValidationRow key={vr.id} vr={vr} rank={s.standsTotal + idx + 1} kind="waitlist" />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Split par jour */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <DayCard day="Vendredi 14 août" exposants={s.regsVen} stand={s.anims.ven_stand} demo={s.anims.ven_demo} />
@@ -383,8 +463,7 @@ function SiteDetailPanel({ site }) {
   );
 }
 
-function DayCard({ day, exposants, stand, demo }) {
-  const total = stand + demo;
+function DayCard({ day, exposants, stand, demo }) {  const total = stand + demo;
   return (
     <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
       <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
@@ -418,5 +497,36 @@ function DayCard({ day, exposants, stand, demo }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+
+// 🆕 SESSION 45 — Ligne d'affichage d'une demande de validation (pré-validé ou liste d'attente)
+function ValidationRow({ vr, rank, kind }) {
+  const dateStr = vr.created_at ? new Date(vr.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  const org = vr.organization || {};
+  const orgName = org.name || vr.organization_name || '(sans nom)';
+  const standCode = vr.stand_code || vr.requested_stand_code || '—';
+  const styles = kind === 'prevalidated'
+    ? 'border-emerald-200 bg-white hover:border-emerald-400'
+    : 'border-amber-200 bg-amber-50/60 hover:border-amber-400';
+  return (
+    <ExposantLink
+      exposant={{ registration_id: vr.registration_id, organization_id: vr.organization_id, name: orgName }}
+      className={`text-xs text-slate-800 rounded px-2 py-1.5 border ${styles} transition flex items-center justify-between gap-2 cursor-pointer`}
+    >
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className={`text-[9px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${kind === 'prevalidated' ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'}`}>
+          {rank}
+        </span>
+        <span className="font-medium truncate">{orgName}</span>
+      </span>
+      <span className="text-[9px] text-slate-500 shrink-0 flex items-center gap-2">
+        <span className="font-mono">{standCode}</span>
+        <span>{dateStr}</span>
+        {kind === 'waitlist' && <span className="text-amber-700 font-bold">⏳</span>}
+      </span>
+    </ExposantLink>
   );
 }

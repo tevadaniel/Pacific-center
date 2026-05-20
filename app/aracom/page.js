@@ -96,7 +96,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'cautions', 'relances', 'validations', 'prospection', 'orgs-sans-dossier', 'corbeille'],
+    items: ['exposants', 'cautions', 'relances', 'validations', 'prospection'],
   },
   {
     key: 'terrain',
@@ -120,7 +120,8 @@ const TAB_GROUPS = [
     key: 'systeme',
     label: 'Système',
     icon: 'Settings',
-    items: ['import', 'backup'],
+    // 🆕 SESSION 45 — Centralise TOUS les outils admin (comptes orphelins, corbeille, import, backup)
+    items: ['import', 'backup', 'orgs-sans-dossier', 'corbeille'],
   },
 ];
 

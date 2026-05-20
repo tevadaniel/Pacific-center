@@ -820,6 +820,36 @@ export async function GET(request, { params }) {
       });
     }
 
+    // 🆕 SESSION 45 — Liste des colonnes disponibles pour l'export Excel
+    if (route === 'admin/excel-export/columns') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const { EXPOSANT_COLUMNS } = await import('@/lib/excel-export-builder');
+      return json({ columns: EXPOSANT_COLUMNS });
+    }
+
+    // 🆕 SESSION 45 — Export Excel multi-onglets (avec sélection de colonnes)
+    //   GET /api/admin/excel-export?columns=col1,col2,col3
+    if (route === 'admin/excel-export') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const { buildExposantsExcel } = await import('@/lib/excel-export-builder');
+      const colsParam = url.searchParams.get('columns');
+      const columns = colsParam ? colsParam.split(',').map((s) => s.trim()).filter(Boolean) : null;
+      const { buf, sheets, row_count } = await buildExposantsExcel({ db, columns });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="export-exposants-${ts}.xlsx"`,
+          'Cache-Control': 'no-store',
+          'X-Row-Count': String(row_count),
+          'X-Sheets': sheets.join(','),
+        },
+      });
+    }
+
     // 🆕 SESSION 45 — Extraction COMPLÈTE de la DB AVEC données (toutes collections en JSON + CSV peuplés)
     //   GET /api/admin/db-extraction
     if (route === 'admin/db-extraction') {
@@ -3800,11 +3830,74 @@ export async function POST(request, { params }) {
     }
 
     // Étape 3 — Choix du stand sur la carte interactive
+    // 🆕 SESSION 45 — Inscription en LISTE D'ATTENTE quand un site est complet
+    //   POST /api/wizard/waitlist  body: { registration_id, venue_id, requested_stand_code?, note? }
+    if (route === 'wizard/waitlist') {
+      const { registration_id, venue_id, requested_stand_code, note } = body;
+      if (!registration_id || !venue_id) return err('registration_id et venue_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: registration_id });
+      if (!reg) return err('Inscription introuvable', 404);
+      const venue = await db.collection('venues').findOne({ id: venue_id });
+      if (!venue) return err('Site introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+
+      // 1) Met à jour la registration : status=liste_attente + venue_id défini, stand_code vide
+      await db.collection('registrations').updateOne(
+        { id: registration_id },
+        { $set: { status: 'liste_attente', venue_id, stand_code: null, updated_at: new Date() } }
+      );
+
+      // 2) Crée (ou met à jour) la validation_request en mode waitlist
+      const existing = await db.collection('validation_requests').findOne({ registration_id, status: { $nin: ['verrouille', 'refused', 'cancelled', 'annule'] } });
+      const valReq = {
+        id: existing?.id || uuid(),
+        registration_id,
+        organization_id: reg.organization_id,
+        organization_name: org?.name || null,
+        venue_id,
+        venue_name: venue.name,
+        requested_stand_code: requested_stand_code || null,
+        status: 'waitlist',
+        kind: 'site_complet_waitlist',
+        note: note || `Site ${venue.name} complet — inscription en liste d'attente`,
+        created_at: existing?.created_at || new Date(),
+        updated_at: new Date(),
+      };
+      if (existing) {
+        await db.collection('validation_requests').updateOne({ id: existing.id }, { $set: valReq });
+      } else {
+        await db.collection('validation_requests').insertOne(valReq);
+      }
+
+      // 3) Notifie ARACOM par email
+      try {
+        const { sendMailAuto } = await import('@/lib/mail-config');
+        await sendMailAuto({
+          to: 'agence@aracom-conseil.fr',
+          subject: `⏳ Nouvel exposant en liste d'attente — ${venue.name}`,
+          html: `<div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;color:#1f2937">
+<h2 style="color:#b45309">⏳ Nouvelle inscription en liste d'attente</h2>
+<p>Le site <b>${venue.name}</b> est complet, un exposant s'est inscrit en liste d'attente :</p>
+<ul>
+  <li><b>Organisation :</b> ${org?.name || '—'}</li>
+  <li><b>Contact :</b> ${org?.contact_name || '—'} (${org?.main_email || '—'})</li>
+  <li><b>Site demandé :</b> ${venue.name}</li>
+  <li><b>Inscription ID :</b> ${registration_id}</li>
+  <li><b>Note :</b> ${note || '(aucune)'}</li>
+</ul>
+<p>Connectez-vous au cockpit pour gérer la file d'attente.</p>
+</div>`,
+        });
+      } catch (e) { console.error('[waitlist-notify]', e.message); }
+
+      await logActivity(db, ctx.userId, 'registration', registration_id, 'waitlist_add', null, { venue_id, requested_stand_code, note });
+      return json({ ok: true, status: 'liste_attente', validation_request_id: valReq.id });
+    }
+
     if (route === 'wizard/stand') {
       const { registration_id, stand_code, venue_stand_id } = body;
       if (!registration_id) return err('registration_id requis', 400);
       if (!stand_code && !venue_stand_id) return err('Veuillez sélectionner un stand sur la carte', 400);
-
       const reg = await db.collection('registrations').findOne({ id: registration_id });
       if (!reg) return err('Inscription introuvable', 404);
       if (!reg.venue_id) return err('Étape 2 (site & jour) manquante', 400);

@@ -706,6 +706,11 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   };
   const myStand = stands.find(s => s.stand_code === b.stand_code);
 
+  // 🆕 SESSION 45 — Détection "site complet" pour proposer la liste d'attente automatique
+  const freeStandsCount = stands.filter(isStandAvailable).length;
+  const allStandsTaken = stands.length > 0 && freeStandsCount === 0;
+  const [waitlistBusy, setWaitlistBusy] = useState(false);
+
   const onStandClick = (stand) => {
     if (!stand) return;
     if (!isStandAvailable(stand)) {
@@ -734,6 +739,25 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
     finally { setSaving(false); }
+  };
+
+  // 🆕 SESSION 45 — Soumettre une demande en LISTE D'ATTENTE quand le site est complet
+  const submitWaitlist = async () => {
+    setWaitlistBusy(true);
+    try {
+      await api('/wizard/waitlist', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          venue_id: venueId,
+          requested_stand_code: null, // pas de stand spécifique
+          note: `Site complet (${stands.length} stands tous pris) — exposant inscrit en liste d'attente`,
+        }),
+      });
+      toast.success("✅ Vous êtes inscrit en liste d'attente. ARACOM vous recontactera dès qu'un stand se libère.");
+      await reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setWaitlistBusy(false); }
   };
 
   if (!selectedVenue) {
@@ -790,16 +814,40 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
           </div>
         )}
 
+        {/* 🆕 SESSION 45 — Bandeau "Site complet → liste d'attente" si tous les stands sont pris */}
+        {allStandsTaken && (
+          <div className="bg-rose-50 border-2 border-rose-300 p-4 rounded-lg flex items-start gap-3">
+            <span className="text-2xl shrink-0">🚫</span>
+            <div className="flex-1">
+              <div className="font-bold text-rose-900 text-base mb-1">Ce site est complet ({stands.length} stands tous attribués)</div>
+              <div className="text-sm text-rose-800 leading-snug">
+                Aucun stand n&apos;est actuellement disponible sur ce site. Vous pouvez vous inscrire en <b>liste d&apos;attente</b> — ARACOM vous recontactera dès qu&apos;un stand se libère, ou pour vous proposer un autre site.
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button
-            onClick={submit}
-            disabled={saving || !b.stand_code}
-            className="gap-2 bg-blue-600 hover:bg-blue-700"
-            data-testid="step3-next"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Verrouiller mon stand <ChevronRight className="w-4 h-4" /></>}
-          </Button>
+          {allStandsTaken && !b.stand_code ? (
+            <Button
+              onClick={submitWaitlist}
+              disabled={waitlistBusy}
+              className="gap-2 bg-amber-600 hover:bg-amber-700"
+              data-testid="step3-waitlist"
+            >
+              {waitlistBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <>⏳ M&apos;inscrire en liste d&apos;attente</>}
+            </Button>
+          ) : (
+            <Button
+              onClick={submit}
+              disabled={saving || !b.stand_code}
+              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              data-testid="step3-next"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Verrouiller mon stand <ChevronRight className="w-4 h-4" /></>}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

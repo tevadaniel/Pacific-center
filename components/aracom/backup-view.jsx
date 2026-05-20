@@ -8,6 +8,7 @@ import { KpiCard } from '@/components/app-shell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import ExcelExportCard from './excel-export-card';
 
 /**
  * 🆕 SESSION 45 — Carte Template & Extraction DB (boutons avec fetch authentifié).
@@ -317,6 +318,9 @@ export default function BackupView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 🆕 SESSION 45 — Export Excel Dashboard avec sélecteur de colonnes */}
+      <ExcelExportCard />
 
       {/* 🆕 SESSION 45 — Template + Extraction exhaustive de la base de données */}
       <DbTemplateAndExtractionCard />
