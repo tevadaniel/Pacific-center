@@ -820,6 +820,26 @@ export async function GET(request, { params }) {
       });
     }
 
+    // 🆕 SESSION 45 — Extraction COMPLÈTE de la DB AVEC données (toutes collections en JSON + CSV peuplés)
+    //   GET /api/admin/db-extraction
+    if (route === 'admin/db-extraction') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const { buildDbExtraction } = await import('@/lib/db-template-builder');
+      const { buf, total_documents, total_collections } = await buildDbExtraction({ db });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="db-extraction-forum-2026-${ts}.zip"`,
+          'Cache-Control': 'no-store',
+          'X-Total-Documents': String(total_documents),
+          'X-Total-Collections': String(total_collections),
+        },
+      });
+    }
+
     // 📄📕📝📋 PDF EXPOSANTS — dispatcher modulaire (Convention, Guide, Questionnaire)
     // (extraits dans /app/lib/api/handlers/exposant-documents.js)
     const exposantDocsResp = await handleExposantDocumentsGet({ db, route, p });
