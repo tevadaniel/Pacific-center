@@ -691,7 +691,10 @@ export default function ExposantsListView() {
 // 📝 MODAL "Nouveau exposant" minimaliste (inline)
 // ╚══════════════════════════════════════════════════════╝
 function NewExposantInline({ venues, onClose, onCreated }) {
-  const [form, setForm] = useState({ name: '', main_email: '', discipline: '', venue_id: '', priority_level: 'C' });
+  const [form, setForm] = useState({
+    name: '', main_email: '', main_phone: '', contact_name: '',
+    discipline: '', venue_id: '', priority_level: 'C',
+  });
   const [submitting, setSubmitting] = useState(false);
   const submit = async () => {
     if (!form.name.trim()) { toast.error('Nom requis'); return; }
@@ -704,7 +707,7 @@ function NewExposantInline({ venues, onClose, onCreated }) {
   };
   return (
     <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-base">➕ Nouvel exposant</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
@@ -715,8 +718,16 @@ function NewExposantInline({ venues, onClose, onCreated }) {
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ex: Tahitian Explorers" className="h-9" />
           </div>
           <div>
-            <label className="text-[11px] text-slate-500">Email</label>
+            <label className="text-[11px] text-slate-500">Email principal</label>
             <Input type="email" value={form.main_email} onChange={(e) => setForm({ ...form, main_email: e.target.value })} placeholder="contact@..." className="h-9" />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500">Téléphone</label>
+            <Input type="tel" value={form.main_phone} onChange={(e) => setForm({ ...form, main_phone: e.target.value })} placeholder="ex: 87 12 34 56" className="h-9" />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500">Nom du contact</label>
+            <Input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} placeholder="ex: Marie Tehei" className="h-9" />
           </div>
           <div>
             <label className="text-[11px] text-slate-500">Discipline / Secteur</label>
@@ -726,7 +737,7 @@ function NewExposantInline({ venues, onClose, onCreated }) {
             <label className="text-[11px] text-slate-500">Site préféré</label>
             <Select value={form.venue_id || '_none'} onValueChange={(v) => setForm({ ...form, venue_id: v === '_none' ? '' : v })}>
               <SelectTrigger className="h-9"><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[300]">
                 <SelectItem value="_none">—</SelectItem>
                 {venues.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
               </SelectContent>
@@ -736,7 +747,7 @@ function NewExposantInline({ venues, onClose, onCreated }) {
             <label className="text-[11px] text-slate-500">Priorité</label>
             <Select value={form.priority_level} onValueChange={(v) => setForm({ ...form, priority_level: v })}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[300]">
                 {PRIO_OPTS.map((o) => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}
               </SelectContent>
             </Select>

@@ -9187,28 +9187,32 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       // Create new organization + registration (ARACOM from Nouveau exposant OR self-register)
       const orgId = body.organization_id || `org-${uuid()}`;
       const existing = body.organization_id ? await db.collection('organizations').findOne({ id: body.organization_id }) : null;
+      // 🐛 FIX SESSION 47.6 — Accepter à la fois `email`/`main_email` et `phone`/`main_phone` (le formulaire admin envoie main_*)
+      const orgEmail = (body.main_email || body.email || '').toString().toLowerCase().trim() || null;
+      const orgPhone = body.main_phone || body.phone || null;
+      const orgContact = body.contact_name || null;
       if (!existing) {
         await db.collection('organizations').insertOne({
           id: orgId,
           name: body.name,
           discipline: body.discipline || 'Autre',
           priority_level: body.priority_level || 'prospect',
-          main_email: body.email || null,
-          main_phone: body.phone || null,
-          contact_name: body.contact_name || null,
+          main_email: orgEmail,
+          main_phone: orgPhone,
+          contact_name: orgContact,
           notes: body.notes || null,
           source_origin: body.source || 'aracom_manual',
           created_at: new Date(), updated_at: new Date(),
         });
       }
       // Create user account for exposant if email provided
-      if (body.email) {
-        const existingUser = await db.collection('users').findOne({ email: body.email.toLowerCase().trim() });
+      if (orgEmail) {
+        const existingUser = await db.collection('users').findOne({ email: orgEmail });
         if (!existingUser) {
           await db.collection('users').insertOne({
-            id: `u-exp-${orgId}`, email: body.email.toLowerCase().trim(),
-            full_name: body.contact_name || body.name,
-            phone: body.phone, role_id: 'role-exposant', role_code: 'exposant',
+            id: `u-exp-${orgId}`, email: orgEmail,
+            full_name: orgContact || body.name,
+            phone: orgPhone, role_id: 'role-exposant', role_code: 'exposant',
             password: body.password || 'forum2026',
             organization_id: orgId, is_active: true,
             password_changed: false,
