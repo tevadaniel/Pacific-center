@@ -625,8 +625,23 @@ export default function ExposantsListView() {
               </div>
             )}
           </div>
-          <Button size="sm" variant="outline" onClick={bulkReminder} disabled={busy} className="h-8 text-xs gap-1">
-            <Send className="w-3 h-3" /> Rappel
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              // 🆕 SESSION 47.8 — Ouvre l'onglet Mailing avec la sélection pré-cochée
+              const ids = Array.from(selected);
+              if (ids.length === 0) { toast.error('Aucun exposant sélectionné'); return; }
+              const url = new URL(window.location.href);
+              url.searchParams.set('tab', 'mailing');
+              url.searchParams.set('preselect', ids.join(','));
+              window.location.href = url.toString();
+            }}
+            disabled={busy}
+            className="h-8 text-xs gap-1"
+            title={`Composer un email pour les ${selected.size} exposants sélectionnés`}
+          >
+            <Send className="w-3 h-3" /> Composer mail ({selected.size})
           </Button>
           <Button size="sm" variant="outline" onClick={() => exportCSV(selected)} disabled={busy} className="h-8 text-xs gap-1">
             <Download className="w-3 h-3" /> Export
