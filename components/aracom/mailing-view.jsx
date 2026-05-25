@@ -179,8 +179,19 @@ export default function MailingView() {
       if (preselect) {
         const ids = preselect.split(',').filter(Boolean);
         if (ids.length > 0) {
+          // 🐛 FIX SESSION 47.9 — Force filtre 'all' pour que les destinataires pré-cochés soient visibles
+          // (sinon le filtre par défaut 'a_relancer' les cache si leur statut ne match pas)
+          setFilter('all');
+          setSiteFilter('all');
+          setYearFilter('all');
+          setRecipientSearch('');
           setSelectedIds(new Set(ids));
-          toast.success(`📥 ${ids.length} destinataire${ids.length > 1 ? 's' : ''} pré-coché${ids.length > 1 ? 's' : ''} depuis le Centre d'alertes`);
+          // Récupère les noms pour le toast (depuis regs si chargés)
+          const matched = regs.filter(r => ids.includes(r.id));
+          const names = matched.map(r => r.organization?.name).filter(Boolean).slice(0, 3);
+          const suffix = matched.length > names.length ? `… (+${matched.length - names.length})` : '';
+          const detail = names.length ? ` : ${names.join(', ')}${suffix}` : '';
+          toast.success(`📥 ${ids.length} destinataire${ids.length > 1 ? 's' : ''} pré-coché${ids.length > 1 ? 's' : ''}${detail}`);
         }
         if (mailType && MAIL_TYPES.some(t => t.value === mailType)) {
           setType(mailType);
