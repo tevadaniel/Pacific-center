@@ -919,9 +919,19 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
   };
 
   const submit = async () => {
-    if (anims.length === 0) { toast.error('Vous devez avoir au moins une animation'); return; }
+    // 🆕 SESSION 47 — Validation stricte : 1 créneau obligatoire par jour de présence
+    if (attendingDays.length === 0) {
+      toast.error('Veuillez d\'abord cocher vos jours de présence à l\'étape précédente.');
+      return;
+    }
+    const missingDays = attendingDays.filter(day => !anims.find(a => a.day_label === day));
+    if (missingDays.length > 0) {
+      toast.error(`Créneau d'animation manquant pour : ${missingDays.join(', ')}`);
+      return;
+    }
     // Valider chaque animation
     for (const a of anims) {
+      const dayName = a.day_label === 'samedi' ? 'Samedi' : 'Vendredi';
       const errs = [];
       if (!a.location_type) errs.push('lieu');
       if (!a.slot_type) errs.push('type');
@@ -932,7 +942,7 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
       if (!a.start_time || !a.end_time) errs.push('horaire');
       if (a.start_time && a.end_time && a.start_time >= a.end_time) errs.push('horaire fin > début');
       if (errs.length) {
-        toast.error(`Animation ${a.day_label} : ${errs.join(', ')} manquant`);
+        toast.error(`Animation ${dayName} : ${errs.join(', ')} manquant`);
         return;
       }
     }
@@ -973,6 +983,13 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
           title="Animations — obligatoire pour tous les exposants"
           desc={`Chaque exposant doit proposer une animation par jour de présence (${attendingDays.length} jour${attendingDays.length > 1 ? 's' : ''} coché${attendingDays.length > 1 ? 's' : ''}). Les créneaux sont calculés automatiquement en fonction du nombre d'exposants attendus.`}
         />
+
+        {/* 🆕 SESSION 47 — Mention pédagogique sur le pourquoi d'un créneau par jour */}
+        <div className="bg-violet-50 border-l-4 border-violet-500 p-4 rounded-r-lg">
+          <div className="text-sm text-violet-900 leading-relaxed">
+            <b>✨ Un créneau obligatoire par jour</b> pour que l&apos;on puisse faire un focus sur ce que vous proposez à cocher. Ensuite, vous pouvez continuer à en faire sur votre stand à votre rythme. <b>La zone de démonstration</b> est le meilleur endroit pour pouvoir effectuer votre démo (espace dédié, scène, tatamis…).
+          </div>
+        </div>
 
         {/* 🆕 SESSION 44 — Alerte pré-validation ARACOM sur les créneaux pris */}
         <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg flex items-start gap-3">

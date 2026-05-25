@@ -4126,6 +4126,12 @@ export async function POST(request, { params }) {
         daysSeen.add(a.day_label);
       }
 
+      // 🆕 SESSION 47 — Validation stricte : 1 créneau OBLIGATOIRE par jour de présence
+      const missingDays = reg.attending_days.filter(d => !daysSeen.has(d));
+      if (missingDays.length > 0) {
+        return err(`Créneau d'animation manquant pour : ${missingDays.join(', ')}. Un créneau est obligatoire par jour de présence.`, 400);
+      }
+
       // Vérifier conflits avec autres exposants du même site / même jour / même lieu
       for (const a of normalized) {
         const conflict = await db.collection('animation_slots').findOne({
