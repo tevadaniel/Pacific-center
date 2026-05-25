@@ -834,6 +834,24 @@ export async function GET(request, { params }) {
       return json(data);
     }
 
+    // 🆕 SESSION 47 — Statistiques d'urgence (public, pour bannière dynamique)
+    //   GET /api/wizard/urgency-stats → { pending_validations, registrations_in_progress, total }
+    if (route === 'wizard/urgency-stats') {
+      const pendingValidations = await db.collection('validation_requests').countDocuments({
+        status: { $in: ['pending', 'en_attente', 'a_valider'] },
+      }).catch(() => 0);
+      const inProgress = await db.collection('registrations').countDocuments({
+        wizard_step: { $gte: 1, $lt: 5 },
+        status: { $nin: ['annule', 'cancelled'] },
+        is_simulation: { $ne: true },
+      }).catch(() => 0);
+      return json({
+        pending_validations: pendingValidations,
+        registrations_in_progress: inProgress,
+        total: pendingValidations + inProgress,
+      });
+    }
+
     // 🆕 SESSION 45 — Template exhaustif de la DB (ZIP : json skeletons + csv + markdown)
     //   GET /api/admin/db-template?download=1
     if (route === 'admin/db-template') {

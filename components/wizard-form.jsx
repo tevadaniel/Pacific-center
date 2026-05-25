@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast, Toaster } from 'sonner';
 import { Check, ChevronRight, ChevronLeft, Lock, Plus, Minus, MapPin, Calendar, Clock, Music, FileText, ShieldCheck, Sparkles, Loader2, AlertCircle, Edit, Download } from 'lucide-react';
 import SmartVenueMap from '@/components/smart-venue-map';
+import UrgencyBanner from '@/components/wizard/urgency-banner';
 
 const STEPS = [
   { n: 1, key: 'profile', label: 'Profil', icon: '👤' },
@@ -243,6 +244,26 @@ export default function WizardPage({ registrationId, isPublic = false }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-6">
+        {/* 🆕 SESSION 47 — Bannière collante : urgence + ajout multi-site */}
+        <UrgencyBanner
+          organizationId={state.organization?.id}
+          currentRegistrationId={registrationId}
+          existingSites={(orgSites || []).map(s => ({
+            registration_id: s.registration_id || s.id,
+            venue_id: s.venue_id,
+            venue_name: s.venue?.name || s.venue_name,
+            is_user_priority: s.is_user_priority,
+          })).filter(s => s.venue_id)}
+          availableVenues={(availability?.venues || []).map(v => ({ id: v.id, name: v.name }))}
+          onSiteAdded={(newRegId) => {
+            try {
+              localStorage.setItem('inscription_public_reg_id', newRegId);
+            } catch {}
+            window.location.reload();
+          }}
+          context="wizard"
+        />
+
         {/* 📌 Bandeau profil persistant : visible à toutes les étapes (sauf 1 = en train de remplir) */}
         {currentStep > 1 && state.organization && (
           <div className="mb-4 bg-white border border-slate-200 rounded-lg p-3 shadow-sm">

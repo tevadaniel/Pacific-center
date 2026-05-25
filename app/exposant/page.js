@@ -21,6 +21,7 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import SimulationModal from '@/components/aracom/simulation-modal';
+import UrgencyBanner from '@/components/wizard/urgency-banner';
 import ExposantPasswordGate, { ExposantPasswordManager } from '@/components/exposant-password-gate';
 import SatisfactionSurvey from '@/components/satisfaction-survey';
 import { toast } from 'sonner';
@@ -66,6 +67,12 @@ export default function ExposantPortal() {
   const [validationRequest, setValidationRequest] = useState(null);
   const [passwordStatus, setPasswordStatus] = useState({ has_password: false });
   const [simulationOpen, setSimulationOpen] = useState(false);
+  const [allVenues, setAllVenues] = useState([]);
+
+  // 🆕 SESSION 47 — Charge la liste des venues pour le banner d'ajout multi-site
+  useEffect(() => {
+    api('/api/venues').then(setAllVenues).catch(() => setAllVenues([]));
+  }, []);
 
   // 🔐 Charge le statut du mot de passe (pour l'affichage du panneau de gestion)
   const loadPasswordStatus = async (orgId) => {
@@ -454,6 +461,28 @@ export default function ExposantPortal() {
             setTimeout(() => window.dispatchEvent(new CustomEvent('exposant:goto-step', { detail: { step } })), 50);
           }
         }} />}
+
+        {/* 🆕 SESSION 47 — Bannière collante : urgence + ajout multi-site */}
+        <UrgencyBanner
+          organizationId={o?.id}
+          currentRegistrationId={r?.id}
+          existingSites={(data.allSites || []).map(s => ({
+            registration_id: s.id || s.registration_id,
+            venue_id: s.venue_id,
+            venue_name: s.venue?.name || s.venue_name,
+            is_user_priority: s.is_user_priority,
+          })).filter(s => s.venue_id)}
+          availableVenues={(allVenues || []).map(v => ({ id: v.id, name: v.name }))}
+          onSiteAdded={(newRegId) => {
+            // Bascule le portail sur la nouvelle inscription
+            if (typeof window !== 'undefined') {
+              const u = new URL(window.location.href);
+              u.searchParams.set('reg', newRegId);
+              window.location.href = u.toString();
+            }
+          }}
+          context="portal"
+        />
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           {/* 🆕 SESSION 29 — Mon profil mis en valeur (orange) séparé visuellement des autres onglets */}
