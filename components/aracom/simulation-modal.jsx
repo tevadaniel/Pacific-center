@@ -24,7 +24,7 @@ export default function SimulationModal({ open, onClose }) {
   const [concurrency, setConcurrency] = useState(3);
   const [events, setEvents] = useState([]);
   const [progress, setProgress] = useState({
-    total: 0, in_progress: 0, success: 0, abandoned: 0, failed: 0,
+    total: 0, in_progress: 0, success: 0, abandoned: 0, waitlisted: 0, failed: 0,
     api_calls: 0, errors: [], by_site: {},
     by_step: { profile: 0, days: 0, stand: 0, animation: 0, finalize: 0 },
   });
@@ -107,7 +107,7 @@ export default function SimulationModal({ open, onClose }) {
       setSummary(null);
       setEvents([]);
       setProgress({
-        total: 0, in_progress: 0, success: 0, abandoned: 0, failed: 0,
+        total: 0, in_progress: 0, success: 0, abandoned: 0, waitlisted: 0, failed: 0,
         api_calls: 0, errors: [], by_site: {},
         by_step: { profile: 0, days: 0, stand: 0, animation: 0, finalize: 0 },
       });
@@ -134,7 +134,7 @@ export default function SimulationModal({ open, onClose }) {
   const isRunning = engineState === 'running';
   const isPaused = engineState === 'paused';
   const canStart = engineState === 'idle' || engineState === 'done' || engineState === 'stopped';
-  const totalDone = progress.success + progress.abandoned + progress.failed;
+  const totalDone = progress.success + progress.abandoned + (progress.waitlisted || 0) + progress.failed;
   const progressPct = progress.total > 0 ? Math.round((totalDone / progress.total) * 100) : 0;
 
   return (
@@ -215,9 +215,9 @@ export default function SimulationModal({ open, onClose }) {
                   <KpiTile label="Total" value={progress.total} color="slate" />
                   <KpiTile label="En cours" value={progress.in_progress} color="blue" />
                   <KpiTile label="Réussis" value={progress.success} color="emerald" icon={<CheckCircle2 className="w-3.5 h-3.5" />} />
-                  <KpiTile label="Abandonnés" value={progress.abandoned} color="amber" />
+                  <KpiTile label="Waitlist" value={progress.waitlisted || 0} color="violet" />
+                  <KpiTile label="Abandons" value={progress.abandoned} color="amber" />
                   <KpiTile label="Erreurs" value={progress.failed} color="rose" icon={<XCircle className="w-3.5 h-3.5" />} />
-                  <KpiTile label="Appels API" value={progress.api_calls} color="violet" />
                 </div>
                 {/* Progress bar */}
                 {progress.total > 0 && (
