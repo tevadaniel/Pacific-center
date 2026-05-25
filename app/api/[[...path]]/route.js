@@ -4265,13 +4265,28 @@ export async function POST(request, { params }) {
 
     // Étape 5 — Finaliser (verrouille tout + envoie email avec badge en pièce jointe)
     if (route === 'wizard/finalize') {
-      const { registration_id, regulation_accepted } = body;
+      const {
+        registration_id, regulation_accepted,
+        caution_payment_method, caution_deposit_date, caution_deposit_time,
+        bring_documents_to_rdv, missing_documents_note,
+      } = body;
       if (!registration_id) return err('registration_id requis');
       if (!regulation_accepted) return err('Vous devez accepter le règlement exposant', 400);
       const state = await getWizardState(db, registration_id);
       if (!state) return err('Inscription introuvable', 404);
       const missing = Object.entries(state.step_status).filter(([k, v]) => k !== 'step5_confirmed' && !v).map(([k]) => k);
       if (missing.length) return err(`Étapes incomplètes : ${missing.join(', ')}`, 400);
+
+      // 🆕 SESSION 47 — Capture des paramètres post-soumission : mode de règlement caution + RDV libre
+      const allowedPayments = ['cheque', 'espece', 'virement'];
+      const cautionPayment = allowedPayments.includes(caution_payment_method) ? caution_payment_method : null;
+      let cautionDepositAt = null;
+      if (caution_deposit_date) {
+        const isoDate = String(caution_deposit_date).slice(0, 10);
+        const isoTime = caution_deposit_time && /^\d{2}:\d{2}$/.test(caution_deposit_time) ? caution_deposit_time : '09:00';
+        const composed = new Date(`${isoDate}T${isoTime}:00`);
+        if (!isNaN(composed.getTime())) cautionDepositAt = composed;
+      }
 
       // Tokens modification 90j
       const tokVisit = await createModificationToken(db, { registration_id, scope: 'visit_slot' });
@@ -4286,6 +4301,11 @@ export async function POST(request, { params }) {
             status: state.registration.status === 'confirme' ? 'confirme' : 'a_confirmer',
             modification_token_visit: tokVisit,
             modification_token_animation: tokAnim,
+            // 🆕 SESSION 47 — Paramètres de soumission finale
+            ...(cautionPayment ? { caution_payment_method: cautionPayment } : {}),
+            ...(cautionDepositAt ? { caution_deposit_at: cautionDepositAt } : {}),
+            ...(bring_documents_to_rdv != null ? { bring_documents_to_rdv: !!bring_documents_to_rdv } : {}),
+            ...(missing_documents_note ? { missing_documents_note: String(missing_documents_note).slice(0, 500) } : {}),
             // 🆕 SESSION 43-j — PHASE 3 : Verrouillage du bloc réservation (Site/Date/Stand/Animation)
             //   Après finalisation, l'exposant voit le bloc en lecture seule. Pour modifier,
             //   il doit utiliser POST /api/registrations/:id/request-modification qui email ARACOM.
@@ -4336,6 +4356,14 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
   <div><b>Lieu :</b> ${(a.location_type === 'sur_stand' || a.location_type === 'stand') ? 'Sur le stand' : 'Zone de démonstration'}</div>
   <div><b>Horaire :</b> ${a.start_time}–${a.end_time}</div>
   <div><b>Public cible :</b> ${a.target_audience || '—'}</div>
+</div>` : ''}
+
+${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 18px;border-radius:6px;margin:18px 0">
+  <h3 style="margin:0 0 10px 0;color:#5b21b6">💰 Caution & dépôt de documents</h3>
+  ${cautionPayment ? `<div><b>Mode de règlement :</b> ${cautionPayment === 'cheque' ? 'Chèque' : cautionPayment === 'espece' ? 'Espèces' : 'Virement bancaire'}</div>` : ''}
+  ${cautionDepositAt ? `<div><b>Date et heure du dépôt :</b> ${new Date(cautionDepositAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} à ${new Date(cautionDepositAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+  ${bring_documents_to_rdv ? `<div style="margin-top:6px;padding:8px;background:#fef3c7;border-radius:4px;font-size:13px"><b>📋 À apporter le jour J :</b> les documents manquants (convention signée, attestation d'assurance, etc.)</div>` : ''}
+  <div style="margin-top:8px;font-size:13px;color:#5b21b6"><b>Caution :</b> 20 000 XPF par site</div>
 </div>` : ''}
 
 <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px 18px;border-radius:6px;margin:18px 0">

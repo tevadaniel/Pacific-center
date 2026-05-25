@@ -12,6 +12,7 @@ import { toast, Toaster } from 'sonner';
 import { Check, ChevronRight, ChevronLeft, Lock, Plus, Minus, MapPin, Calendar, Clock, Music, FileText, ShieldCheck, Sparkles, Loader2, AlertCircle, Edit, Download } from 'lucide-react';
 import SmartVenueMap from '@/components/smart-venue-map';
 import UrgencyBanner from '@/components/wizard/urgency-banner';
+import SubmitFinalizeModal from '@/components/wizard/submit-finalize-modal';
 
 const STEPS = [
   { n: 1, key: 'profile', label: 'Profil', icon: '👤' },
@@ -1218,6 +1219,8 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
   const [accepted, setAccepted] = useState(state.registration?.wizard_regulation_accepted || false);
   const [completed, setCompleted] = useState(state.registration?.status === 'confirme');
   const [links, setLinks] = useState({});
+  // 🆕 SESSION 47 — Modal de soumission post-wizard (caution + RDV + docs)
+  const [submitModalOpen, setSubmitModalOpen] = useState(false);
 
   const o = state.organization || {};
   const v = state.venue || {};
@@ -1290,20 +1293,43 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
 
   const hasRdv = !!(state.validation_request?.rdv_date || state.validation_request?.rdv_proposal);
 
-  const submit = async () => {
+  // 🆕 SESSION 47 — Le clic sur Soumettre ouvre le modal de pré-soumission
+  const openSubmitModal = () => {
     if (!hasRdv) { toast.error('Veuillez d\'abord demander un RDV caution ci-dessus'); return; }
     if (!accepted) { toast.error('Acceptez le règlement exposant pour finaliser'); return; }
+    setSubmitModalOpen(true);
+  };
+
+  // Confirme la soumission avec les paramètres du modal (caution + RDV + docs)
+  const submit = async (extra = {}) => {
     setSaving(true);
     try {
-      const r = await api('/wizard/finalize', { method: 'POST', body: JSON.stringify({ registration_id: registrationId, regulation_accepted: true }) });
-      toast.success('🎉 Inscription confirmée ! Email envoyé avec votre badge en pièce jointe.');
+      const r = await api('/wizard/finalize', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: registrationId,
+          regulation_accepted: true,
+          ...extra,
+        }),
+      });
+      toast.success('🎉 Demande soumise ! Email de récap envoyé avec votre badge.');
       setLinks(r.modification_links || {});
       setCompleted(true);
+      setSubmitModalOpen(false);
       await reload();
       try { localStorage.removeItem(`wizard:${registrationId}`); } catch {}
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   };
+
+  // Écoute l'event refresh-state émis par le modal après upload de doc
+  useEffect(() => {
+    const handler = () => { reload && reload(); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('wizard:refresh-state', handler);
+      return () => window.removeEventListener('wizard:refresh-state', handler);
+    }
+  }, [reload]);
 
   if (completed) {
     const addAnotherSite = async () => {
@@ -1560,11 +1586,20 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={submit} disabled={saving || !accepted || !hasRdv} size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700" data-testid="finalize">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Confirmer mon inscription</>}
+          <Button onClick={openSubmitModal} disabled={saving || !accepted || !hasRdv} size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700" data-testid="finalize">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Soumettre ma demande</>}
           </Button>
         </div>
       </CardContent>
+      {/* 🆕 SESSION 47 — Modal de soumission finale (caution + RDV libre + docs) */}
+      <SubmitFinalizeModal
+        open={submitModalOpen}
+        onClose={() => setSubmitModalOpen(false)}
+        onConfirm={submit}
+        state={state}
+        registrationId={registrationId}
+        saving={saving}
+      />
     </Card>
   );
 }
