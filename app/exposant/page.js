@@ -70,8 +70,9 @@ export default function ExposantPortal() {
   const [allVenues, setAllVenues] = useState([]);
 
   // 🆕 SESSION 47 — Charge la liste des venues pour le banner d'ajout multi-site
+  // 🆕 SESSION 47.10 — only_active=1 : seuls les sites activés par ARACOM sont proposés
   useEffect(() => {
-    api('/api/venues').then(setAllVenues).catch(() => setAllVenues([]));
+    api('/api/venues?only_active=1').then(setAllVenues).catch(() => setAllVenues([]));
   }, []);
 
   // 🔐 Charge le statut du mot de passe (pour l'affichage du panneau de gestion)

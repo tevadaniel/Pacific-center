@@ -44,8 +44,9 @@ export default function EditExposantChoicesDialog({ registration, organization, 
   useEffect(() => { setMounted(true); }, []);
 
   // 🔄 Charger les venues une fois à l'ouverture
+  // 🆕 SESSION 47.10 — only_active=1 : ne propose que les sites activés par ARACOM
   useEffect(() => {
-    api('/api/venues').then((v) => {
+    api('/api/venues?only_active=1').then((v) => {
       setVenues(Array.isArray(v) ? v : []);
     }).catch(() => {});
   }, []);

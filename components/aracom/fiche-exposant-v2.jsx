@@ -173,7 +173,7 @@ export default function FicheExposantV2({ id, onClose }) {
     try {
       const [d, v] = await Promise.all([
         api(`/api/registrations/${id}`),
-        api('/api/venues').catch(() => []),
+        api('/api/venues?only_active=1').catch(() => []),
       ]);
       setData(d);
       setAllVenues(Array.isArray(v) ? v : []);
@@ -769,7 +769,7 @@ function AdminMultiSitesPanel({ organizationId, currentRegId, onReload, onSwitch
     try {
       const [s, v] = await Promise.all([
         api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(organizationId)}`).catch(() => []),
-        api('/api/venues').catch(() => []),
+        api('/api/venues?only_active=1').catch(() => []),
       ]);
       setSites(Array.isArray(s) ? s : []);
       setVenues(Array.isArray(v) ? v : []);
@@ -1192,7 +1192,7 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
   };
   const loadAllVenues = async () => {
     try {
-      const v = await api('/api/venues');
+      const v = await api('/api/venues?only_active=1');
       setAllVenuesList(Array.isArray(v) ? v.filter((x) => x.is_available_2026 !== false) : []);
     } catch { /* ignore */ }
   };

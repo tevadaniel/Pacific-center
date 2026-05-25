@@ -717,6 +717,8 @@ export default function ExposantsListView() {
 // 📝 MODAL "Nouveau exposant" minimaliste (inline)
 // ╚══════════════════════════════════════════════════════╝
 function NewExposantInline({ venues, onClose, onCreated }) {
+  // 🆕 SESSION 47.10 — Ne montre que les sites activés par ARACOM dans le dropdown de sélection
+  const activeVenues = (venues || []).filter(v => v.is_available_2026 !== false && v.is_active !== false);
   const [form, setForm] = useState({
     name: '', main_email: '', main_phone: '', contact_name: '',
     discipline: '', venue_id: '', priority_level: 'C',
@@ -765,9 +767,12 @@ function NewExposantInline({ venues, onClose, onCreated }) {
               <SelectTrigger className="h-9"><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent className="z-[300]">
                 <SelectItem value="_none">—</SelectItem>
-                {venues.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                {activeVenues.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
               </SelectContent>
             </Select>
+            {activeVenues.length < (venues?.length || 0) && (
+              <div className="text-[10px] text-slate-500 mt-0.5">{(venues?.length || 0) - activeVenues.length} site(s) inactif(s) masqué(s)</div>
+            )}
           </div>
           <div>
             <label className="text-[11px] text-slate-500">Priorité</label>

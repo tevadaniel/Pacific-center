@@ -472,6 +472,15 @@ function replaceContactWithAccessLink(html, accessUrl) {
       (m, open, _inner, close) => `${open.replace(/href=["']mailto:[^"']+["']/i, `href="${accessUrl}"`)}Accéder à mon espace${close}`
     );
   }
+  // 🆕 SESSION 47.11 — Bouton CTA proéminent "Accéder à mon espace personnel" (si pas déjà présent)
+  if (accessUrl && !out.includes(accessUrl + '"')) {
+    out += `
+<div style="margin:32px 0 8px;padding:20px;text-align:center;background:linear-gradient(135deg,#eff6ff 0%,#e0e7ff 100%);border-radius:10px;border:1px solid #c7d2fe">
+  <p style="margin:0 0 12px;font-size:13px;color:#475569;font-weight:500">Retrouvez toutes vos informations dans votre espace personnel :</p>
+  <a href="${accessUrl}" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%);color:white;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;box-shadow:0 2px 8px rgba(37,99,235,0.25)">🔐 Accéder à mon espace personnel</a>
+  <p style="margin:10px 0 0;font-size:11px;color:#64748b">Lien personnel &amp; sécurisé — aucun mot de passe à retenir</p>
+</div>`;
+  }
   // Append a fallback contact line if not already present
   if (!/agence@aracom-conseil\.fr/.test(out) || !out.includes('💬')) {
     out += `
@@ -1220,8 +1229,13 @@ export async function GET(request, { params }) {
     if (route === 'venues') {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
       const userRole = request.headers.get('x-user-role');
+      const onlyActive = url.searchParams.get('only_active') === '1';
       // Hide unavailable venues for non-admin roles
       let visible = userRole === 'aracom_admin' ? venues : venues.filter(v => v.is_available_2026 !== false);
+      // 🆕 SESSION 47.10 — Si only_active=1 (dropdown de sélection), force le filtre même pour aracom_admin
+      if (onlyActive) {
+        visible = visible.filter(v => v.is_available_2026 !== false && v.is_active !== false);
+      }
       // 🆕 Filtre supplémentaire pour Pacific Centers : seuls les sites avec pacific_visible=true (ou non défini = true par défaut)
       if (userRole === 'pacific_centers_readonly') {
         visible = visible.filter(v => v.pacific_visible !== false);
