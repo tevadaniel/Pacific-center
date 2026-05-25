@@ -574,7 +574,18 @@ export default function ExposantsListView() {
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => sendReminderSingle(r)} title="Envoyer rappel" className="p-1.5 rounded hover:bg-blue-100 text-blue-600">
+                        <button
+                          onClick={() => {
+                            // 🆕 SESSION 47.7 — Ouvre l'onglet Mailing avec cet exposant pré-coché (envoi unique)
+                            if (!r.organization?.main_email) { toast.error('Pas d\'email enregistré pour cet exposant'); return; }
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('tab', 'mailing');
+                            url.searchParams.set('preselect', r.id);
+                            window.location.href = url.toString();
+                          }}
+                          title={`Composer un email pour ${r.organization?.name || 'cet exposant'}`}
+                          className="p-1.5 rounded hover:bg-blue-100 text-blue-600"
+                        >
                           <Send className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => askDeleteSingle(r.id)} title="Supprimer" className="p-1.5 rounded hover:bg-red-100 text-red-600">
