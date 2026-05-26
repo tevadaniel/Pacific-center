@@ -810,8 +810,8 @@ export async function GET(request, { params }) {
       const siteFilter = url.searchParams.get('site');
       const dateFilter = url.searchParams.get('date'); // 2026-08-14 etc.
 
-      const matchStand = {};
-      const matchAnim = {};
+      const matchStand = { status: { $nin: ['annule', 'cancelled'] } };
+      const matchAnim = { status: { $ne: 'annulé' } };
       if (statusFilter && statusFilter !== 'all') {
         matchStand.request_status = statusFilter;
         matchAnim.request_status = statusFilter;
@@ -1573,14 +1573,25 @@ export async function GET(request, { params }) {
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const regById = Object.fromEntries(regs.map(r => [r.id, r]));
       const result = stands.map(s => {
-        const assign = assignments.find(a => a.venue_stand_id === s.id && a.status !== 'annule');
+        // 🆕 SESSION 47.13 — priorise validated > pending > waitlist > legacy (sans request_status)
+        const candidates = assignments.filter(a => a.venue_stand_id === s.id && a.status !== 'annule' && a.status !== 'cancelled');
+        const assign = candidates.find(a => a.request_status === 'validated')
+          || candidates.find(a => a.request_status === 'pending')
+          || candidates.find(a => !a.request_status) // legacy entries sans request_status (rétro-compat)
+          || candidates.find(a => a.request_status === 'waitlist')
+          || null;
         let reg = null, org = null;
         if (assign) {
           reg = regById[assign.registration_id];
           if (reg) org = orgById[reg.organization_id];
         }
         delete s._id;
-        return { ...s, assignment: assign ? { registration_id: assign.registration_id, status: assign.status } : null, organization: org ? { id: org.id, name: org.name, discipline: org.discipline, priority_level: org.priority_level } : null, registration_status: reg?.status || null };
+        return {
+          ...s,
+          assignment: assign ? { registration_id: assign.registration_id, status: assign.status, request_status: assign.request_status || null, waitlist_position: assign.waitlist_position || null } : null,
+          organization: org ? { id: org.id, name: org.name, discipline: org.discipline, priority_level: org.priority_level } : null,
+          registration_status: reg?.status || null,
+        };
       });
       return json(result);
     }
@@ -3991,9 +4002,10 @@ export async function POST(request, { params }) {
 
       // Si on change de site, libère le stand précédemment réservé
       if (reg.venue_id && reg.venue_id !== venue_id && reg.stand_code) {
+        // 🆕 SESSION 47.13 — Aussi marquer request_status='annule' pour les sortir de la file de validation
         await db.collection('stand_assignments').updateMany(
           { registration_id, status: { $nin: ['annule', 'cancelled'] } },
-          { $set: { status: 'annule', updated_at: new Date() } }
+          { $set: { status: 'annule', request_status: 'annule', updated_at: new Date() } }
         );
         await db.collection('registrations').updateOne(
           { id: registration_id },
@@ -4142,9 +4154,10 @@ export async function POST(request, { params }) {
       }
 
       // Annuler les anciennes assignations de cet exposant
+      // 🆕 SESSION 47.13 — Aussi marquer request_status='annule' pour les sortir de la file de validation
       await db.collection('stand_assignments').updateMany(
         { registration_id, status: { $nin: ['annule', 'cancelled'] } },
-        { $set: { status: 'annule', updated_at: new Date() } }
+        { $set: { status: 'annule', request_status: 'annule', updated_at: new Date() } }
       );
 
       // Détermine le request_status : pending si stand libre, waitlist si force_waitlist demandé
