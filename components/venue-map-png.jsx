@@ -487,7 +487,19 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
                       : '0 1px 3px rgba(0,0,0,.3)',
                 opacity: matchesSearch ? 1 : 0.25,
               }}
-              title={s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline})${editMode ? ' — Cliquez pour (dé)sélectionner, glisser pour déplacer' : ''}` : `${s.stand_code} — Libre${editMode ? ' — Cliquez pour (dé)sélectionner, glisser pour déplacer' : ''}`}
+              title={(() => {
+                if (editMode) {
+                  return s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline}) — Cliquez pour (dé)sélectionner, glisser pour déplacer` : `${s.stand_code} — Libre — Cliquez pour (dé)sélectionner, glisser pour déplacer`;
+                }
+                if (!s.organization) return `${s.stand_code} — 🟢 Libre · Cliquez pour le demander`;
+                // 🆕 SESSION 47.13 — Affiche le request_status pour transparence sur waitlist
+                const rs = s.assignment?.request_status;
+                const wpos = s.assignment?.waitlist_position;
+                if (rs === 'validated') return `${s.stand_code} — 🔒 Validé ARACOM pour ${s.organization.name} · Verrouillé`;
+                if (rs === 'pending') return `${s.stand_code} — ⏳ En attente de validation pour ${s.organization.name} · Cliquez pour rejoindre la liste d'attente`;
+                if (rs === 'waitlist') return `${s.stand_code} — 📋 En liste d'attente${wpos ? ` (#${wpos})` : ''} pour ${s.organization.name} · Cliquez pour rejoindre la liste`;
+                return `${s.stand_code} — ${s.organization.name} (${s.organization.discipline})`;
+              })()}
             >
               <div className="text-[9px] leading-tight font-mono">{s.stand_code.replace(/^[A-Z]-[A-Z]/, '').replace(/^[A-Z]/, '')}</div>
               {editMode && (

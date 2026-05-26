@@ -722,15 +722,28 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
     return () => { cancelled = true; };
   }, [venueId]);
 
-  const isStandAvailable = (s) => {
+  // 🆕 SESSION 47.13 — Cliquable = pas verrouillé par ARACOM (validated bloque, pending/waitlist OK)
+  const isStandClickable = (s) => {
+    if (!s.assignment) return true;
+    if (s.assignment.registration_id === registrationId) return true;
+    if (['annule', 'cancelled'].includes(s.assignment.status)) return true;
+    // ❌ Verrouillé UNIQUEMENT si la demande est validée par ARACOM
+    if (s.assignment.request_status === 'validated') return false;
+    // ✅ pending/waitlist/legacy : cliquable, déclenchera la popup waitlist
+    return true;
+  };
+  // Stand totalement libre (aucune demande active)
+  const isStandFree = (s) => {
     if (!s.assignment) return true;
     if (s.assignment.registration_id === registrationId) return true;
     return ['annule', 'cancelled'].includes(s.assignment.status);
   };
+  // 🔄 Rétro-compat : isStandAvailable garde l'ancien comportement pour le map (le map utilise les couleurs)
+  const isStandAvailable = isStandClickable;
   const myStand = stands.find(s => s.stand_code === b.stand_code);
 
   // 🆕 SESSION 45 — Détection "site complet" pour proposer la liste d'attente automatique
-  const freeStandsCount = stands.filter(isStandAvailable).length;
+  const freeStandsCount = stands.filter(isStandFree).length;
   const allStandsTaken = stands.length > 0 && freeStandsCount === 0;
   const [waitlistBusy, setWaitlistBusy] = useState(false);
 
@@ -738,19 +751,33 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   const [conflictInfo, setConflictInfo] = useState(null); // {owner_name, owner_status, waitlist_count, waitlist_position, message}
   const [conflictBusy, setConflictBusy] = useState(false);
 
+  // Stand sélectionné : est-il en conflit (pris par un autre exposant pending/waitlist) ?
+  const selectedStandObj = stands.find(s => s.id === b.venue_stand_id || s.stand_code === b.stand_code);
+  const selectedIsTaken = selectedStandObj && !isStandFree(selectedStandObj);
+  const selectedOwnerName = selectedStandObj?.organization?.name || null;
+  const selectedOwnerStatus = selectedStandObj?.assignment?.request_status || null;
+  const selectedWaitlistPos = selectedStandObj?.assignment?.waitlist_position || null;
+
   const onStandClick = (stand) => {
     if (!stand) return;
-    if (!isStandAvailable(stand)) {
-      toast.error(`Stand ${stand.stand_code} déjà attribué à ${stand.organization?.name || 'un autre exposant'}`);
+    if (!isStandClickable(stand)) {
+      toast.error(`Stand ${stand.stand_code} verrouillé — déjà validé par ARACOM pour ${stand.organization?.name || 'un autre exposant'}`);
       return;
     }
     setField('stand_code', stand.stand_code);
     setField('venue_stand_id', stand.id);
-    toast.success(`Stand ${stand.stand_code} sélectionné`);
+    if (!isStandFree(stand)) {
+      const owner = stand.organization?.name || 'un autre exposant';
+      const rs = stand.assignment?.request_status;
+      const labelStatus = rs === 'waitlist' ? `en liste d'attente` : `en attente de validation`;
+      toast.info(`📋 Stand ${stand.stand_code} déjà demandé par ${owner} (${labelStatus}). Cliquez "Demander ce stand" pour rejoindre la liste d'attente.`, { duration: 6500 });
+    } else {
+      toast.success(`✓ Stand ${stand.stand_code} sélectionné`);
+    }
   };
 
   const submit = async (forceWaitlist = false) => {
-    if (!b.stand_code) { toast.error('Cliquez sur un stand disponible sur la carte'); return; }
+    if (!b.stand_code) { toast.error('Cliquez sur un stand de la carte'); return; }
     if (forceWaitlist) setConflictBusy(true); else setSaving(true);
     try {
       const result = await api('/wizard/stand', {
@@ -782,20 +809,34 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   };
 
   // 🆕 SESSION 45 — Soumettre une demande en LISTE D'ATTENTE quand le site est complet
+  //   → SESSION 47.13 : désormais on sélectionne automatiquement un stand "pris" + force_waitlist
   const submitWaitlist = async () => {
+    // Préfère un stand pending (file plus courte) à un waitlist
+    const candidates = stands.filter(s => isStandClickable(s) && !isStandFree(s));
+    if (candidates.length === 0) {
+      toast.error('Aucun stand disponible pour rejoindre une liste d\'attente sur ce site.');
+      return;
+    }
+    // Trie : moins de waitlist d'abord
+    candidates.sort((a, b) => (a.assignment?.waitlist_position || 0) - (b.assignment?.waitlist_position || 0));
+    const target = candidates[0];
+    setField('stand_code', target.stand_code);
+    setField('venue_stand_id', target.id);
     setWaitlistBusy(true);
     try {
-      await api('/wizard/waitlist', {
+      const result = await api('/wizard/stand', {
         method: 'POST',
         body: JSON.stringify({
           registration_id: registrationId,
-          venue_id: venueId,
-          requested_stand_code: null, // pas de stand spécifique
-          note: `Site complet (${stands.length} stands tous pris) — exposant inscrit en liste d'attente`,
+          stand_code: target.stand_code,
+          venue_stand_id: target.id,
+          force_waitlist: true,
         }),
       });
-      toast.success("✅ Vous êtes inscrit en liste d'attente. ARACOM vous recontactera dès qu'un stand se libère.");
+      const pos = result?.waitlist_position || '?';
+      toast.success(`⏳ Inscrit en liste d'attente sur le stand ${target.stand_code} (position #${pos}). ARACOM tranchera.`);
       await reload();
+      onNext();
     } catch (e) { toast.error(e.message); }
     finally { setWaitlistBusy(false); }
   };
@@ -818,16 +859,20 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   return (
     <Card>
       <CardContent className="p-6 space-y-6">
-        <SectionHeader icon="🗺️" title={`Mon stand sur le plan de ${selectedVenue.name}`} desc="Cliquez sur un stand libre pour le sélectionner. Les stands grisés sont déjà pris." />
+        <SectionHeader icon="🗺️" title={`Mon stand sur le plan de ${selectedVenue.name}`} desc="Cliquez sur un stand pour le sélectionner. Les stands déjà demandés peuvent être rejoints en liste d'attente." />
 
-        {/* 🆕 SESSION 44 — Alerte pré-validation ARACOM */}
-        <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg flex items-start gap-3">
-          <span className="text-2xl shrink-0">⚠️</span>
-          <div className="flex-1">
-            <div className="font-bold text-amber-900 text-base mb-1">Stands déjà attribués = verrouillés</div>
-            <div className="text-sm text-amber-800 leading-snug">
-              Tout stand <b>déjà pris par un autre exposant</b> est <b>pré-validé par ARACOM</b> et ne pourra pas être modifié.
-              Seuls les stands marqués <b>« Libre »</b> sur le plan sont disponibles. En cas de besoin spécifique, contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.
+        {/* 🆕 SESSION 47.13 — Bandeau pédagogique : workflow waitlist */}
+        <div className="bg-indigo-50 border-2 border-indigo-300 p-4 rounded-lg space-y-2">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl shrink-0">💡</span>
+            <div className="flex-1 text-sm text-indigo-900 leading-relaxed">
+              <b>Comment ça marche :</b>
+              <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                <li><b>Stand libre</b> ⟶ Votre demande passe en <b>"en attente de validation"</b> par ARACOM.</li>
+                <li><b>Stand déjà demandé</b> par un autre exposant ⟶ Cliquez dessus pour rejoindre la <b>liste d&apos;attente</b> (un popup vous informera). Vous serez automatiquement promu si l&apos;exposant en attente est refusé.</li>
+                <li><b>Stand validé ARACOM</b> (verrouillé) ⟶ Vous ne pouvez pas le sélectionner.</li>
+              </ul>
+              <div className="mt-2 text-xs italic text-indigo-700">Besoin spécifique ? Contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.</div>
             </div>
           </div>
         </div>
@@ -847,21 +892,39 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
           </div>
         )}
 
-        {b.stand_code && (
+        {/* Stand sélectionné — LIBRE */}
+        {b.stand_code && !selectedIsTaken && (
           <div className="bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r text-sm font-medium text-emerald-900 flex items-center justify-between">
             <span>✓ Stand sélectionné : <b>{b.stand_code}</b>{myStand?.zone ? ` (zone ${myStand.zone})` : ''}</span>
             <button onClick={() => { setField('stand_code', ''); setField('venue_stand_id', ''); }} className="text-xs text-emerald-700 underline">Changer</button>
           </div>
         )}
 
-        {/* 🆕 SESSION 45 — Bandeau "Site complet → liste d'attente" si tous les stands sont pris */}
-        {allStandsTaken && (
+        {/* 🆕 SESSION 47.13 — Stand sélectionné EN CONFLIT (alerte préventive) */}
+        {b.stand_code && selectedIsTaken && (
+          <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg space-y-2">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl shrink-0">⏳</span>
+              <div className="flex-1">
+                <div className="font-bold text-amber-900 text-base mb-1">Stand {b.stand_code} déjà demandé</div>
+                <div className="text-sm text-amber-800 leading-snug">
+                  Ce stand est <b>{selectedOwnerStatus === 'waitlist' ? `${selectedWaitlistPos ? `en liste d'attente (position #${selectedWaitlistPos})` : `en liste d'attente`}` : 'en attente de validation'}</b> pour <b>{selectedOwnerName || 'un autre exposant'}</b>.
+                  En cliquant sur <b>« Demander ce stand »</b> ci-dessous, un popup vous proposera de rejoindre la liste d&apos;attente. Vous serez automatiquement promu si l&apos;exposant en attente est refusé par ARACOM.
+                </div>
+                <button onClick={() => { setField('stand_code', ''); setField('venue_stand_id', ''); }} className="text-xs text-amber-700 underline mt-2 inline-block">Choisir un autre stand</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🆕 SESSION 45 → 47.13 — Bandeau "Site complet → liste d'attente" si tous les stands sont pris */}
+        {allStandsTaken && !b.stand_code && (
           <div className="bg-rose-50 border-2 border-rose-300 p-4 rounded-lg flex items-start gap-3">
             <span className="text-2xl shrink-0">🚫</span>
             <div className="flex-1">
-              <div className="font-bold text-rose-900 text-base mb-1">Ce site est complet ({stands.length} stands tous attribués)</div>
+              <div className="font-bold text-rose-900 text-base mb-1">Ce site est complet ({stands.length} stands tous demandés)</div>
               <div className="text-sm text-rose-800 leading-snug">
-                Aucun stand n&apos;est actuellement disponible sur ce site. Vous pouvez vous inscrire en <b>liste d&apos;attente</b> — ARACOM vous recontactera dès qu&apos;un stand se libère, ou pour vous proposer un autre site.
+                Aucun stand n&apos;est entièrement libre sur ce site. Cliquez sur n&apos;importe quel stand pour rejoindre sa liste d&apos;attente, OU cliquez ci-dessous pour rejoindre la file la moins longue automatiquement.
               </div>
             </div>
           </div>
@@ -876,16 +939,16 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
               className="gap-2 bg-amber-600 hover:bg-amber-700"
               data-testid="step3-waitlist"
             >
-              {waitlistBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <>⏳ M&apos;inscrire en liste d&apos;attente</>}
+              {waitlistBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <>⏳ Rejoindre la file la plus courte</>}
             </Button>
           ) : (
             <Button
               onClick={() => submit(false)}
               disabled={saving || !b.stand_code}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              className={`gap-2 ${selectedIsTaken ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
               data-testid="step3-next"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Demander ce stand <ChevronRight className="w-4 h-4" /></>}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : selectedIsTaken ? <>⏳ Demander (liste d&apos;attente) <ChevronRight className="w-4 h-4" /></> : <>Demander ce stand <ChevronRight className="w-4 h-4" /></>}
             </Button>
           )}
         </div>
@@ -1111,11 +1174,14 @@ function AnimationBlock({ anim, idx, config, grid, registrationId, update }) {
   const typeInfo = (config.ANIMATION_TYPES || []).find(t => t.value === a.slot_type);
 
   // 🆕 SESSION 44 — Grille DYNAMIQUE (durée = plage_totale ÷ N exposants attendus)
+  // 🆕 SESSION 47.13 — Slot cliquable même si occupé (pending/waitlist) → popup waitlist
   const gridSlots = Array.isArray(grid?.slots) ? grid.slots : [];
   const animSlots = gridSlots.map(slot => {
     const isOccupiedByOther = slot.occupied && slot.registration_id !== registrationId;
     const isSel = a.start_time === slot.start && a.end_time === slot.end;
-    return { ...slot, isOccupied: isOccupiedByOther, isSel };
+    // Verrouillé UNIQUEMENT si validé ARACOM (sinon waitlist possible)
+    const isLockedByAracom = isOccupiedByOther && slot.request_status === 'validated';
+    return { ...slot, isOccupied: isOccupiedByOther, isSel, isLockedByAracom };
   });
   const isFull = grid?.is_full === true;
   const waitlistCount = grid?.waitlist_count || 0;
@@ -1220,37 +1286,66 @@ function AnimationBlock({ anim, idx, config, grid, registrationId, update }) {
           </div>
         )}
         {!isFull && animSlots.length > 0 && (
-          <div className="text-xs text-emerald-700 my-2">💡 Un créneau libre a été pré-sélectionné automatiquement. Vous pouvez choisir un autre créneau ci-dessous.</div>
+          <div className="text-xs text-emerald-700 my-2">💡 Un créneau libre a été pré-sélectionné automatiquement. Vous pouvez choisir un autre créneau ci-dessous. Les créneaux <span className="bg-amber-100 px-1 rounded">⏳ pris</span> peuvent aussi être rejoints en liste d&apos;attente.</div>
         )}
         <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-          {animSlots.map((s, i) => (
-            <button
-              key={`${a.day_label}-${s.start}-${i}`}
-              type="button"
-              disabled={s.isOccupied}
-              onClick={() => { update('start_time', s.start); update('end_time', s.end); }}
-              className={`p-2 rounded border-2 text-center transition ${
-                s.isSel ? 'border-violet-600 bg-violet-600 text-white' :
-                s.isOccupied ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed' :
-                'border-slate-200 hover:border-violet-400 bg-white'
-              }`}
-              data-testid={`anim-${a.day_label}-slot-${s.start}`}
-            >
-              <div className="font-mono text-xs font-bold">{s.start}</div>
-              <div className="text-[10px]">{s.isOccupied ? (s.organization_name ? s.organization_name.slice(0, 12) : 'Pris') : 'Libre'}</div>
-            </button>
-          ))}
+          {animSlots.map((s, i) => {
+            // 🆕 SESSION 47.13 — Visuel : libre / pris (waitlist possible) / verrouillé ARACOM (validé)
+            const cls = s.isSel
+              ? 'border-violet-600 bg-violet-600 text-white'
+              : s.isLockedByAracom
+                ? 'border-rose-200 bg-rose-50 text-rose-300 cursor-not-allowed opacity-60'
+                : s.isOccupied
+                  ? 'border-amber-300 bg-amber-50 hover:border-amber-500 text-amber-900'
+                  : 'border-slate-200 hover:border-violet-400 bg-white';
+            const labelText = s.isLockedByAracom
+              ? '🔒 Validé'
+              : s.isOccupied
+                ? `⏳ ${s.organization_name ? s.organization_name.slice(0, 10) : 'Pris'}`
+                : 'Libre';
+            const titleText = s.isLockedByAracom
+              ? `Verrouillé : déjà validé par ARACOM pour ${s.organization_name || 'un autre exposant'}`
+              : s.isOccupied
+                ? `Pris par ${s.organization_name || 'un autre exposant'} — cliquez pour rejoindre la liste d'attente${s.slot_waitlist_count ? ` (${s.slot_waitlist_count} déjà en attente)` : ''}`
+                : 'Créneau libre — cliquez pour le sélectionner';
+            return (
+              <button
+                key={`${a.day_label}-${s.start}-${i}`}
+                type="button"
+                disabled={s.isLockedByAracom}
+                title={titleText}
+                onClick={() => {
+                  if (s.isLockedByAracom) return;
+                  update('start_time', s.start);
+                  update('end_time', s.end);
+                }}
+                className={`p-2 rounded border-2 text-center transition ${cls}`}
+                data-testid={`anim-${a.day_label}-slot-${s.start}`}
+              >
+                <div className="font-mono text-xs font-bold">{s.start}</div>
+                <div className="text-[10px] truncate">{labelText}</div>
+              </button>
+            );
+          })}
         </div>
         {animSlots.length === 0 && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-800 text-center">
             Aucun créneau disponible — la plage horaire n&apos;est pas encore configurée pour ce site. Contactez ARACOM.
           </div>
         )}
-        {a.start_time && (
-          <div className="mt-3 bg-emerald-50 border-l-4 border-emerald-500 p-2 rounded-r text-sm font-medium text-emerald-900">
-            ✓ {a.start_time} → {a.end_time}
-          </div>
-        )}
+        {a.start_time && (() => {
+          const selSlot = animSlots.find(s => s.start === a.start_time && s.end === a.end_time);
+          const selIsTaken = selSlot && selSlot.isOccupied && !selSlot.isLockedByAracom;
+          return (
+            <div className={`mt-3 ${selIsTaken ? 'bg-amber-50 border-amber-500 text-amber-900' : 'bg-emerald-50 border-emerald-500 text-emerald-900'} border-l-4 p-2 rounded-r text-sm font-medium`}>
+              {selIsTaken ? (
+                <>⏳ {a.start_time} → {a.end_time} — créneau déjà demandé par <b>{selSlot.organization_name || 'un autre exposant'}</b>. Vous rejoindrez la liste d&apos;attente.</>
+              ) : (
+                <>✓ {a.start_time} → {a.end_time}</>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
