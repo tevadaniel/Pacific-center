@@ -801,6 +801,135 @@ export async function GET(request, { params }) {
     const dashboardResp = await handleDashboardGet({ db, request, url, route });
     if (dashboardResp) return dashboardResp;
 
+    // 🆕 SESSION 47.13 — Validation queue ARACOM : liste FIFO de toutes les demandes
+    // GET /api/admin/validation-queue?status=&type=&site=&date=
+    if (route === 'admin/validation-queue') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const statusFilter = url.searchParams.get('status'); // pending|waitlist|validated|refused|all
+      const typeFilter = url.searchParams.get('type'); // stand|animation|all
+      const siteFilter = url.searchParams.get('site');
+      const dateFilter = url.searchParams.get('date'); // 2026-08-14 etc.
+
+      const matchStand = {};
+      const matchAnim = {};
+      if (statusFilter && statusFilter !== 'all') {
+        matchStand.request_status = statusFilter;
+        matchAnim.request_status = statusFilter;
+      } else {
+        matchStand.request_status = { $in: ['pending', 'waitlist', 'validated', 'refused'] };
+        matchAnim.request_status = { $in: ['pending', 'waitlist', 'validated', 'refused'] };
+      }
+      if (dateFilter) {
+        matchAnim.event_date = dateFilter;
+      }
+
+      const items = [];
+      // 1. Stands
+      if (!typeFilter || typeFilter === 'all' || typeFilter === 'stand') {
+        const stands = await db.collection('stand_assignments').find(matchStand).sort({ request_submitted_at: 1 }).toArray();
+        for (const s of stands) {
+          const reg = await db.collection('registrations').findOne({ id: s.registration_id });
+          if (!reg) continue;
+          if (siteFilter && reg.venue_id !== siteFilter) continue;
+          const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+          const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+          const stand = await db.collection('venue_stands').findOne({ id: s.venue_stand_id });
+          // Next-in-waitlist
+          let nextInfo = null;
+          if (s.request_status === 'pending' || s.request_status === 'validated') {
+            const next = await db.collection('stand_assignments').findOne(
+              { venue_stand_id: s.venue_stand_id, request_status: 'waitlist', id: { $ne: s.id } },
+              { sort: { waitlist_position: 1, request_submitted_at: 1 } }
+            );
+            if (next) {
+              const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
+              const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
+              nextInfo = { name: nOrg?.name, waitlist_position: next.waitlist_position, assignment_id: next.id };
+            }
+          }
+          items.push({
+            type: 'stand',
+            id: s.id,
+            registration_id: reg.id,
+            organization: { id: org?.id, name: org?.name, main_email: org?.main_email },
+            venue: { id: venue?.id, name: venue?.name },
+            stand_code: stand?.stand_code,
+            attending_days: reg.attending_days || [],
+            request_status: s.request_status,
+            waitlist_position: s.waitlist_position,
+            request_submitted_at: s.request_submitted_at,
+            validated_at: s.validated_at,
+            validated_by: s.validated_by,
+            refused_reason: s.refused_reason,
+            next_in_waitlist: nextInfo,
+          });
+        }
+      }
+      // 2. Animations
+      if (!typeFilter || typeFilter === 'all' || typeFilter === 'animation') {
+        const anims = await db.collection('animation_slots').find(matchAnim).sort({ request_submitted_at: 1 }).toArray();
+        for (const a of anims) {
+          if (siteFilter && a.venue_id !== siteFilter) continue;
+          let nextInfo = null;
+          if (a.request_status === 'pending' || a.request_status === 'validated') {
+            const next = await db.collection('animation_slots').findOne(
+              { venue_id: a.venue_id, day_label: a.day_label, location_type: a.location_type, start_time: a.start_time, request_status: 'waitlist', id: { $ne: a.id } },
+              { sort: { waitlist_position: 1, request_submitted_at: 1 } }
+            );
+            if (next) {
+              const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
+              const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
+              nextInfo = { name: nOrg?.name, waitlist_position: next.waitlist_position, assignment_id: next.id };
+            }
+          }
+          items.push({
+            type: 'animation',
+            id: a.id,
+            registration_id: a.registration_id,
+            organization: { id: null, name: a.organization_name, main_email: null },
+            venue: { id: a.venue_id, name: a.venue_name },
+            day_label: a.day_label,
+            event_date: a.event_date,
+            start_time: a.start_time,
+            end_time: a.end_time,
+            location_type: a.location_type,
+            title: a.title,
+            request_status: a.request_status,
+            waitlist_position: a.waitlist_position,
+            request_submitted_at: a.request_submitted_at,
+            validated_at: a.validated_at,
+            validated_by: a.validated_by,
+            refused_reason: a.refused_reason,
+            next_in_waitlist: nextInfo,
+          });
+        }
+      }
+      // Tri FIFO global
+      items.sort((x, y) => new Date(x.request_submitted_at || 0) - new Date(y.request_submitted_at || 0));
+
+      // Deadline configurée
+      const deadlineDoc = await db.collection('app_settings').findOne({ key: 'validation_deadline' });
+
+      return json({
+        ok: true,
+        items,
+        total: items.length,
+        deadline_at: deadlineDoc?.deadline_at || null,
+        counts: {
+          pending: items.filter(i => i.request_status === 'pending').length,
+          waitlist: items.filter(i => i.request_status === 'waitlist').length,
+          validated: items.filter(i => i.request_status === 'validated').length,
+          refused: items.filter(i => i.request_status === 'refused').length,
+        },
+      });
+    }
+
+    // GET /api/admin/validation-deadline (lit la config)
+    if (route === 'admin/validation-deadline') {
+      const d = await db.collection('app_settings').findOne({ key: 'validation_deadline' });
+      return json({ deadline_at: d?.deadline_at || null });
+    }
+
     // 🆕 SESSION 47 — Status de la simulation (compteurs des records is_simulation:true)
     if (route === 'admin/simulation/status') {
       if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
@@ -3964,7 +4093,7 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'wizard/stand') {
-      const { registration_id, stand_code, venue_stand_id } = body;
+      const { registration_id, stand_code, venue_stand_id, force_waitlist } = body;
       if (!registration_id) return err('registration_id requis', 400);
       if (!stand_code && !venue_stand_id) return err('Veuillez sélectionner un stand sur la carte', 400);
       const reg = await db.collection('registrations').findOne({ id: registration_id });
@@ -3980,16 +4109,33 @@ export async function POST(request, { params }) {
       }
       if (!stand) return err('Stand introuvable sur ce site', 404);
 
-      // Vérifier qu'il n'est pas pris par quelqu'un d'autre
-      const conflicting = await db.collection('stand_assignments').findOne({
+      // 🆕 SESSION 47.13 — Refonte : detection des conflits avec request_status
+      // Cherche les demandes actives (pending/validated/waitlist) par d'AUTRES exposants
+      const otherRequests = await db.collection('stand_assignments').find({
         venue_stand_id: stand.id,
         status: { $nin: ['annule', 'cancelled'] },
+        request_status: { $in: ['pending', 'validated', 'waitlist'] },
         registration_id: { $ne: registration_id },
-      });
-      if (conflicting) {
-        const otherReg = await db.collection('registrations').findOne({ id: conflicting.registration_id });
-        const otherOrg = otherReg ? await db.collection('organizations').findOne({ id: otherReg.organization_id }) : null;
-        return err(`Ce stand est déjà réservé par ${otherOrg?.name || 'un autre exposant'}. Choisissez-en un autre.`, 409);
+      }).sort({ request_submitted_at: 1 }).toArray();
+
+      const hasActiveOwner = otherRequests.some(r => r.request_status === 'pending' || r.request_status === 'validated');
+      const waitlistCount = otherRequests.filter(r => r.request_status === 'waitlist').length;
+
+      // Si conflit ET pas de force_waitlist → renvoie info pour popup côté front
+      if (hasActiveOwner && !force_waitlist) {
+        const ownerReq = otherRequests.find(r => r.request_status === 'pending' || r.request_status === 'validated');
+        const ownerReg = await db.collection('registrations').findOne({ id: ownerReq.registration_id });
+        const ownerOrg = ownerReg ? await db.collection('organizations').findOne({ id: ownerReg.organization_id }) : null;
+        return json({
+          ok: false,
+          conflict: true,
+          stand_code: stand.stand_code,
+          owner_status: ownerReq.request_status,
+          owner_name: ownerOrg?.name || 'un autre exposant',
+          waitlist_count: waitlistCount,
+          waitlist_position: waitlistCount + 1,
+          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'validé' : 'en attente de validation'} pour ${ownerOrg?.name || 'un autre exposant'}. Votre demande peut être placée en liste d'attente (position #${waitlistCount + 1}).`,
+        }, 200);
       }
 
       // Annuler les anciennes assignations de cet exposant
@@ -3998,14 +4144,25 @@ export async function POST(request, { params }) {
         { $set: { status: 'annule', updated_at: new Date() } }
       );
 
-      // Créer la nouvelle assignation
+      // Détermine le request_status : pending si stand libre, waitlist si force_waitlist demandé
+      const newRequestStatus = (hasActiveOwner || force_waitlist) ? 'waitlist' : 'pending';
+      const waitlistPosition = newRequestStatus === 'waitlist' ? waitlistCount + 1 : null;
+
+      const assignmentId = uuid();
       await db.collection('stand_assignments').insertOne({
-        id: uuid(),
+        id: assignmentId,
         registration_id,
         venue_stand_id: stand.id,
         assigned_by: 'wizard',
         assigned_at: new Date(),
         status: 'provisoire',
+        // 🆕 Workflow validation ARACOM
+        request_status: newRequestStatus,
+        request_submitted_at: new Date(),
+        waitlist_position: waitlistPosition,
+        validated_at: null,
+        validated_by: null,
+        refused_reason: null,
         created_at: new Date(),
         updated_at: new Date(),
       });
@@ -4018,6 +4175,12 @@ export async function POST(request, { params }) {
       return json({
         ok: true,
         stand: { id: stand.id, stand_code: stand.stand_code, zone: stand.zone },
+        request_status: newRequestStatus,
+        waitlist_position: waitlistPosition,
+        assignment_id: assignmentId,
+        message: newRequestStatus === 'waitlist'
+          ? `📋 Demande enregistrée en liste d'attente (position #${waitlistPosition}). ARACOM tranchera selon les disponibilités.`
+          : `✅ Demande enregistrée. En attente de validation ARACOM.`,
         next_step: 4,
       });
     }
@@ -4164,7 +4327,9 @@ export async function POST(request, { params }) {
         return err(`Créneau d'animation manquant pour : ${missingDays.join(', ')}. Un créneau est obligatoire par jour de présence.`, 400);
       }
 
-      // Vérifier conflits avec autres exposants du même site / même jour / même lieu
+      // 🆕 SESSION 47.13 — Refonte : detection des conflits avec request_status + auto-waitlist
+      const { force_waitlist: animForceWaitlist } = body;
+      const conflictsInfo = [];
       for (const a of normalized) {
         const conflict = await db.collection('animation_slots').findOne({
           venue_id: reg.venue_id,
@@ -4172,12 +4337,43 @@ export async function POST(request, { params }) {
           location_type: a.location_type,
           registration_id: { $ne: registration_id },
           status: { $ne: 'annulé' },
+          request_status: { $in: ['pending', 'validated'] },
           start_time: { $lt: a.end_time },
           end_time: { $gt: a.start_time },
         });
         if (conflict) {
-          return err(`Conflit ${a.day_label} ${a.start_time}–${a.end_time} (${a.location_type === 'sur_stand' ? 'sur stand' : 'zone démo'}) : créneau déjà pris.`, 409);
+          const conflictReg = await db.collection('registrations').findOne({ id: conflict.registration_id });
+          const conflictOrg = conflictReg ? await db.collection('organizations').findOne({ id: conflictReg.organization_id }) : null;
+          // Compte la liste d'attente actuelle sur ce slot
+          const wlCount = await db.collection('animation_slots').countDocuments({
+            venue_id: reg.venue_id,
+            day_label: a.day_label,
+            location_type: a.location_type,
+            request_status: 'waitlist',
+            registration_id: { $ne: registration_id },
+            start_time: { $lt: a.end_time },
+            end_time: { $gt: a.start_time },
+          });
+          conflictsInfo.push({
+            day_label: a.day_label,
+            start_time: a.start_time,
+            end_time: a.end_time,
+            location_type: a.location_type,
+            owner_name: conflictOrg?.name || 'un autre exposant',
+            owner_status: conflict.request_status,
+            waitlist_count: wlCount,
+            waitlist_position: wlCount + 1,
+          });
         }
+      }
+      // Si conflits ET pas force_waitlist → demande l'accord côté frontend
+      if (conflictsInfo.length > 0 && !animForceWaitlist) {
+        return json({
+          ok: false,
+          conflict: true,
+          conflicts: conflictsInfo,
+          message: `${conflictsInfo.length} créneau(x) en conflit. Veuillez confirmer pour les placer en liste d'attente.`,
+        }, 200);
       }
 
       // Remplacer toutes les animations existantes de cet exposant
@@ -4186,6 +4382,10 @@ export async function POST(request, { params }) {
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
       const inserted = [];
       for (const a of normalized) {
+        // Détermine le statut de cette anim individuellement
+        const thisConflict = conflictsInfo.find(c => c.day_label === a.day_label && c.start_time === a.start_time);
+        const rs = thisConflict ? 'waitlist' : 'pending';
+        const wp = thisConflict ? thisConflict.waitlist_position : null;
         const slotId = uuid();
         const doc = {
           id: slotId,
@@ -4206,18 +4406,34 @@ export async function POST(request, { params }) {
           target_audience: a.target_audience,
           material_needs: a.material_needs || '',
           status: 'planifié',
+          // 🆕 Workflow validation ARACOM
+          request_status: rs,
+          request_submitted_at: new Date(),
+          waitlist_position: wp,
+          validated_at: null,
+          validated_by: null,
+          refused_reason: null,
           created_at: new Date(),
           updated_at: new Date(),
         };
         await db.collection('animation_slots').insertOne(doc);
-        inserted.push({ id: slotId, day_label: a.day_label });
+        inserted.push({ id: slotId, day_label: a.day_label, request_status: rs, waitlist_position: wp });
       }
 
       await db.collection('registrations').updateOne(
         { id: registration_id },
         { $set: { wizard_step: 4, updated_at: new Date() } }
       );
-      return json({ ok: true, animations: inserted, next_step: 4 });
+      const waitlistAnimsCount = inserted.filter(i => i.request_status === 'waitlist').length;
+      return json({
+        ok: true,
+        animations: inserted,
+        next_step: 4,
+        waitlist_count: waitlistAnimsCount,
+        message: waitlistAnimsCount > 0
+          ? `📋 ${waitlistAnimsCount}/${inserted.length} créneau(x) en liste d'attente. ARACOM tranchera.`
+          : `✅ ${inserted.length} créneau(x) en attente de validation ARACOM.`,
+      });
     }
 
     // Étape 4 — Documents & RDV caution (réutilise les endpoints existants ; ici marquage step)
@@ -4644,6 +4860,115 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       const result = await doSeed(body?.force || false);
       return json(result);
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 47.13 — REFONTE SYSTÈME RÉSERVATION : validation queue ARACOM
+    // ═════════════════════════════════════════════════════════════════════════
+    // POST /api/admin/validation/:id/validate — Valide une assignation stand OU animation_slot
+    // POST /api/admin/validation/:id/refuse — Refuse (body: {reason})
+    // POST /api/admin/validation/bulk — Action bulk (body: {ids, type: 'stand'|'animation', action: 'validate'|'refuse', reason?})
+    // POST /api/admin/validation-deadline — Configure la deadline (body: {deadline: ISO date})
+    if (route.startsWith('admin/validation/') && route.endsWith('/validate')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const targetId = route.split('/')[2];
+      // Cherche d'abord dans stand_assignments
+      let asn = await db.collection('stand_assignments').findOne({ id: targetId });
+      let kind = 'stand';
+      if (!asn) {
+        asn = await db.collection('animation_slots').findOne({ id: targetId });
+        kind = 'animation';
+      }
+      if (!asn) return err('Demande introuvable', 404);
+      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
+      await db.collection(collName).updateOne(
+        { id: targetId },
+        { $set: { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() } }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'VALIDATION_VALIDATE',
+        description: `Validation ${kind} ${targetId}`,
+        metadata: { kind, target_id: targetId, registration_id: asn.registration_id },
+        created_at: new Date(),
+      });
+      return json({ ok: true, kind, target_id: targetId, request_status: 'validated' });
+    }
+
+    if (route.startsWith('admin/validation/') && route.endsWith('/refuse')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const targetId = route.split('/')[2];
+      const reason = body?.reason || 'Refusé par ARACOM';
+      let asn = await db.collection('stand_assignments').findOne({ id: targetId });
+      let kind = 'stand';
+      if (!asn) {
+        asn = await db.collection('animation_slots').findOne({ id: targetId });
+        kind = 'animation';
+      }
+      if (!asn) return err('Demande introuvable', 404);
+      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
+      await db.collection(collName).updateOne(
+        { id: targetId },
+        { $set: { request_status: 'refused', refused_reason: reason, validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() } }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'VALIDATION_REFUSE',
+        description: `Refus ${kind} ${targetId} : ${reason}`,
+        metadata: { kind, target_id: targetId, registration_id: asn.registration_id, reason },
+        created_at: new Date(),
+      });
+      // Retourne le next-in-waitlist pour information
+      const filter = kind === 'stand'
+        ? { venue_stand_id: asn.venue_stand_id, request_status: 'waitlist', id: { $ne: targetId } }
+        : { venue_id: asn.venue_id, day_label: asn.day_label, location_type: asn.location_type, start_time: asn.start_time, request_status: 'waitlist', id: { $ne: targetId } };
+      const next = await db.collection(collName).findOne(filter, { sort: { waitlist_position: 1, request_submitted_at: 1 } });
+      let nextInfo = null;
+      if (next) {
+        const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
+        const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
+        nextInfo = { assignment_id: next.id, registration_id: next.registration_id, organization_name: nOrg?.name, waitlist_position: next.waitlist_position };
+      }
+      return json({ ok: true, kind, target_id: targetId, request_status: 'refused', reason, next_in_waitlist: nextInfo });
+    }
+
+    if (route === 'admin/validation/bulk') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const { ids, type, action, reason } = body;
+      if (!Array.isArray(ids) || !ids.length) return err('ids[] requis');
+      if (!['validate', 'refuse'].includes(action)) return err('action invalide');
+      if (!['stand', 'animation'].includes(type)) return err('type invalide');
+      const collName = type === 'stand' ? 'stand_assignments' : 'animation_slots';
+      const set = action === 'validate'
+        ? { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() }
+        : { request_status: 'refused', refused_reason: reason || 'Refusé en masse', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() };
+      const result = await db.collection(collName).updateMany({ id: { $in: ids } }, { $set: set });
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: `VALIDATION_BULK_${action.toUpperCase()}`,
+        description: `Bulk ${action} ${type} : ${result.modifiedCount} record(s)`,
+        metadata: { type, action, ids, reason, modified: result.modifiedCount },
+        created_at: new Date(),
+      });
+      return json({ ok: true, action, type, modified: result.modifiedCount });
+    }
+
+    if (route === 'admin/validation-deadline') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const { deadline } = body;
+      if (!deadline) return err('deadline ISO requise');
+      const dl = new Date(deadline);
+      if (isNaN(dl.getTime())) return err('Format de date invalide');
+      await db.collection('app_settings').updateOne(
+        { key: 'validation_deadline' },
+        { $set: { key: 'validation_deadline', deadline_at: dl, updated_at: new Date(), updated_by: ctx.userId || 'u-admin' } },
+        { upsert: true }
+      );
+      return json({ ok: true, deadline_at: dl });
+    }
+
 
     // ═════════════════════════════════════════════════════════════════════════
     // 🆕 SESSION 47 — SIMULATION E2E (mode QA test des fonctions réelles)
