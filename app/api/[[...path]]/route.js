@@ -1435,6 +1435,8 @@ export async function GET(request, { params }) {
           // 🆕 SESSION 35 — Étoile désignée par l'utilisateur (pas de ★ auto)
           // is_user_priority=true UNIQUEMENT si l'exposant a explicitement cliqué "Définir prioritaire"
           is_user_priority: r.is_user_priority === true,
+          // 🆕 SESSION 47.15 — Indicateur "demande en liste d'attente" (set par pre-reserve-stand avec force_waitlist)
+          is_waitlist: r.is_waitlist === true,
           venue: v ? { id: v.id, name: v.name, code: v.code, capacity_stands: v.capacity_stands } : null,
           deposit: depByReg[r.id] || null,
           animations_count: regSlots.length,
@@ -8492,48 +8494,81 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
     // ---- Exposant : pré-réservation d'un stand (atomique) ----
     if (route.match(/^registrations\/[^/]+\/pre-reserve-stand$/)) {
       const regId = p[1];
-      const { stand_id } = body;
+      const { stand_id, force_waitlist } = body;
       if (!stand_id) return err('stand_id requis', 400);
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
       const stand = await db.collection('venue_stands').findOne({ id: stand_id });
       if (!stand) return err('Stand introuvable', 404);
-      // Check the stand is FREE (not assigned to another registration via stand_code)
-      const occupant = await db.collection('registrations').findOne({
-        edition_id: EDITION_ID,
-        venue_id: stand.venue_id,
-        stand_code: stand.stand_code,
-        id: { $ne: regId },
-      });
-      if (occupant) return err('Ce stand est déjà pré-réservé ou attribué à un autre exposant', 409);
-      // Also check via stand_assignments
-      const existingAssignment = await db.collection('stand_assignments').findOne({
+      // 🆕 SESSION 47.15 — Détection de conflit + workflow waitlist
+      // Cherche les demandes actives (pending/validated/waitlist) sur ce stand par d'autres exposants
+      const otherRequests = await db.collection('stand_assignments').find({
         venue_stand_id: stand.id,
-        status: { $ne: 'annule' },
+        status: { $nin: ['annule', 'cancelled'] },
+        request_status: { $in: ['pending', 'validated', 'waitlist'] },
+        registration_id: { $ne: regId },
+      }).sort({ request_submitted_at: 1 }).toArray();
+      // Fallback : legacy entries sans request_status (compatibilité avec l'ancien flux)
+      const legacyOwner = await db.collection('stand_assignments').findOne({
+        venue_stand_id: stand.id,
+        status: { $nin: ['annule', 'cancelled'] },
+        request_status: { $exists: false },
         registration_id: { $ne: regId },
       });
-      if (existingAssignment) return err('Ce stand est déjà attribué via une affectation', 409);
-      // Update registration: assign venue + stand
+      const activeOwners = otherRequests.filter(r => r.request_status !== 'waitlist');
+      const hasActiveOwner = activeOwners.length > 0 || !!legacyOwner;
+      const waitlistCount = otherRequests.filter(r => r.request_status === 'waitlist').length;
+      // Si conflit ET pas force_waitlist : retourne {conflict:true} pour permettre au frontend d'afficher la popup
+      if (hasActiveOwner && !force_waitlist) {
+        const ownerReq = activeOwners[0] || legacyOwner;
+        const ownerReg = await db.collection('registrations').findOne({ id: ownerReq.registration_id });
+        const ownerOrg = ownerReg ? await db.collection('organizations').findOne({ id: ownerReg.organization_id }) : null;
+        return json({
+          ok: false,
+          conflict: true,
+          owner_name: ownerOrg?.name || 'un autre exposant',
+          owner_status: ownerReq.request_status || 'validated',
+          waitlist_count: waitlistCount,
+          waitlist_position: waitlistCount + 1,
+          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'validé' : 'en attente de validation'} pour ${ownerOrg?.name || 'un autre exposant'}. Votre demande peut être placée en liste d'attente (position #${waitlistCount + 1}).`,
+        });
+      }
+      // Détermine le request_status
+      const newRequestStatus = (hasActiveOwner || force_waitlist) ? 'waitlist' : 'pending';
+      const waitlistPosition = newRequestStatus === 'waitlist' ? waitlistCount + 1 : null;
+      // Update registration : assign venue + stand
       const upd = {
         venue_id: stand.venue_id,
         stand_code: stand.stand_code,
         status: reg.status === 'confirme' ? 'confirme' : 'a_confirmer',
         is_pre_reserved: true,
+        is_waitlist: newRequestStatus === 'waitlist',
         pre_reserved_at: new Date(),
         updated_at: new Date(),
       };
       await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
-      // Sync stand_assignments — remove any old assignment for this registration, add a new one
-      await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
+      // Sync stand_assignments — cancel old + add new
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: regId, status: { $nin: ['annule', 'cancelled'] } },
+        { $set: { status: 'annule', request_status: 'annule', updated_at: new Date() } }
+      );
       await db.collection('stand_assignments').insertOne({
         id: uuid(),
         registration_id: regId,
         venue_stand_id: stand.id,
+        stand_code: stand.stand_code,
         status: 'pre_reserve',
-        created_at: new Date(), updated_at: new Date(),
+        request_status: newRequestStatus,
+        request_submitted_at: new Date(),
+        waitlist_position: waitlistPosition,
+        validated_at: null,
+        validated_by: null,
+        refused_reason: null,
+        created_at: new Date(),
+        updated_at: new Date(),
       });
-      await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id });
-      return json({ ok: true, stand_code: stand.stand_code, status: upd.status });
+      await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id, request_status: newRequestStatus, waitlist_position: waitlistPosition });
+      return json({ ok: true, stand_code: stand.stand_code, status: upd.status, request_status: newRequestStatus, waitlist_position: waitlistPosition });
     }
 
     // ---- Exposant : libération du stand pré-réservé ----

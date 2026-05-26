@@ -309,6 +309,46 @@ Sur `stand_assignments` et `animation_slots` :
 
 ---
 
+## 🎁 SESSION 47.15 — Portail Exposant + Filtres Actifs (LIVRÉ)
+
+### Bugs critiques corrigés
+1. **`getFullAvailability`** (wizard-helpers.js) ne filtrait pas `is_available_2026: false` → Mahina/Moorea visibles dans "Disponibilité en direct" → ✅ Fixed
+2. **Portail Exposant SiteAndStandPicker** : 
+   - Utilisait `/api/venues` (tous sites) au lieu de `?only_active=1` → ✅ Fixed
+   - **`pre-reserve-stand` rejetait toute tentative sur un stand pris** → l'exposant ne pouvait pas rejoindre la liste d'attente → ✅ Refonte complète avec conflit + force_waitlist
+3. **`/api/venues` ligne 703** utilisait toujours l'endpoint sans filtre → ✅ Fixed
+
+### Backend
+| Item | Détails |
+|------|---------|
+| `/registrations/:id/pre-reserve-stand` | Workflow conflit/waitlist aligné sur `/wizard/stand` : détecte conflit, accepte `force_waitlist`, retourne `{conflict:true}` avec owner+position si refusé |
+| Pose `is_waitlist: true` sur la registration quand force_waitlist | Propage aux UI |
+| Sync `stand_assignments` avec `request_status: 'pending'|'waitlist'` | Apparait correctement dans la file de validation |
+| `/exposant/my-sites` retourne `is_waitlist` | Badge UI |
+
+### Frontend
+| Item | Détails |
+|------|---------|
+| **SiteAndStandPicker refondu** | Section "Stands libres" (vert) + section "Rejoindre liste d'attente" (jaune) + carte interactive |
+| **Bandeau Site COMPLET** | Affiché quand 0 stands libres : explication waitlist + date butoir ARACOM + 2 options (changer site OU cliquer stand) |
+| **Popup ConflictDialog** | Réutilisée du wizard public, affiche owner+position+promotion auto |
+| **Badge "⏳ Liste d'attente"** | Sur la carte de site quand `s.is_waitlist=true` |
+| **Bouton dynamique** | "Soumettre ce site" → "Soumettre la demande sur la liste d'attente" (orange) si is_waitlist |
+| **Bandeau global persistant** | En haut du portail si `r.is_waitlist=true`, rappel à toutes les étapes (animations, docs, etc.) |
+| **`/api/venues?only_active=1`** | Appliqué partout dans le portail exposant |
+
+### Décisions utilisateur
+> "Si il décoche pour l'exposant et pacific tu dois l'appliquer sur tout les composantes futur à crée les concernant" → **Règle ajoutée au PRD section 12**.
+
+### Tests automatisés (5/5 ✅)
+1. `/api/venues?only_active=1` exclut Mahina/Moorea
+2. `/api/wizard/availability` (utilisé par LiveAvailabilityFloater) exclut Mahina/Moorea
+3. `pre-reserve-stand` détecte le conflit pending/legacy → retourne `{conflict:true}` avec owner+position
+4. `pre-reserve-stand` avec `force_waitlist=true` → `request_status='waitlist'` + `is_waitlist=true` posé sur reg
+5. `/exposant/my-sites` propage `is_waitlist` pour les badges UI
+
+---
+
 ## 🎁 SESSION 47.14 — Notifications & Auto-promotion (LIVRÉ)
 
 ### Backend
@@ -387,6 +427,13 @@ Voir `/app/memory/test_credentials.md`. En résumé :
 6. ❗ Tests backend : 24/24 endpoints critiques validés en SESSION 47.13.
 7. ❗ Tests frontend : flux waitlist E2E validé visuellement en SESSION 47.13.
 8. ❗ Production = `aracompacificcenters.com`. Toujours demander Preview vs Prod.
+9. 🆕 **FILTRE VENUES ACTIFS UNIVERSEL** : Tout composant montrant des sites à un **exposant** ou un compte **Pacific Centers** DOIT utiliser le filtre `?only_active=1` (ou propager `is_available_2026: { $ne: false }` côté backend). Mahina/Moorea sont désactivés pour 2026 et ne doivent JAMAIS être visibles dans :
+   - Wizard public (Step 2 sites)
+   - Portail Exposant (sélecteur site, multi-sites)
+   - Live Availability Floater (badges "Disponibilité en direct")
+   - Dashboard PC (lecture seule)
+   - Tout nouveau composant utilisateur final
+   - **Cockpit ARACOM seul** voit tous les sites (admin)
 
 ---
 

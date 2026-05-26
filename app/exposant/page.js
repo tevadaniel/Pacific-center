@@ -18,6 +18,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
+import ConflictDialog from '@/components/wizard/conflict-dialog';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import SimulationModal from '@/components/aracom/simulation-modal';
@@ -485,6 +486,20 @@ export default function ExposantPortal() {
           context="portal"
         />
 
+        {/* 🆕 SESSION 47.15 — Bandeau permanent quand l'exposant est en liste d'attente */}
+        {r?.is_waitlist && (
+          <div className="my-3 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-400 rounded-lg p-4 flex items-start gap-3 shadow-sm">
+            <span className="text-2xl shrink-0">⏳</span>
+            <div className="flex-1 text-sm">
+              <div className="font-bold text-amber-900 text-base mb-1">Vous êtes en liste d&apos;attente</div>
+              <div className="text-amber-800 leading-snug">
+                Votre demande sur le site <b>{v?.name || data.allSites?.find(x => x.id === r?.id)?.venue?.name || 'sélectionné'}</b>{r?.stand_code ? ` (stand ${r.stand_code})` : ''} est placée en <b>liste d&apos;attente</b>. ARACOM vous recontactera pour confirmer votre demande ou vous proposer une alternative.
+              </div>
+              <div className="text-xs text-amber-700 italic mt-1">Vous pouvez continuer à compléter votre dossier (animations, documents) en attendant la validation.</div>
+            </div>
+          </div>
+        )}
+
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           {/* 🆕 SESSION 29 — Mon profil mis en valeur (orange) séparé visuellement des autres onglets */}
           <TabsList className="w-full flex flex-wrap gap-1 bg-transparent p-0 h-auto justify-start">
@@ -700,7 +715,7 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
   };
 
   useEffect(() => {
-    api('/api/venues').then(async (vs) => {
+    api('/api/venues?only_active=1').then(async (vs) => {
       setVenues(vs || []);
       // 🆕 SESSION 28k — Charge l'occupation de chaque site pour afficher "Complet" si plein
       const stats = {};
@@ -829,6 +844,8 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                       {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
                       {s.is_complete && !isLocked && !valReq && <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">✅ Complet</Badge>}
                       {!s.is_complete && !isLocked && <Badge className="bg-amber-100 text-amber-800 text-[10px]">⏳ À compléter</Badge>}
+                      {/* 🆕 SESSION 47.15 — Badge waitlist visible en permanence sur la carte */}
+                      {s.is_waitlist && <Badge className="bg-orange-100 text-orange-800 text-[10px] border-orange-300">⏳ Liste d&apos;attente</Badge>}
                       {valReq?.status === 'en_attente' && <Badge className="bg-amber-500 text-white text-[10px]">⏳ Soumis · en attente</Badge>}
                       {valReq?.status === 'rdv_fixe' && <Badge className="bg-blue-500 text-white text-[10px]">📅 RDV fixé</Badge>}
                     </div>
@@ -858,6 +875,7 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                     </Button>
                   )}
                   {/* 🆕 SESSION 35 — Soumettre ce site : bloqué si site incomplet (toast clair) */}
+                  {/* 🆕 SESSION 47.15 — Label dynamique selon mode liste d'attente */}
                   {!isLocked && !valReq && (
                     <Button
                       size="sm"
@@ -874,11 +892,11 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                       }}
                       disabled={busySubmit === s.id}
                       className={`text-xs gap-1 h-8 ${canSubmit && (!isMultiSite || allSites.some(x => x.is_user_priority))
-                        ? 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white'
+                        ? (s.is_waitlist ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white' : 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white')
                         : 'bg-slate-300 text-slate-600 cursor-not-allowed hover:bg-slate-300'}`}
                     >
                       {busySubmit === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
-                      Soumettre ce site
+                      {s.is_waitlist ? 'Soumettre la demande sur la liste d\'attente' : 'Soumettre ce site'}
                     </Button>
                   )}
                   {!isLocked && !valReq && allSites.length > 1 && (
@@ -1832,15 +1850,19 @@ function ProfilBlock({ organization, registration, onRefresh }) {
 }
 
 // =====================================================================
-// SITES & PLAN — un seul site, sélection rapide d'un stand libre
+// SITES & PLAN — un seul site, sélection rapide d'un stand libre OU rejoindre la liste d'attente
 // =====================================================================
 function SiteAndStandPicker({ registration, organization, onRefresh }) {
   const [venues, setVenues] = useState([]);
   const [stands, setStands] = useState([]);
   const [selectedVenueId, setSelectedVenueId] = useState(registration.venue_id || '');
   const [busy, setBusy] = useState(false);
+  // 🆕 SESSION 47.15 — Popup conflit pour rejoindre une waitlist sur un stand pris
+  const [conflictInfo, setConflictInfo] = useState(null); // {stand, conflict_response}
+  const [conflictBusy, setConflictBusy] = useState(false);
 
-  useEffect(() => { api('/api/venues').then(setVenues); }, []);
+  // 🆕 SESSION 47.15 — Filtre `?only_active=1` pour ne montrer QUE les sites actifs aux exposants
+  useEffect(() => { api('/api/venues?only_active=1').then(setVenues); }, []);
   useEffect(() => {
     if (selectedVenueId) api(`/api/venues/${selectedVenueId}/stands`).then(setStands);
     else setStands([]);
@@ -1851,19 +1873,34 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
   const isOnSelectedVenue = registration.venue_id === selectedVenueId;
   const isLocked = registration.status === 'confirme';
 
-  const reserve = async (stand) => {
+  // 🆕 SESSION 47.15 — Helpers pour classer les stands
+  const isStandFree = (s) => !s.assignment || ['annule', 'cancelled'].includes(s.assignment.status);
+  const isStandValidated = (s) => s.assignment?.request_status === 'validated';
+  const isStandClickable = (s) => !isStandValidated(s);
+
+  const reserve = async (stand, forceWaitlist = false) => {
     if (isLocked) { toast.error('Stand confirmé — contactez ARACOM pour changer'); return; }
-    if (!confirm(`Pré-réserver le stand ${stand.stand_code} sur ${venue?.name} ?\n\nLa réservation sera CONFIRMÉE par ARACOM dès réception de votre caution de 20 000 XPF.`)) return;
-    setBusy(true);
+    if (!isStandClickable(stand)) { toast.error(`Stand ${stand.stand_code} verrouillé par ARACOM`); return; }
+    if (forceWaitlist) setConflictBusy(true); else setBusy(true);
     try {
-      await api(`/api/registrations/${registration.id}/pre-reserve-stand`, {
+      const r = await api(`/api/registrations/${registration.id}/pre-reserve-stand`, {
         method: 'POST',
-        body: JSON.stringify({ stand_id: stand.id }),
+        body: JSON.stringify({ stand_id: stand.id, force_waitlist: forceWaitlist || undefined }),
       });
-      toast.success(`✅ Stand ${stand.stand_code} pré-réservé sur ${venue?.name}`);
+      if (r && r.conflict === true && !forceWaitlist) {
+        setConflictInfo({ stand, response: r });
+        return;
+      }
+      const rs = r?.request_status;
+      if (rs === 'waitlist') {
+        toast.success(`⏳ Inscrit en liste d'attente sur le stand ${stand.stand_code} (position #${r?.waitlist_position || '?'}). ARACOM tranchera.`);
+      } else {
+        toast.success(`📋 Stand ${stand.stand_code} demandé — en attente de validation ARACOM.`);
+      }
+      setConflictInfo(null);
       onRefresh();
     } catch (e) { toast.error(e.message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setConflictBusy(false); }
   };
 
   const release = async () => {
@@ -1879,8 +1916,17 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
   };
 
   // Stands FREE = those without an organization
-  const freeStands = stands.filter(s => !s.organization);
+  const freeStands = stands.filter(isStandFree);
+  // 🆕 SESSION 47.15 — Stands rejoignables en waitlist (taken mais pas validated)
+  const waitlistableStands = stands.filter(s => !isStandFree(s) && isStandClickable(s));
   const myStand = stands.find(s => s.stand_code === myStandCode && isOnSelectedVenue);
+  const siteIsFull = selectedVenueId && stands.length > 0 && freeStands.length === 0;
+  // Récupère la deadline pour le message waitlist
+  const [deadline, setDeadline] = useState(null);
+  useEffect(() => {
+    api('/api/admin/validation-deadline').then(r => setDeadline(r?.deadline_at || null)).catch(() => setDeadline(null));
+  }, []);
+  const deadlineLabel = deadline ? new Date(deadline).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' }) : null;
 
   return (
     <div className="space-y-4">
@@ -1909,23 +1955,54 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
         </CardContent>
       </Card>
 
+      {/* 🆕 SESSION 47.15 — Bandeau SITE COMPLET avec proposition liste d'attente */}
+      {siteIsFull && !myStand && (
+        <Card className="border-2 border-amber-400 bg-amber-50">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <span className="text-3xl shrink-0">⏳</span>
+              <div className="flex-1">
+                <div className="font-bold text-amber-900 text-base mb-1">{venue?.name} est complet — Inscrivez-vous en liste d&apos;attente</div>
+                <div className="text-sm text-amber-800 leading-snug">
+                  Tous les stands de ce site sont actuellement demandés ou validés par d&apos;autres exposants. Vous pouvez :
+                </div>
+                <ul className="list-disc ml-5 mt-2 text-sm text-amber-900 space-y-1">
+                  <li><b>Choisir un autre site</b> dans le sélecteur ci-dessus (s&apos;il en reste de disponibles).</li>
+                  <li><b>Cliquer sur un stand ci-dessous</b> pour rejoindre sa liste d&apos;attente — vous serez automatiquement promu(e) si l&apos;exposant en attente est refusé.</li>
+                </ul>
+                {deadlineLabel && (
+                  <div className="mt-3 bg-white border border-amber-300 rounded p-2 text-xs text-slate-800">
+                    📅 <b>ARACOM recontactera les exposants en liste d&apos;attente au plus tard le {deadlineLabel}</b> pour confirmer ou proposer une alternative.
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Current stand status */}
       {selectedVenueId && (
-        <Card className={myStand ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200'}>
+        <Card className={myStand ? (registration.is_waitlist ? 'border-amber-300 bg-amber-50/40' : 'border-blue-200 bg-blue-50/40') : 'border-slate-200'}>
           <CardContent className="p-4 flex flex-col md:flex-row md:items-center gap-3">
             {myStand ? (
               <>
-                <CheckCircle2 className="w-5 h-5 text-blue-600 shrink-0" />
+                <CheckCircle2 className={`w-5 h-5 shrink-0 ${registration.is_waitlist ? 'text-amber-600' : 'text-blue-600'}`} />
                 <div className="flex-1">
-                  <div className="font-semibold">Stand pré-réservé : <span className="font-mono text-blue-700">{myStandCode}</span></div>
-                  <div className="text-xs text-slate-600">{venue?.name} • {registration.status === 'confirme' ? 'Confirmé par ARACOM ✅' : 'En attente de caution ⏳'}</div>
+                  <div className="font-semibold">
+                    {registration.is_waitlist ? '⏳ En liste d\'attente — Stand : ' : 'Stand pré-réservé : '}
+                    <span className={`font-mono ${registration.is_waitlist ? 'text-amber-700' : 'text-blue-700'}`}>{myStandCode}</span>
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    {venue?.name} • {registration.status === 'confirme' ? 'Confirmé par ARACOM ✅' : (registration.is_waitlist ? 'ARACOM tranchera selon les disponibilités' : 'En attente de validation ARACOM ⏳')}
+                  </div>
                 </div>
                 {!isLocked && <Button variant="outline" size="sm" onClick={release} disabled={busy} className="gap-1.5"><Trash2 className="w-3.5 h-3.5" /> Libérer</Button>}
               </>
             ) : (
               <>
                 <Info className="w-5 h-5 text-slate-500 shrink-0" />
-                <div className="flex-1 text-sm text-slate-600">Vous n&apos;avez pas encore choisi de stand sur ce site. Cliquez sur un stand libre ci-dessous pour le pré-réserver.</div>
+                <div className="flex-1 text-sm text-slate-600">Vous n&apos;avez pas encore choisi de stand sur ce site. {siteIsFull ? 'Cliquez sur un stand pour rejoindre sa liste d\'attente.' : 'Cliquez sur un stand libre ci-dessous pour le pré-réserver.'}</div>
               </>
             )}
           </CardContent>
@@ -1959,6 +2036,42 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
         </Card>
       )}
 
+      {/* 🆕 SESSION 47.15 — Stands rejoignables en waitlist (visibles surtout quand site complet) */}
+      {selectedVenueId && !isLocked && !myStand && waitlistableStands.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4 text-amber-600" /> Rejoindre une liste d&apos;attente
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              {waitlistableStands.length} stand(s) déjà demandé(s) sur {venue?.name}. Cliquez pour rejoindre la liste d&apos;attente correspondante. Si l&apos;exposant en attente est refusé, vous serez automatiquement promu(e).
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+              {waitlistableStands.map(s => {
+                const rs = s.assignment?.request_status;
+                const owner = s.organization?.name?.slice(0, 12) || 'Pris';
+                const wpos = s.assignment?.waitlist_position;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => reserve(s)}
+                    disabled={busy || conflictBusy}
+                    className="border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 rounded-md p-2 text-center transition disabled:opacity-50"
+                    title={`Stand ${s.stand_code} — demandé par ${s.organization?.name || 'un autre exposant'} (${rs === 'waitlist' ? `liste d'attente${wpos ? ` #${wpos}` : ''}` : 'en attente de validation'}). Cliquez pour rejoindre sa file.`}
+                  >
+                    <div className="font-mono font-bold text-amber-700">{s.stand_code}</div>
+                    <div className="text-[10px] text-amber-700 truncate">⏳ {owner}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Visual map */}
       {selectedVenueId && venue && (
         <Card>
@@ -1967,10 +2080,21 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
             <p className="text-xs text-slate-500 mt-1">Vue d&apos;ensemble : votre stand est mis en évidence en bleu.</p>
           </CardHeader>
           <CardContent>
-            <SmartVenueMap stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} />
+            <SmartVenueMap stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} onStandClick={!isLocked ? (st) => reserve(st) : null} />
           </CardContent>
         </Card>
       )}
+
+      {/* 🆕 SESSION 47.15 — Popup conflit pour rejoindre une waitlist */}
+      <ConflictDialog
+        open={!!conflictInfo}
+        onClose={() => setConflictInfo(null)}
+        kind="stand"
+        conflicts={conflictInfo?.response}
+        standCode={conflictInfo?.stand?.stand_code}
+        submitting={conflictBusy}
+        onConfirmWaitlist={() => reserve(conflictInfo?.stand, true)}
+      />
     </div>
   );
 }
