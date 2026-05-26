@@ -175,6 +175,9 @@ export default function MailingView() {
       const params = new URLSearchParams(window.location.search);
       const preselect = params.get('preselect');
       const mailType = params.get('mail_type');
+      // 🆕 SESSION 47.14 — Support prefill_subject + prefill_body (base64) pour templates pré-générés
+      const prefillSubject = params.get('prefill_subject');
+      const prefillBody = params.get('prefill_body');
 
       if (preselect) {
         const ids = preselect.split(',').filter(Boolean);
@@ -196,10 +199,28 @@ export default function MailingView() {
         if (mailType && MAIL_TYPES.some(t => t.value === mailType)) {
           setType(mailType);
         }
+        // 🆕 SESSION 47.14 — Pré-remplit le sujet + corps si fournis (base64 decoded)
+        try {
+          if (prefillSubject) {
+            const decodedSubject = decodeURIComponent(escape(atob(prefillSubject)));
+            setSubject(decodedSubject);
+          }
+          if (prefillBody) {
+            const decodedBody = decodeURIComponent(escape(atob(prefillBody)));
+            setBody(decodedBody);
+          }
+          if (prefillSubject || prefillBody) {
+            toast.info('📝 Sujet & corps pré-remplis — modifiez-les avant envoi si besoin.');
+          }
+        } catch (e) {
+          console.error('[mailing-view] prefill decode error', e);
+        }
         // Nettoie les params pour éviter le re-déclenchement après refresh
         const url = new URL(window.location.href);
         url.searchParams.delete('preselect');
         url.searchParams.delete('mail_type');
+        url.searchParams.delete('prefill_subject');
+        url.searchParams.delete('prefill_body');
         window.history.replaceState({}, '', url.toString());
         return; // sélection imposée → ne pas auto-populate
       }

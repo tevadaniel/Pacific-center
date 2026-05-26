@@ -4884,6 +4884,111 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
     // POST /api/admin/validation/:id/refuse — Refuse (body: {reason})
     // POST /api/admin/validation/bulk — Action bulk (body: {ids, type: 'stand'|'animation', action: 'validate'|'refuse', reason?})
     // POST /api/admin/validation-deadline — Configure la deadline (body: {deadline: ISO date})
+
+    // 🆕 SESSION 47.14 — Helper : génère un template d'email "suggéré" pour l'exposant
+    // (validated / refused / promoted). Le frontend ouvrira le composer avec ce template
+    // pré-rempli pour qu'ARACOM puisse le modifier avant envoi.
+    async function buildExposantEmailTemplate(registration_id, action, context = {}) {
+      try {
+        const reg = await db.collection('registrations').findOne({ id: registration_id });
+        if (!reg) return null;
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        if (!org) return null;
+        const orgName = org.name || 'votre association';
+        const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+        const venueName = venue?.name || '';
+        const kind = context.kind === 'animation' ? 'animation' : 'stand';
+        const standCode = context.stand_code || reg.stand_code || '';
+        const standOrAnim = kind === 'stand'
+          ? (standCode ? `<b>stand ${standCode}</b>` : 'votre stand')
+          : (context.day_label ? `créneau d'animation du ${context.day_label === 'samedi' ? 'samedi' : 'vendredi'} ${context.start_time || ''}–${context.end_time || ''}` : 'votre créneau d\'animation');
+        let subject = '';
+        let body = '';
+        if (action === 'validated') {
+          subject = `[Forum 2026] ✅ Votre ${kind === 'stand' ? 'stand' : 'créneau d\'animation'} est confirmé !`;
+          body = `<p>Bonjour ${orgName},</p>
+<p>Excellente nouvelle ! Votre demande pour ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''} vient d'être <b>validée par ARACOM</b>. 🎉</p>
+<p>Votre place est maintenant officiellement confirmée pour le Forum de la Rentrée des 14 & 15 août 2026.</p>
+<p>Vous pouvez désormais finaliser votre dossier (caution, convention, documents) directement depuis votre espace personnel.</p>
+<p>[[MON_ESPACE]]</p>
+<p>À très bientôt,<br/>L'équipe ARACOM</p>`;
+        } else if (action === 'refused') {
+          const reason = context.reason || 'Demande refusée';
+          subject = `[Forum 2026] Concernant votre demande de ${kind === 'stand' ? 'stand' : 'créneau'}`;
+          body = `<p>Bonjour ${orgName},</p>
+<p>Nous vous remercions pour votre intérêt pour le Forum de la Rentrée 2026.</p>
+<p>Malheureusement, votre demande pour ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''} <b>n'a pas pu être retenue</b>.</p>
+<p><b>Motif :</b> ${reason}</p>
+<p>Nous restons à votre disposition pour vous proposer une alternative (autre stand, autre site ou autre créneau). N'hésitez pas à nous recontacter ou à modifier votre demande depuis votre espace.</p>
+<p>[[MON_ESPACE]]</p>
+<p>Cordialement,<br/>L'équipe ARACOM</p>`;
+        } else if (action === 'promoted') {
+          subject = `[Forum 2026] 🎉 Vous êtes promu(e) — votre ${kind === 'stand' ? 'stand' : 'créneau'} est disponible !`;
+          body = `<p>Bonjour ${orgName},</p>
+<p>Bonne nouvelle ! Vous étiez en <b>liste d'attente</b> sur ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''}. La place s'étant libérée, votre demande passe automatiquement <b>en attente de validation</b> par ARACOM.</p>
+<p>Aucune action n'est requise de votre part pour l'instant — ARACOM va examiner votre dossier et vous tiendra informé.e dans les meilleurs délais.</p>
+<p>[[MON_ESPACE]]</p>
+<p>Cordialement,<br/>L'équipe ARACOM</p>`;
+        }
+        return {
+          registration_id,
+          organization_name: orgName,
+          organization_email: org.main_email || null,
+          subject,
+          body_html: body,
+          mail_type: action === 'validated' ? 'confirmation' : (action === 'promoted' ? 'info_pratique' : 'info_pratique'),
+        };
+      } catch (e) {
+        console.error('[buildExposantEmailTemplate] error', e?.message);
+        return null;
+      }
+    }
+
+    // 🆕 SESSION 47.14 — Helper : promeut effectivement le 1er en waitlist sur un stand/slot refusé
+    // - Trouve le waitlist #1
+    // - Bascule en request_status='pending', waitlist_position=null
+    // - Décrémente waitlist_position de tous les autres waitlist (#2 → #1, etc.)
+    // - Retourne {promoted_assignment, email_template} ou null si personne en waitlist
+    async function promoteNextInWaitlist(refusedAsn, kind) {
+      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
+      const statusField = kind === 'stand' ? 'status' : 'status';
+      const filter = kind === 'stand'
+        ? { venue_stand_id: refusedAsn.venue_stand_id, request_status: 'waitlist', [statusField]: { $nin: ['annule', 'cancelled', 'annulé'] }, id: { $ne: refusedAsn.id } }
+        : { venue_id: refusedAsn.venue_id, day_label: refusedAsn.day_label, location_type: refusedAsn.location_type, start_time: refusedAsn.start_time, end_time: refusedAsn.end_time, request_status: 'waitlist', [statusField]: { $ne: 'annulé' }, id: { $ne: refusedAsn.id } };
+      const waitlist = await db.collection(collName).find(filter).sort({ waitlist_position: 1, request_submitted_at: 1 }).toArray();
+      if (waitlist.length === 0) return null;
+      const promoted = waitlist[0];
+      // Promote #1 → pending
+      await db.collection(collName).updateOne(
+        { id: promoted.id },
+        { $set: { request_status: 'pending', waitlist_position: null, promoted_at: new Date(), updated_at: new Date() } }
+      );
+      // Decrement positions of the rest
+      for (let i = 1; i < waitlist.length; i++) {
+        await db.collection(collName).updateOne(
+          { id: waitlist[i].id },
+          { $set: { waitlist_position: Math.max(1, (waitlist[i].waitlist_position || i + 1) - 1), updated_at: new Date() } }
+        );
+      }
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: 'system',
+        action: 'WAITLIST_AUTO_PROMOTE',
+        description: `Promotion auto de l'exposant ${promoted.registration_id} suite au refus de ${refusedAsn.registration_id}`,
+        metadata: { kind, promoted_id: promoted.id, refused_id: refusedAsn.id },
+        created_at: new Date(),
+      });
+      // Build email template for the promoted exposant
+      const template = await buildExposantEmailTemplate(promoted.registration_id, 'promoted', {
+        kind,
+        stand_code: promoted.stand_code,
+        day_label: promoted.day_label,
+        start_time: promoted.start_time,
+        end_time: promoted.end_time,
+      });
+      return { promoted_assignment: promoted, email_template: template };
+    }
+
     if (route.startsWith('admin/validation/') && route.endsWith('/validate')) {
       if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
       const targetId = route.split('/')[2];
@@ -4908,7 +5013,15 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         metadata: { kind, target_id: targetId, registration_id: asn.registration_id },
         created_at: new Date(),
       });
-      return json({ ok: true, kind, target_id: targetId, request_status: 'validated' });
+      // 🆕 SESSION 47.14 — Génère un template d'email validé pour le composer ARACOM
+      const emailTemplate = await buildExposantEmailTemplate(asn.registration_id, 'validated', {
+        kind,
+        stand_code: asn.stand_code,
+        day_label: asn.day_label,
+        start_time: asn.start_time,
+        end_time: asn.end_time,
+      });
+      return json({ ok: true, kind, target_id: targetId, request_status: 'validated', email_template: emailTemplate });
     }
 
     if (route.startsWith('admin/validation/') && route.endsWith('/refuse')) {
@@ -4935,18 +5048,39 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         metadata: { kind, target_id: targetId, registration_id: asn.registration_id, reason },
         created_at: new Date(),
       });
-      // Retourne le next-in-waitlist pour information
-      const filter = kind === 'stand'
-        ? { venue_stand_id: asn.venue_stand_id, request_status: 'waitlist', id: { $ne: targetId } }
-        : { venue_id: asn.venue_id, day_label: asn.day_label, location_type: asn.location_type, start_time: asn.start_time, request_status: 'waitlist', id: { $ne: targetId } };
-      const next = await db.collection(collName).findOne(filter, { sort: { waitlist_position: 1, request_submitted_at: 1 } });
+      // 🆕 SESSION 47.14 — PROMOTION EFFECTIVE du 1er en waitlist (était seulement signalée avant)
+      const promotion = await promoteNextInWaitlist(asn, kind);
+      // 🆕 Template email pour l'exposant refusé
+      const refusedTemplate = await buildExposantEmailTemplate(asn.registration_id, 'refused', {
+        kind,
+        stand_code: asn.stand_code,
+        day_label: asn.day_label,
+        start_time: asn.start_time,
+        end_time: asn.end_time,
+        reason,
+      });
+      // Backward-compat : next_in_waitlist (legacy field)
       let nextInfo = null;
-      if (next) {
-        const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
-        const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
-        nextInfo = { assignment_id: next.id, registration_id: next.registration_id, organization_name: nOrg?.name, waitlist_position: next.waitlist_position };
+      if (promotion?.promoted_assignment) {
+        const pReg = await db.collection('registrations').findOne({ id: promotion.promoted_assignment.registration_id });
+        const pOrg = pReg ? await db.collection('organizations').findOne({ id: pReg.organization_id }) : null;
+        nextInfo = {
+          assignment_id: promotion.promoted_assignment.id,
+          registration_id: promotion.promoted_assignment.registration_id,
+          organization_name: pOrg?.name,
+          waitlist_position: 1,
+        };
       }
-      return json({ ok: true, kind, target_id: targetId, request_status: 'refused', reason, next_in_waitlist: nextInfo });
+      return json({
+        ok: true,
+        kind,
+        target_id: targetId,
+        request_status: 'refused',
+        reason,
+        next_in_waitlist: nextInfo,
+        email_template: refusedTemplate,
+        promoted_email_template: promotion?.email_template || null,
+      });
     }
 
     if (route === 'admin/validation/bulk') {
@@ -4959,16 +5093,42 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       const set = action === 'validate'
         ? { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() }
         : { request_status: 'refused', refused_reason: reason || 'Refusé en masse', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() };
+      // 🆕 SESSION 47.14 — Récupère les assignations AVANT update pour générer les templates email + promouvoir
+      const targets = await db.collection(collName).find({ id: { $in: ids } }).toArray();
       const result = await db.collection(collName).updateMany({ id: { $in: ids } }, { $set: set });
+      const emailTemplates = [];
+      const promotedTemplates = [];
+      for (const asn of targets) {
+        const tpl = await buildExposantEmailTemplate(asn.registration_id, action === 'validate' ? 'validated' : 'refused', {
+          kind: type,
+          stand_code: asn.stand_code,
+          day_label: asn.day_label,
+          start_time: asn.start_time,
+          end_time: asn.end_time,
+          reason: reason || 'Refusé en masse',
+        });
+        if (tpl) emailTemplates.push(tpl);
+        if (action === 'refuse') {
+          const promo = await promoteNextInWaitlist(asn, type);
+          if (promo?.email_template) promotedTemplates.push(promo.email_template);
+        }
+      }
       await db.collection('activity_logs').insertOne({
         id: uuid(),
         actor_user_id: ctx.userId || 'u-admin',
         action: `VALIDATION_BULK_${action.toUpperCase()}`,
-        description: `Bulk ${action} ${type} : ${result.modifiedCount} record(s)`,
-        metadata: { type, action, ids, reason, modified: result.modifiedCount },
+        description: `Bulk ${action} ${type} : ${result.modifiedCount} record(s)${promotedTemplates.length ? `, ${promotedTemplates.length} promu(s)` : ''}`,
+        metadata: { type, action, ids, reason, modified: result.modifiedCount, promoted_count: promotedTemplates.length },
         created_at: new Date(),
       });
-      return json({ ok: true, action, type, modified: result.modifiedCount });
+      return json({
+        ok: true,
+        action,
+        type,
+        modified: result.modifiedCount,
+        email_templates: emailTemplates,
+        promoted_email_templates: promotedTemplates,
+      });
     }
 
     if (route === 'admin/validation-deadline') {

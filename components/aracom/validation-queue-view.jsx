@@ -38,6 +38,9 @@ export default function ValidationQueueView() {
   const [bulkReason, setBulkReason] = useState('');
   const [showDeadlineEditor, setShowDeadlineEditor] = useState(false);
   const [newDeadline, setNewDeadline] = useState('');
+  // 🆕 SESSION 47.14 — Queue d'emails à proposer après validate/refuse (validated/refused/promoted)
+  // Format: [{ registration_id, subject, body_html, organization_name, kind: 'validated'|'refused'|'promoted' }, ...]
+  const [emailQueue, setEmailQueue] = useState([]);
 
   // Filtres
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -116,6 +119,10 @@ export default function ValidationQueueView() {
     try {
       const r = await api(`/api/admin/validation/${it.id}/validate`, { method: 'POST' });
       toast.success(`✅ ${it.type === 'stand' ? 'Stand' : 'Animation'} validé(e) — ${it.organization?.name || ''}`);
+      // 🆕 SESSION 47.14 — Propose le template email pour notifier l'exposant
+      if (r.email_template) {
+        setEmailQueue([{ ...r.email_template, kind: 'validated' }]);
+      }
       await load();
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
@@ -135,6 +142,11 @@ export default function ValidationQueueView() {
       } else {
         toast.success('❌ Refusé.');
       }
+      // 🆕 SESSION 47.14 — Queue des emails (refusé + promu si applicable)
+      const queue = [];
+      if (r.email_template) queue.push({ ...r.email_template, kind: 'refused' });
+      if (r.promoted_email_template) queue.push({ ...r.promoted_email_template, kind: 'promoted' });
+      if (queue.length > 0) setEmailQueue(queue);
       setRefusing(null);
       setRefuseReason('');
       await load();
@@ -160,13 +172,46 @@ export default function ValidationQueueView() {
         method: 'POST',
         body: JSON.stringify({ ids, type, action, reason: action === 'refuse' ? bulkReason.trim() : undefined }),
       });
-      toast.success(`${action === 'validate' ? '✅ Validé' : '❌ Refusé'} : ${r.modified} demande(s)`);
+      toast.success(`${action === 'validate' ? '✅ Validé' : '❌ Refusé'} : ${r.modified} demande(s)${r.promoted_email_templates?.length ? ` · ${r.promoted_email_templates.length} promu(s) auto` : ''}`);
+      // 🆕 SESSION 47.14 — Queue tous les emails (actionned + promoted)
+      const queue = [];
+      (r.email_templates || []).forEach(t => queue.push({ ...t, kind: action === 'validate' ? 'validated' : 'refused' }));
+      (r.promoted_email_templates || []).forEach(t => queue.push({ ...t, kind: 'promoted' }));
+      if (queue.length > 0) setEmailQueue(queue);
       setBulkRefusing(false);
       setBulkReason('');
       setSelectedIds(new Set());
       await load();
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
+  };
+
+  // 🆕 SESSION 47.14 — Ouvre la composer mail avec un template pré-rempli pour 1 destinataire
+  const openMailComposer = (template) => {
+    if (!template?.registration_id) {
+      toast.error('Destinataire introuvable pour ce template');
+      return;
+    }
+    // Encode le sujet & body en base64 (gère les caractères unicode FR via escape/unescape trick)
+    const b64 = (str) => {
+      try { return btoa(unescape(encodeURIComponent(str))); } catch (e) { return ''; }
+    };
+    const params = new URLSearchParams({
+      tab: 'mailing',
+      preselect: template.registration_id,
+      mail_type: template.mail_type || 'info_pratique',
+      prefill_subject: b64(template.subject || ''),
+      prefill_body: b64(template.body_html || ''),
+    });
+    // Retire ce template de la queue
+    setEmailQueue(q => q.filter(t => t !== template));
+    // Navigate (full reload via window.location pour s'assurer que MailingView pick up les params)
+    window.location.href = `/aracom?${params.toString()}`;
+  };
+
+  const skipAllEmails = () => {
+    setEmailQueue([]);
+    toast.info('Notifications email annulées. Vous pourrez toujours envoyer un email manuellement depuis la fiche exposant.');
   };
 
   const saveDeadline = async () => {
@@ -474,6 +519,46 @@ export default function ValidationQueueView() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeadlineEditor(false)}>Annuler</Button>
             <Button onClick={saveDeadline} className="bg-indigo-600 hover:bg-indigo-700 text-white">Enregistrer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 🆕 SESSION 47.14 — Dialog Notification Email Queue */}
+      <Dialog open={emailQueue.length > 0} onOpenChange={(v) => { if (!v) skipAllEmails(); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              📧 Notifier {emailQueue.length} exposant{emailQueue.length > 1 ? 's' : ''} ?
+            </DialogTitle>
+            <DialogDescription>
+              Un template d&apos;email a été pré-rempli pour chaque exposant concerné. Cliquez sur <b>« Préparer l&apos;email »</b> pour ouvrir le composer (modifiable avant envoi). Vous pourrez aussi ignorer cette étape et envoyer manuellement plus tard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {emailQueue.map((t, idx) => {
+              const kindLabel = t.kind === 'validated' ? '✅ Validé' : t.kind === 'refused' ? '❌ Refusé' : '🎉 Promu de waitlist';
+              const kindClass = t.kind === 'validated' ? 'border-emerald-300 bg-emerald-50' : t.kind === 'refused' ? 'border-rose-300 bg-rose-50' : 'border-violet-300 bg-violet-50';
+              return (
+                <div key={idx} className={`border-2 rounded-lg p-3 ${kindClass}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="outline" className="text-xs">{kindLabel}</Badge>
+                        <span className="font-semibold text-slate-900 truncate">{t.organization_name || '—'}</span>
+                      </div>
+                      <div className="text-xs text-slate-600 truncate">{t.organization_email || '(email non disponible)'}</div>
+                      <div className="text-sm font-medium text-slate-800 mt-2 italic">« {t.subject} »</div>
+                    </div>
+                    <Button size="sm" onClick={() => openMailComposer(t)} className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0">
+                      📧 Préparer l&apos;email
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={skipAllEmails}>Ignorer toutes les notifications</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

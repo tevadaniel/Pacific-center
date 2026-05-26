@@ -301,11 +301,46 @@ Sur `stand_assignments` et `animation_slots` :
 | # | Tâche | Priorité | Notes |
 |---|-------|----------|-------|
 | 9.1 | Refactor du monolithe `route.js` (~10k lignes) → `/lib/api/handlers/` | P2 | Critique pour maintenabilité long terme |
-| 9.2 | Email auto à l'exposant lors de validation/refus par ARACOM (composer pré-rempli éditable) | P1 | Validé par l'utilisateur, à implémenter |
-| 9.3 | Promotion automatique du waitlist → re-notification de l'exposant promu | P1 | Backend retourne `next_in_waitlist`, manque notification |
+| 9.2 | ✅ ~~Email auto à l'exposant lors de validation/refus~~ | **DONE** | Session 47.14 — Dialog "Notifier" + composer pré-rempli modifiable |
+| 9.3 | ✅ ~~Promotion automatique du waitlist + notification~~ | **DONE** | Session 47.14 — `promoteNextInWaitlist` + template "promoted" |
 | 9.4 | Mode "À l'aveugle" pour les filtres dashboard (cacher noms pour démo) | P3 | Pas demandé explicitement, à confirmer |
 | 9.5 | Audit complet des routes API (404 introuvables, dead code) | P2 | |
 | 9.6 | Internationalisation FR/EN (actuellement FR-only) | P3 | |
+
+---
+
+## 🎁 SESSION 47.14 — Notifications & Auto-promotion (LIVRÉ)
+
+### Backend
+| Item | Détails |
+|------|---------|
+| `buildExposantEmailTemplate(reg_id, action, ctx)` | Helper qui génère subject + body_html avec `[[MON_ESPACE]]` selon action (validated / refused / promoted) |
+| `promoteNextInWaitlist(asn, kind)` | **Promotion EFFECTIVE** : le 1er en waitlist passe en `pending`, `waitlist_position` nulle, les autres décrémentés de 1 |
+| `/admin/validation/:id/validate` | Retourne `email_template` (sujet/corps pour le composer) |
+| `/admin/validation/:id/refuse` | Retourne `email_template` (refusé) + `promoted_email_template` (promu) + promotion DB effective |
+| `/admin/validation/bulk` | Retourne `email_templates[]` + `promoted_email_templates[]` + promotions DB |
+| Activity log `WAITLIST_AUTO_PROMOTE` | Traçabilité de chaque promotion automatique |
+
+### Frontend
+| Item | Détails |
+|------|---------|
+| **Dialog "Notifier l'exposant ?"** s'ouvre après validate/refuse/bulk | Liste les emails à envoyer avec preview du sujet, couleur par type (vert/rouge/violet) |
+| Bouton "📧 Préparer l'email" par destinataire | Ouvre `MailingView` avec `preselect` + `prefill_subject` + `prefill_body` |
+| Bouton "Ignorer toutes les notifications" | Skip optionnel |
+| `MailingView` accepte URL params `prefill_subject` & `prefill_body` (base64) | Sujet + corps pré-remplis, modifiables avant envoi |
+| Composer affiche un toast "📝 Sujet & corps pré-remplis" pour notifier l'admin | |
+
+### Templates email générés
+- **Validated** : "🎉 Votre stand est confirmé !" — confirmation chaleureuse + magic link
+- **Refused** : "Concernant votre demande" — motif détaillé + invitation à reconsidérer
+- **Promoted** : "🎉 Vous êtes promu(e) — votre stand est disponible !" — explication waitlist → pending + magic link
+
+### Tests automatisés
+- ✅ Refuse A → B promu effectivement de waitlist#1 vers pending
+- ✅ C waitlist#2 → décrémenté en waitlist#1
+- ✅ Email templates générés pour A (refused) + B (promoted) avec [[MON_ESPACE]]
+- ✅ Validate B → email template "confirmé" généré
+- ✅ Bulk refuse 2 exposants → 2 templates email retournés
 
 ---
 
