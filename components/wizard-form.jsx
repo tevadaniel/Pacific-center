@@ -1123,14 +1123,18 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
           </div>
         </div>
 
-        {/* 🆕 SESSION 44 — Alerte pré-validation ARACOM sur les créneaux pris */}
-        <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-lg flex items-start gap-3">
-          <span className="text-2xl shrink-0">⚠️</span>
-          <div className="flex-1">
-            <div className="font-bold text-amber-900 text-base mb-1">Créneaux déjà attribués = verrouillés</div>
-            <div className="text-sm text-amber-800 leading-snug">
-              Tout créneau d&apos;animation <b>déjà pris par un autre exposant</b> est <b>pré-validé par ARACOM</b> et ne pourra pas être modifié.
-              Seuls les créneaux marqués <b>« Libre »</b> sont sélectionnables. En cas de besoin spécifique, contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.
+        {/* 🆕 SESSION 47.13 — Pédagogie waitlist animations (remplace l'ancien wording "verrouillés") */}
+        <div className="bg-indigo-50 border-2 border-indigo-300 p-4 rounded-lg space-y-2">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl shrink-0">💡</span>
+            <div className="flex-1 text-sm text-indigo-900 leading-relaxed">
+              <b>Créneaux animation — comment ça marche :</b>
+              <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                <li><b>Créneau libre</b> (blanc) ⟶ Votre demande passe en <b>en attente de validation</b>.</li>
+                <li><b>Créneau déjà demandé</b> (jaune ⏳) ⟶ Cliquez dessus pour rejoindre la <b>liste d&apos;attente</b> (popup d&apos;information).</li>
+                <li><b>Créneau validé ARACOM</b> (rouge 🔒) ⟶ Verrouillé, non sélectionnable.</li>
+              </ul>
+              <div className="mt-2 text-xs italic text-indigo-700">Besoin spécifique ? Contactez ARACOM à <a href="mailto:agence@aracom-conseil.fr" className="underline font-semibold">agence@aracom-conseil.fr</a>.</div>
             </div>
           </div>
         </div>
