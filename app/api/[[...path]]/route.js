@@ -4288,7 +4288,18 @@ export async function POST(request, { params }) {
       if (!regulation_accepted) return err('Vous devez accepter le règlement exposant', 400);
       const state = await getWizardState(db, registration_id);
       if (!state) return err('Inscription introuvable', 404);
-      const missing = Object.entries(state.step_status).filter(([k, v]) => k !== 'step5_confirmed' && !v).map(([k]) => k);
+      // 🆕 SESSION 47.12 — Si le body contient caution_deposit_date, on considère step5_docs_rdv comme rempli
+      // (les données arrivent EN MÊME TEMPS que le finalize, pas avant)
+      const hasInlineCaution = !!body.caution_deposit_date;
+      // step5_confirmed et step6_confirmed sont définis APRÈS finalize → on les exclut du check préalable
+      // step5_docs_rdv et step4_docs_rdv sont satisfaits si caution_deposit_date est dans le body
+      const missing = Object.entries(state.step_status)
+        .filter(([k, v]) => {
+          if (k === 'step5_confirmed' || k === 'step6_confirmed') return false;
+          if (hasInlineCaution && (k === 'step5_docs_rdv' || k === 'step4_docs_rdv')) return false;
+          return !v;
+        })
+        .map(([k]) => k);
       if (missing.length) return err(`Étapes incomplètes : ${missing.join(', ')}`, 400);
 
       // 🆕 SESSION 47 — Capture des paramètres post-soumission : mode de règlement caution + RDV libre
