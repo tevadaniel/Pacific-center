@@ -13,6 +13,7 @@ import { Check, ChevronRight, ChevronLeft, Lock, Plus, Minus, MapPin, Calendar, 
 import SmartVenueMap from '@/components/smart-venue-map';
 import UrgencyBanner from '@/components/wizard/urgency-banner';
 import SubmitFinalizeModal from '@/components/wizard/submit-finalize-modal';
+import ConflictDialog from '@/components/wizard/conflict-dialog';
 
 const STEPS = [
   { n: 1, key: 'profile', label: 'Profil', icon: '👤' },
@@ -733,6 +734,10 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   const allStandsTaken = stands.length > 0 && freeStandsCount === 0;
   const [waitlistBusy, setWaitlistBusy] = useState(false);
 
+  // 🆕 SESSION 47.13 — Conflit pending/validated : popup + retry force_waitlist
+  const [conflictInfo, setConflictInfo] = useState(null); // {owner_name, owner_status, waitlist_count, waitlist_position, message}
+  const [conflictBusy, setConflictBusy] = useState(false);
+
   const onStandClick = (stand) => {
     if (!stand) return;
     if (!isStandAvailable(stand)) {
@@ -744,23 +749,36 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
     toast.success(`Stand ${stand.stand_code} sélectionné`);
   };
 
-  const submit = async () => {
+  const submit = async (forceWaitlist = false) => {
     if (!b.stand_code) { toast.error('Cliquez sur un stand disponible sur la carte'); return; }
-    setSaving(true);
+    if (forceWaitlist) setConflictBusy(true); else setSaving(true);
     try {
-      await api('/wizard/stand', {
+      const result = await api('/wizard/stand', {
         method: 'POST',
         body: JSON.stringify({
           registration_id: registrationId,
           stand_code: b.stand_code,
           venue_stand_id: b.venue_stand_id,
+          force_waitlist: forceWaitlist || undefined,
         }),
       });
-      toast.success(`Stand ${b.stand_code} verrouillé ✓`);
+      // 🆕 SESSION 47.13 — Réponse de conflit : ouvrir la popup
+      if (result && result.conflict === true && !forceWaitlist) {
+        setConflictInfo(result);
+        return;
+      }
+      // Succès : afficher message selon request_status
+      const rs = result?.request_status;
+      if (rs === 'waitlist') {
+        toast.success(`⏳ Inscrit en liste d'attente sur le stand ${b.stand_code} (position #${result?.waitlist_position || '?'}). ARACOM tranchera.`);
+      } else {
+        toast.success(`📋 Stand ${b.stand_code} demandé — en attente de validation ARACOM.`);
+      }
+      setConflictInfo(null);
       await reload();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setConflictBusy(false); }
   };
 
   // 🆕 SESSION 45 — Soumettre une demande en LISTE D'ATTENTE quand le site est complet
@@ -862,15 +880,26 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
             </Button>
           ) : (
             <Button
-              onClick={submit}
+              onClick={() => submit(false)}
               disabled={saving || !b.stand_code}
               className="gap-2 bg-blue-600 hover:bg-blue-700"
               data-testid="step3-next"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Verrouiller mon stand <ChevronRight className="w-4 h-4" /></>}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Demander ce stand <ChevronRight className="w-4 h-4" /></>}
             </Button>
           )}
         </div>
+
+        {/* 🆕 SESSION 47.13 — Popup conflit pending/validated */}
+        <ConflictDialog
+          open={!!conflictInfo}
+          onClose={() => setConflictInfo(null)}
+          kind="stand"
+          conflicts={conflictInfo}
+          standCode={b.stand_code}
+          submitting={conflictBusy}
+          onConfirmWaitlist={() => submit(true)}
+        />
       </CardContent>
     </Card>
   );
@@ -940,7 +969,10 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
     });
   };
 
-  const submit = async () => {
+  const [conflictAnims, setConflictAnims] = useState(null); // array of conflicts
+  const [conflictAnimBusy, setConflictAnimBusy] = useState(false);
+
+  const submit = async (forceWaitlist = false) => {
     // 🆕 SESSION 47 — Validation stricte : 1 créneau obligatoire par jour de présence
     if (attendingDays.length === 0) {
       toast.error('Veuillez d\'abord cocher vos jours de présence à l\'étape précédente.');
@@ -968,18 +1000,33 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
         return;
       }
     }
-    setSaving(true);
+    if (forceWaitlist) setConflictAnimBusy(true); else setSaving(true);
     try {
-      await api('/wizard/animation', {
+      const result = await api('/wizard/animation', {
         method: 'POST',
-        body: JSON.stringify({ registration_id: registrationId, animations: anims }),
+        body: JSON.stringify({
+          registration_id: registrationId,
+          animations: anims,
+          force_waitlist: forceWaitlist || undefined,
+        }),
       });
-      toast.success(`${anims.length} animation${anims.length > 1 ? 's' : ''} enregistrée${anims.length > 1 ? 's' : ''} ✓`);
+      // 🆕 SESSION 47.13 — Réponse de conflit : ouvrir la popup
+      if (result && result.conflict === true && !forceWaitlist) {
+        setConflictAnims(result.conflicts || []);
+        return;
+      }
+      const wlCount = result?.waitlist_count || 0;
+      if (wlCount > 0) {
+        toast.success(`⏳ ${wlCount}/${anims.length} créneau(x) en liste d'attente. ARACOM tranchera.`);
+      } else {
+        toast.success(`📋 ${anims.length} créneau${anims.length > 1 ? 'x' : ''} en attente de validation ARACOM.`);
+      }
+      setConflictAnims(null);
       await reload();
       await reloadAvailability();
       onNext();
     } catch (e) { toast.error(e.message); reloadAvailability(); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setConflictAnimBusy(false); }
   };
 
   if (attendingDays.length === 0) {
@@ -1039,10 +1086,20 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={submit} disabled={saving} className="gap-2 bg-violet-600 hover:bg-violet-700" data-testid="step3-next">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmer mes animations <ChevronRight className="w-4 h-4" /></>}
+          <Button onClick={() => submit(false)} disabled={saving} className="gap-2 bg-violet-600 hover:bg-violet-700" data-testid="step3-next">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Demander mes animations <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
+
+        {/* 🆕 SESSION 47.13 — Popup conflit anim pending/validated */}
+        <ConflictDialog
+          open={!!conflictAnims && conflictAnims.length > 0}
+          onClose={() => setConflictAnims(null)}
+          kind="animation"
+          conflicts={conflictAnims || []}
+          submitting={conflictAnimBusy}
+          onConfirmWaitlist={() => submit(true)}
+        />
       </CardContent>
     </Card>
   );

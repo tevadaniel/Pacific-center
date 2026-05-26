@@ -58,6 +58,7 @@ import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 import SimulationModal from '@/components/aracom/simulation-modal';
+import ValidationQueueView from '@/components/aracom/validation-queue-view';
 
 // 🎨 SESSION 29 — Menus intelligents : 6 groupes accordéon cohérents, Exposants en tête
 //    • Renaming : libellés explicites (ex: "Liste exposants" → "Liste & fiches")
@@ -67,6 +68,7 @@ const TABS = [
   { key: 'dashboard', label: 'Tableau de bord', icon: 'LayoutDashboard', href: '/aracom' },
   // — Exposants (cœur métier) —
   { key: 'exposants', label: 'Liste & fiches', icon: 'Users', href: '/aracom?tab=exposants' },
+  { key: 'file-validation', label: 'File de validation', icon: 'ShieldCheck', href: '/aracom?tab=file-validation' },
   { key: 'cautions', label: 'Cautions & restitutions', icon: 'Wallet', href: '/aracom?tab=cautions' },
   { key: 'relances', label: 'Relances IA', icon: 'Bell', href: '/aracom?tab=relances' },
   { key: 'validations', label: 'Validations dossiers', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
@@ -97,7 +99,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'cautions', 'relances', 'validations', 'prospection'],
+    items: ['exposants', 'file-validation', 'cautions', 'relances', 'validations', 'prospection'],
   },
   {
     key: 'terrain',
@@ -170,6 +172,7 @@ export default function AracomPage() {
   // Mapping tab.key → champ menu-badges (compteur affiché dans le menu)
   const BADGE_MAP = {
     'validations': 'validations',
+    'file-validation': 'pending_validations',
     'relances': 'relances',
     'exposants': 'a_confirmer',
     'cautions': 'cautions',
@@ -180,6 +183,7 @@ export default function AracomPage() {
   // Tooltips contextuels affichés au hover sur chaque badge
   const BADGE_TOOLTIPS = {
     'validations': `${menuBadges.validations || 0} demande(s) de validation en attente`,
+    'file-validation': `${menuBadges.pending_validations || 0} demande(s) stand/animation en attente ARACOM`,
     'relances': `${menuBadges.relances || 0} exposant(s) à relancer`,
     'exposants': `${menuBadges.a_confirmer || 0} dossier(s) à confirmer`,
     'cautions': `${menuBadges.cautions || 0} caution(s) non encaissée(s)`,
@@ -248,6 +252,7 @@ export default function AracomPage() {
       {activeTab === 'exposants' && <ExposantsListView />}
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'validations' && <ValidationsView />}
+      {activeTab === 'file-validation' && <ValidationQueueView />}
       {activeTab === 'access' && <AccessTokensView />}
       {activeTab === 'cautions' && <CautionsView />}
       {activeTab === 'mailing' && <MailingView />}
