@@ -1362,8 +1362,13 @@ export async function GET(request, { params }) {
       // Hide unavailable venues for non-admin roles
       let visible = userRole === 'aracom_admin' ? venues : venues.filter(v => v.is_available_2026 !== false);
       // 🆕 SESSION 47.10 — Si only_active=1 (dropdown de sélection), force le filtre même pour aracom_admin
+      // 🆕 SESSION 47.16 — Inclut aussi `exposant_visible !== false` car only_active=1 est public-facing (exposants/pacific)
       if (onlyActive) {
-        visible = visible.filter(v => v.is_available_2026 !== false && v.is_active !== false);
+        visible = visible.filter(v =>
+          v.is_available_2026 !== false &&
+          v.is_active !== false &&
+          v.exposant_visible !== false
+        );
       }
       // 🆕 Filtre supplémentaire pour Pacific Centers : seuls les sites avec pacific_visible=true (ou non défini = true par défaut)
       if (userRole === 'pacific_centers_readonly') {
@@ -4137,21 +4142,33 @@ export async function POST(request, { params }) {
 
       const hasActiveOwner = otherRequests.some(r => r.request_status === 'pending' || r.request_status === 'validated');
       const waitlistCount = otherRequests.filter(r => r.request_status === 'waitlist').length;
+      // 🆕 SESSION 47.16 — Limite stricte de 3 personnes en liste d'attente par stand
+      const WAITLIST_MAX_PER_STAND = 3;
+      if (hasActiveOwner && waitlistCount >= WAITLIST_MAX_PER_STAND) {
+        return json({
+          ok: false,
+          conflict: true,
+          waitlist_full: true,
+          stand_code: stand.stand_code,
+          waitlist_count: waitlistCount,
+          waitlist_max: WAITLIST_MAX_PER_STAND,
+          message: `La liste d'attente de ce stand est complète (${WAITLIST_MAX_PER_STAND} exposants déjà inscrits). Veuillez choisir un autre stand.`,
+        }, 200);
+      }
 
       // Si conflit ET pas de force_waitlist → renvoie info pour popup côté front
       if (hasActiveOwner && !force_waitlist) {
         const ownerReq = otherRequests.find(r => r.request_status === 'pending' || r.request_status === 'validated');
-        const ownerReg = await db.collection('registrations').findOne({ id: ownerReq.registration_id });
-        const ownerOrg = ownerReg ? await db.collection('organizations').findOne({ id: ownerReg.organization_id }) : null;
+        // 🆕 SESSION 47.16 — ANONYMAT : ne pas exposer le nom du propriétaire
         return json({
           ok: false,
           conflict: true,
           stand_code: stand.stand_code,
           owner_status: ownerReq.request_status,
-          owner_name: ownerOrg?.name || 'un autre exposant',
           waitlist_count: waitlistCount,
           waitlist_position: waitlistCount + 1,
-          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'validé' : 'en attente de validation'} pour ${ownerOrg?.name || 'un autre exposant'}. Votre demande peut être placée en liste d'attente (position #${waitlistCount + 1}).`,
+          waitlist_max: WAITLIST_MAX_PER_STAND,
+          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'réservé' : 'pré-réservé (en attente de validation)'}. Vous pouvez soumettre votre demande d'occupation de stand en liste d'attente (position ${waitlistCount + 1}/${WAITLIST_MAX_PER_STAND}).`,
         }, 200);
       }
 
@@ -8518,19 +8535,30 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       const activeOwners = otherRequests.filter(r => r.request_status !== 'waitlist');
       const hasActiveOwner = activeOwners.length > 0 || !!legacyOwner;
       const waitlistCount = otherRequests.filter(r => r.request_status === 'waitlist').length;
-      // Si conflit ET pas force_waitlist : retourne {conflict:true} pour permettre au frontend d'afficher la popup
-      if (hasActiveOwner && !force_waitlist) {
-        const ownerReq = activeOwners[0] || legacyOwner;
-        const ownerReg = await db.collection('registrations').findOne({ id: ownerReq.registration_id });
-        const ownerOrg = ownerReg ? await db.collection('organizations').findOne({ id: ownerReg.organization_id }) : null;
+      // 🆕 SESSION 47.16 — Limite stricte de 3 personnes en liste d'attente par stand
+      const WAITLIST_MAX_PER_STAND = 3;
+      if (hasActiveOwner && waitlistCount >= WAITLIST_MAX_PER_STAND) {
         return json({
           ok: false,
           conflict: true,
-          owner_name: ownerOrg?.name || 'un autre exposant',
+          waitlist_full: true,
+          waitlist_count: waitlistCount,
+          waitlist_max: WAITLIST_MAX_PER_STAND,
+          message: `La liste d'attente de ce stand est complète (${WAITLIST_MAX_PER_STAND} exposants déjà inscrits). Veuillez choisir un autre stand.`,
+        });
+      }
+      // Si conflit ET pas force_waitlist : retourne {conflict:true} pour permettre au frontend d'afficher la popup
+      if (hasActiveOwner && !force_waitlist) {
+        const ownerReq = activeOwners[0] || legacyOwner;
+        // 🆕 SESSION 47.16 — ANONYMAT : ne pas exposer le nom du propriétaire, juste son statut
+        return json({
+          ok: false,
+          conflict: true,
           owner_status: ownerReq.request_status || 'validated',
           waitlist_count: waitlistCount,
           waitlist_position: waitlistCount + 1,
-          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'validé' : 'en attente de validation'} pour ${ownerOrg?.name || 'un autre exposant'}. Votre demande peut être placée en liste d'attente (position #${waitlistCount + 1}).`,
+          waitlist_max: WAITLIST_MAX_PER_STAND,
+          message: `Ce stand est déjà ${ownerReq.request_status === 'validated' ? 'réservé' : 'pré-réservé (en attente de validation)'}. Vous pouvez soumettre votre demande en liste d'attente (position ${waitlistCount + 1}/${WAITLIST_MAX_PER_STAND}).`,
         });
       }
       // Détermine le request_status

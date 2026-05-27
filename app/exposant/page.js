@@ -2051,8 +2051,9 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
               {waitlistableStands.map(s => {
                 const rs = s.assignment?.request_status;
-                const owner = s.organization?.name?.slice(0, 12) || 'Pris';
                 const wpos = s.assignment?.waitlist_position;
+                // 🆕 SESSION 47.16 — Anonymat : pas de nom d'owner
+                const label = rs === 'waitlist' ? `⏳ En liste${wpos ? ` #${wpos}` : ''}` : (rs === 'validated' ? '✅ Réservé' : '⏳ Pré-réservé');
                 return (
                   <button
                     key={s.id}
@@ -2060,10 +2061,10 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
                     onClick={() => reserve(s)}
                     disabled={busy || conflictBusy}
                     className="border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 rounded-md p-2 text-center transition disabled:opacity-50"
-                    title={`Stand ${s.stand_code} — demandé par ${s.organization?.name || 'un autre exposant'} (${rs === 'waitlist' ? `liste d'attente${wpos ? ` #${wpos}` : ''}` : 'en attente de validation'}). Cliquez pour rejoindre sa file.`}
+                    title={`Stand ${s.stand_code} — ${rs === 'validated' ? 'déjà réservé' : 'pré-réservé (en attente de validation)'}. Cliquez pour soumettre votre demande en liste d'attente.`}
                   >
                     <div className="font-mono font-bold text-amber-700">{s.stand_code}</div>
-                    <div className="text-[10px] text-amber-700 truncate">⏳ {owner}</div>
+                    <div className="text-[10px] text-amber-700 truncate">{label}</div>
                   </button>
                 );
               })}

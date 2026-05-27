@@ -761,16 +761,16 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
   const onStandClick = (stand) => {
     if (!stand) return;
     if (!isStandClickable(stand)) {
-      toast.error(`Stand ${stand.stand_code} verrouillé — déjà validé par ARACOM pour ${stand.organization?.name || 'un autre exposant'}`);
+      toast.error(`Stand ${stand.stand_code} verrouillé — déjà validé par ARACOM`);
       return;
     }
     setField('stand_code', stand.stand_code);
     setField('venue_stand_id', stand.id);
     if (!isStandFree(stand)) {
-      const owner = stand.organization?.name || 'un autre exposant';
+      // 🆕 SESSION 47.16 — Anonymat : pas de nom d'owner dans le toast
       const rs = stand.assignment?.request_status;
-      const labelStatus = rs === 'waitlist' ? `en liste d'attente` : `en attente de validation`;
-      toast.info(`📋 Stand ${stand.stand_code} déjà demandé par ${owner} (${labelStatus}). Cliquez "Demander ce stand" pour rejoindre la liste d'attente.`, { duration: 6500 });
+      const labelStatus = rs === 'waitlist' ? `en liste d'attente` : (rs === 'validated' ? 'réservé' : 'pré-réservé (en attente de validation)');
+      toast.info(`📋 Stand ${stand.stand_code} déjà ${labelStatus}. Cliquez "Demander ce stand" pour soumettre votre demande en liste d'attente.`, { duration: 6500 });
     } else {
       toast.success(`✓ Stand ${stand.stand_code} sélectionné`);
     }
