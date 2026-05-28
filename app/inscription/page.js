@@ -45,24 +45,40 @@ export default function InscriptionPublicPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-b from-aracom-beige-pale to-aracom-beige-fond flex items-center justify-center p-4">
       <Toaster position="top-right" richColors />
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border-2 border-aracom-gold/60 shadow-xl">
         <CardContent className="p-8 space-y-5">
           <div className="text-center">
             <div className="text-5xl mb-2">🌺</div>
-            <h1 className="text-2xl font-bold text-slate-900">Forum de la Rentrée 2026</h1>
-            <p className="text-sm text-slate-500 mt-1">Inscription exposant — 14 & 15 août 2026</p>
+            <h1 className="text-2xl font-bold text-aracom-black">Forum de la Rentrée 2026</h1>
+            <p className="text-sm text-aracom-black/60 mt-1">Inscription exposant — 14 &amp; 15 août 2026</p>
+          </div>
+          <div className="bg-aracom-gold/15 border border-aracom-gold/50 rounded-lg p-3 text-xs text-aracom-black/80 leading-relaxed">
+            ✨ Votre inscription se fait en 5 étapes guidées : <b>profil → site → jours → stand → animation</b>. À chaque étape, un bouton vous indiquera explicitement la suivante. Votre saisie est sauvegardée automatiquement.
           </div>
           <div>
-            <Label>Email du référent</Label>
-            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="contact@votre-asso.pf" data-testid="public-email" />
+            <Label className="text-aracom-black">Email du référent</Label>
+            <Input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="contact@votre-asso.pf"
+              data-testid="public-email"
+              className="border-aracom-gold/40 focus:border-aracom-orange focus:ring-aracom-orange/30"
+            />
           </div>
-          <Button onClick={startInscription} disabled={submitting || !email} className="w-full bg-blue-600 hover:bg-blue-700" size="lg" data-testid="start-inscription">
+          <Button
+            onClick={startInscription}
+            disabled={submitting || !email}
+            className="w-full bg-aracom-orange hover:bg-aracom-orange/90 text-white shadow-lg"
+            size="lg"
+            data-testid="start-inscription"
+          >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Commencer mon inscription
+            Commencer mon inscription →
           </Button>
-          <p className="text-xs text-slate-500 text-center">Vous accéderez ensuite au formulaire en 5 étapes. Votre saisie est sauvegardée automatiquement.</p>
+          <p className="text-xs text-aracom-black/50 text-center">⚠️ Toute réservation est une <b>pré-réservation</b>. Elle sera confirmée après validation par ARACOM.</p>
         </CardContent>
       </Card>
     </div>

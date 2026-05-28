@@ -4415,6 +4415,12 @@ export async function POST(request, { params }) {
       await db.collection('animation_slots').deleteMany({ registration_id });
       const venue = await db.collection('venues').findOne({ id: reg.venue_id });
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      // 🆕 PHASE A — PACKAGE LINKING: link animation slots to the stand_assignment
+      const linkedStandAssignment = await db.collection('stand_assignments').findOne({
+        registration_id,
+        status: { $nin: ['annule', 'cancelled'] },
+      });
+      const linkedStandAssignmentId = linkedStandAssignment?.id || null;
       const inserted = [];
       for (const a of normalized) {
         // Détermine le statut de cette anim individuellement
@@ -4448,11 +4454,27 @@ export async function POST(request, { params }) {
           validated_at: null,
           validated_by: null,
           refused_reason: null,
+          // 🆕 PHASE A — Package linking stand ↔ animation (foundation Phase B cession)
+          linked_stand_assignment_id: linkedStandAssignmentId,
           created_at: new Date(),
           updated_at: new Date(),
         };
         await db.collection('animation_slots').insertOne(doc);
         inserted.push({ id: slotId, day_label: a.day_label, request_status: rs, waitlist_position: wp });
+      }
+
+      // 🆕 PHASE A — Mettre à jour le stand_assignment avec la liste des animation_slot_ids liés
+      if (linkedStandAssignmentId) {
+        await db.collection('stand_assignments').updateOne(
+          { id: linkedStandAssignmentId },
+          {
+            $set: {
+              linked_animation_slot_ids: inserted.map(i => i.id),
+              package_locked_at: new Date(),
+              updated_at: new Date(),
+            },
+          }
+        );
       }
 
       await db.collection('registrations').updateOne(

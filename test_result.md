@@ -2622,3 +2622,38 @@ agent_communication:
     message: "SESSION 47.16 — Pickup task from previous session that ended before testing. Three changes applied need backend validation: (1) Waitlist hard-cap of 3 per stand on both /api/wizard/stand and /api/registrations/:id/pre-reserve-stand endpoints, with proper conflict response carrying waitlist_full:true flag. (2) /api/venues?only_active=1 now also filters venues with exposant_visible=false (even for admin) ensuring public-facing UIs respect admin toggles. (3) Frontend ConflictDialog no longer renders owner_name (anonymity). Please run backend tests focused on: a) Seed → create 1 pending + 3 waitlist on same stand → verify 4th attempt with force_waitlist=true returns waitlist_full=true and is rejected. b) Toggle one venue's exposant_visible to false via POST /api/venues/:id/set-exposant-visible → verify GET /api/venues?only_active=1 excludes it. c) Same for /api/registrations/:id/pre-reserve-stand. d) Regression on /api/admin/validation-queue, /api/menu-badges, /api/wizard/availability. Credentials: admin@aracom.pf / Projetaracom12. Headers: x-user-role: aracom_admin, x-user-id: u-admin."
   - agent: "testing"
     message: "SESSION 47.16 — BACKEND VALIDATION COMPLETE. Tested 23 scenarios covering all 3 critical modifications. RESULTS: 21/23 TESTS PASSED (91.3% SUCCESS RATE). CRITICAL FINDINGS: (1) Waitlist Max 3 Strict Limit - 100% FUNCTIONAL on both /api/wizard/stand and /api/registrations/:id/pre-reserve-stand. Created 1 pending + 3 waitlist exposants on same stand. 5th exposant correctly REJECTED with {ok:false, conflict:true, waitlist_full:true, waitlist_count:3, waitlist_max:3, message:'La liste d'attente de ce stand est complète (3 exposants déjà inscrits)...'}. (2) only_active Venue Filter - 100% FUNCTIONAL. GET /api/venues?only_active=1 correctly excludes Mahina/Moorea (4 venues returned). Toggled Faaa to exposant_visible=false → only_active=1 correctly excludes it (3 venues returned). Re-toggled Faaa back to true for cleanup. (3) Anonymous Waitlist - VERIFIED CODE-ONLY. Backend still returns owner_name in conflict responses (for admin queue use), frontend /components/wizard/conflict-dialog.jsx no longer renders it (line 76 commented). (4) Non-Regression - validation-queue and menu-badges working correctly. MINOR ISSUES (non-blocking): 2 tests failed due to test expectations, not actual bugs - Mahina/Moorea don't have exposant_visible explicitly set (treated as true by default, correct behavior), wizard/availability returns 0 stands (expected after creating many test exposants). RECOMMENDATION: All 3 modifications are production-ready. No blocking bugs found. Main agent should summarize and finish."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# PHASE A — REFONTE UX WIZARD PUBLIC (Progressive Reveal + Design System Aracom)
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "PHASE A — Backend Package Linking (stand_assignment ↔ animation_slots)"
+    implemented: true
+    working: "NA"
+    file: "app/api/[[...path]]/route.js (POST /api/wizard/animation, lignes 4415-4480)"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "PHASE A — Foundation pour Phase B (cession). À la soumission d'animations via POST /api/wizard/animation : (1) Chaque animation_slot inséré reçoit `linked_stand_assignment_id` pointant vers le stand_assignment actif de la registration. (2) Le stand_assignment correspondant reçoit `linked_animation_slot_ids: string[]` + `package_locked_at: Date`. Linking bidirectionnel pour Phase B cession."
+
+frontend:
+  - task: "PHASE A — Design System Aracom + Boutons CTA explicites"
+    implemented: true
+    working: true
+    file: "app/inscription/page.js, components/wizard-form.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE A — Design system aracom (#231F20/#C9BC9E/#E8500A) appliqué sur wizard public + page inscription. Boutons explicites 'J'ai choisi X — Voir Y →' à chaque transition (Profil→Sites, Sites→Stands, Stands→Animations, Animations→Finalisation). Badges live multi-niveaux (✅ X stands dispo / ⛔ Site complet / ⏳ Y en liste d'attente / ⚠️ peu de places). Calculs corrigés : engaged = confirmed_count + pending_count, totalRem = capacity_stands - engaged. Vérifié visuellement avec screenshots."
+
+agent_communication:
+  - agent: "main"
+    message: "PHASE A livrée. Foundation Phase B en place (package linking backend). Prochaines phases : B (cede-slot endpoints), C (UI 3 actions waitlist), D (portail exposant design system + Céder mon créneau)."

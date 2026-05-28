@@ -181,7 +181,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
               Cela peut arriver si l&apos;équipe ARACOM a réinitialisé la base de test
               ou si trop de temps s&apos;est écoulé.
             </p>
-            <Button onClick={resetAndRestart} size="lg" className="bg-blue-600 hover:bg-blue-700 w-full">
+            <Button onClick={resetAndRestart} size="lg" className="bg-aracom-orange hover:bg-aracom-orange/90 w-full">
               Recommencer une inscription
             </Button>
           </CardContent>
@@ -207,7 +207,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
           </div>
           {/* Progress bar */}
           <div className="mt-3 relative h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-500" style={{ width: `${progressPct + (currentStep === 5 ? 25 : 0)}%` }} />
+            <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-aracom-orange to-aracom-gold transition-all duration-500" style={{ width: `${progressPct + (currentStep === 5 ? 25 : 0)}%` }} />
           </div>
           {/* Steps nav */}
           <div className="mt-3 grid grid-cols-5 gap-1 md:gap-2">
@@ -223,14 +223,14 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                   disabled={isLocked && !isActive}
                   onClick={() => !isLocked && setCurrentStep(s.n)}
                   className={`relative flex flex-col items-center gap-1 py-2 px-1 rounded-lg transition ${
-                    isActive ? 'bg-blue-100 text-blue-900' :
+                    isActive ? 'bg-aracom-orange/15 text-aracom-black' :
                     isDone ? 'bg-emerald-50 text-emerald-700' :
                     isLocked ? 'opacity-50 cursor-not-allowed text-slate-400' : 'hover:bg-slate-50 text-slate-600'
                   }`}
                   data-testid={`wizard-step-${s.n}`}
                 >
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${
-                    isActive ? 'bg-blue-600 text-white' :
+                    isActive ? 'bg-aracom-orange text-white' :
                     isDone ? 'bg-emerald-500 text-white' :
                     'bg-slate-200 text-slate-500'
                   }`}>
@@ -281,18 +281,18 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setCurrentStep(1)} className="text-xs text-blue-600 hover:underline whitespace-nowrap" data-testid="edit-profile">Modifier</button>
+              <button onClick={() => setCurrentStep(1)} className="text-xs text-aracom-orange hover:underline whitespace-nowrap" data-testid="edit-profile">Modifier</button>
             </div>
             {/* Résumé des étapes verrouillées */}
             {(state.registration?.venue_id || state.registration?.stand_code || (state.animation_slots?.length > 0)) && (
               <div className="mt-3 pt-3 border-t flex flex-wrap gap-2 text-[11px]">
                 {state.registration?.venue_id && (
-                  <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-800 gap-1">
+                  <Badge variant="outline" className="bg-aracom-gold/20 border-aracom-gold text-aracom-black gap-1">
                     <MapPin className="w-3 h-3" /> {state.venue?.name || state.registration.venue_id}
                   </Badge>
                 )}
                 {state.registration?.attending_days?.length > 0 && (
-                  <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-800 gap-1">
+                  <Badge variant="outline" className="bg-aracom-gold/20 border-aracom-gold text-aracom-black gap-1">
                     <Calendar className="w-3 h-3" /> {state.registration.attending_days.length === 2 ? 'Ven + Sam' : (state.registration.attending_days[0] === 'samedi' ? 'Sam' : 'Ven')}
                   </Badge>
                 )}
@@ -338,7 +338,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                         className={`text-left rounded-md border p-2 transition ${
                           isCurrent
                             ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200 cursor-default'
-                            : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'
+                            : 'bg-white border-slate-200 hover:border-aracom-orange hover:bg-aracom-orange/5'
                         }`}
                         data-testid={`site-${s.registration_id}`}
                       >
@@ -382,7 +382,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                       setTimeout(() => { window.location.href = '/inscription'; }, 800);
                     } catch (e) { toast.error(e.message); }
                   }}
-                  className="mt-2 text-[11px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                  className="mt-2 text-[11px] text-aracom-orange hover:text-blue-800 hover:underline inline-flex items-center gap-1"
                   data-testid="add-another-site"
                 >
                   <Plus className="w-3 h-3" /> Réserver un site supplémentaire
@@ -405,7 +405,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
                       setTimeout(() => { window.location.href = '/inscription'; }, 800);
                     } catch (e) { toast.error(e.message); }
                   }}
-                  className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                  className="text-[11px] text-aracom-orange hover:text-blue-800 hover:underline inline-flex items-center gap-1"
                   data-testid="add-second-site"
                 >
                   <Plus className="w-3 h-3" /> Ajouter un second site (optionnel)
@@ -426,7 +426,7 @@ export default function WizardPage({ registrationId, isPublic = false }) {
 }
 
 function FullScreenLoader() {
-  return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
+  return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-aracom-orange" /></div>;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -504,10 +504,10 @@ function Step1Profile({ state, draft, setDraft, onNext, reload, registrationId, 
             <Button
               onClick={submit}
               disabled={saving || !canContinue}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              className="gap-2 bg-aracom-orange hover:bg-aracom-orange/90"
               data-testid="step1-next"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>J&apos;ai renseigné mon profil — Voir les sites <ChevronRight className="w-4 h-4" /></>}
             </Button>
           </div>
         </div>
@@ -576,17 +576,21 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
 
         {/* 1) SITES */}
         <div>
-          <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> 1. Mon site</h3>
+          <h3 className="font-semibold text-aracom-black mb-3 flex items-center gap-2"><MapPin className="w-4 h-4 text-aracom-orange" /> 1. Mon site</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {venues.map(v => {
               const isSel = b.venue_id === v.id;
-              const totalRem = v.available_per_day?.reduce((a, d) => a + d.remaining, 0) || 0;
+              // 🆕 PHASE A — Stands engagés = exposants confirmés + en attente de validation
+              const engagedStands = (v.confirmed_count || 0) + (v.pending_count || 0);
+              const totalRem = Math.max(0, (v.capacity_stands || 0) - engagedStands);
               const isFull = totalRem === 0;
+              const waitlistGlobal = v.waitlist_count || 0;
+              const pendingGlobal = v.pending_count || 0;
               return (
                 <button
                   key={v.id}
                   type="button"
-                  disabled={isFull && !isSel}
+                  disabled={isFull && !isSel && waitlistGlobal === 0}
                   onClick={() => {
                     if (b.venue_id !== v.id) {
                       setField('venue_id', v.id);
@@ -595,18 +599,31 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
                     }
                   }}
                   className={`relative p-3 rounded-lg border-2 text-left transition ${
-                    isSel ? 'border-blue-600 bg-blue-50' :
-                    isFull ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed' :
-                    'border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'
+                    isSel ? 'border-aracom-orange bg-aracom-orange/10 shadow-md' :
+                    isFull && waitlistGlobal === 0 ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed' :
+                    'border-aracom-gold/40 hover:border-aracom-orange hover:bg-aracom-orange/5'
                   }`}
                   data-testid={`venue-${v.id}`}
                 >
-                  <div className="font-bold text-slate-900">{v.name}</div>
-                  <div className="text-xs text-slate-500 mt-1">{v.capacity_stands} stands</div>
-                  <div className="text-xs mt-1 font-medium">
-                    {isFull ? <span className="text-slate-400">Complet</span> : <span className="text-emerald-600">{totalRem} créneaux dispo</span>}
+                  <div className="font-bold text-aracom-black">{v.name}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">{v.capacity_stands} stands</div>
+                  <div className="mt-2 flex flex-col gap-1">
+                    {!isFull ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 w-fit">
+                        ✅ {totalRem} stand{totalRem > 1 ? 's' : ''} dispo
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 w-fit">
+                        ⛔ Site complet
+                      </span>
+                    )}
+                    {waitlistGlobal > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 w-fit">
+                        ⏳ {waitlistGlobal} en liste d&apos;attente
+                      </span>
+                    )}
                   </div>
-                  {isSel && <div className="absolute top-2 right-2 bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center"><Check className="w-3 h-3" /></div>}
+                  {isSel && <div className="absolute top-2 right-2 bg-aracom-orange text-white rounded-full w-5 h-5 flex items-center justify-center"><Check className="w-3 h-3" /></div>}
                 </button>
               );
             })}
@@ -616,7 +633,7 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
         {/* 2) JOURS DE PRÉSENCE + HORAIRES */}
         {selectedVenue ? (
           <div>
-            <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-600" /> 2. Mes jours et horaires de présence</h3>
+            <h3 className="font-semibold text-aracom-black mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-aracom-orange" /> 2. Mes jours et horaires de présence</h3>
             <div className="text-xs text-slate-500 mb-3">Cochez au moins un jour. Renseignez vos horaires d&apos;ouverture du stand pour chaque jour coché.</div>
             <div className="space-y-3">
               {[
@@ -625,36 +642,51 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
               ].map(d => {
                 const isChecked = Array.isArray(b.attending_days) && b.attending_days.includes(d.key);
                 const t = b.attending_day_times?.[d.key] || { start: '08:00', end: '17:00' };
-                // 🆕 SESSION 43-j — PHASE 2 : Places restantes dynamiques par jour
+                // 🆕 PHASE A — Stands disponibles par jour = capacité - exposants déjà inscrits sur ce jour
                 const dayAvail = (availability?.venues || []).find(av => av.id === selectedVenue.id);
                 const dayInfo = (dayAvail?.available_per_day || []).find(x => x.day_key === d.key);
-                const dayRemaining = dayInfo?.remaining ?? null;
-                const dayTotal = dayInfo?.total_capacity ?? (selectedVenue.capacity_stands || 16);
-                const isDayFull = dayInfo?.is_full === true || dayRemaining === 0;
+                const usedThisDay = (dayInfo?.confirmed_count_day || 0) + (dayInfo?.pending_count_day || 0);
+                const dayTotal = selectedVenue.capacity_stands || 16;
+                const dayRemaining = Math.max(0, dayTotal - usedThisDay);
+                const isDayFull = dayRemaining === 0;
+                const dayWaitlist = dayInfo?.waitlist_count_day ?? 0;
                 return (
                   <div key={d.key} className={`p-4 rounded-lg border-2 transition ${
-                    isDayFull ? 'border-red-200 bg-red-50/40 opacity-60' :
-                    isChecked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200'
+                    isDayFull && dayWaitlist === 0 ? 'border-rose-200 bg-rose-50/40 opacity-60' :
+                    isChecked ? 'border-aracom-orange bg-aracom-orange/10' : 'border-aracom-gold/40'
                   }`}>
-                    <label className={`flex items-center gap-3 ${isDayFull ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                    <label className={`flex items-center gap-3 ${isDayFull && dayWaitlist === 0 ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                       <input
                         type="checkbox"
                         checked={isChecked}
-                        disabled={isDayFull}
-                        onChange={() => !isDayFull && toggleDay(d.key)}
-                        className="w-5 h-5 accent-blue-600"
+                        disabled={isDayFull && dayWaitlist === 0}
+                        onChange={() => !(isDayFull && dayWaitlist === 0) && toggleDay(d.key)}
+                        className="w-5 h-5 accent-aracom-orange"
                         data-testid={`day-check-${d.key}`}
                       />
-                      <span className="font-bold text-slate-900 flex-1">{d.label}</span>
-                      {dayRemaining !== null && (
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                          isDayFull ? 'bg-red-100 text-red-700 border border-red-300' :
-                          dayRemaining <= 3 ? 'bg-amber-100 text-amber-800 border border-amber-300' :
-                          'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                        }`}>
-                          {isDayFull ? 'COMPLET' : `${dayRemaining}/${dayTotal} places restantes`}
-                        </span>
-                      )}
+                      <span className="font-bold text-aracom-black flex-1">📅 {d.label}</span>
+                      <div className="flex flex-col items-end gap-1">
+                        {dayRemaining !== null && (
+                          isDayFull ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                              ⛔ Complet
+                            </span>
+                          ) : dayRemaining <= 3 ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                              ⚠️ {dayRemaining} stand{dayRemaining > 1 ? 's' : ''} restant{dayRemaining > 1 ? 's' : ''}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ✅ {dayRemaining} stands disponibles
+                            </span>
+                          )
+                        )}
+                        {dayWaitlist > 0 && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                            ⏳ {dayWaitlist} en liste d&apos;attente
+                          </span>
+                        )}
+                      </div>
                     </label>
                     {isChecked && !isDayFull && (
                       <div className="mt-3 ml-8 grid grid-cols-2 gap-3 max-w-md">
@@ -685,10 +717,10 @@ function Step2Days({ state, availability, draft, setDraft, onNext, onBack, reloa
           <Button
             onClick={submit}
             disabled={saving || !b.venue_id || !(b.attending_days?.length > 0)}
-            className="gap-2 bg-blue-600 hover:bg-blue-700"
+            className="gap-2 bg-aracom-orange hover:bg-aracom-orange/90"
             data-testid="step2-next"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continuer <ChevronRight className="w-4 h-4" /></>}
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>J&apos;ai choisi mon site et mes jours — Voir les stands <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
       </CardContent>
@@ -945,7 +977,7 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
             <Button
               onClick={() => submit(false)}
               disabled={saving || !b.stand_code}
-              className={`gap-2 ${selectedIsTaken ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+              className={`gap-2 ${selectedIsTaken ? 'bg-amber-600 hover:bg-amber-700' : 'bg-aracom-orange hover:bg-aracom-orange/90'}`}
               data-testid="step3-next"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : selectedIsTaken ? <>⏳ Demander (liste d&apos;attente) <ChevronRight className="w-4 h-4" /></> : <>Demander ce stand <ChevronRight className="w-4 h-4" /></>}
@@ -1153,8 +1185,8 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
 
         <div className="flex justify-between pt-3 border-t">
           <Button variant="outline" onClick={onBack} className="gap-2"><ChevronLeft className="w-4 h-4" /> Retour</Button>
-          <Button onClick={() => submit(false)} disabled={saving} className="gap-2 bg-violet-600 hover:bg-violet-700" data-testid="step3-next">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Demander mes animations <ChevronRight className="w-4 h-4" /></>}
+          <Button onClick={() => submit(false)} disabled={saving} className="gap-2 bg-aracom-orange hover:bg-aracom-orange/90" data-testid="step3-next">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <>J&apos;ai choisi mes animations — Finaliser <ChevronRight className="w-4 h-4" /></>}
           </Button>
         </div>
 
@@ -1631,7 +1663,7 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
         {/* 2) Documents (optionnel — peuvent être remis au RDV) */}
         <div className="border-t pt-5">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-blue-600" /> 2. Documents</h3>
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-aracom-orange" /> 2. Documents</h3>
             <div className="text-xs text-slate-500">{requiredDocsUploaded}/{requiredDocs.length} obligatoires en ligne</div>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800 mb-3">
@@ -1736,7 +1768,7 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
         <div className="border-t pt-4">
           <label className="flex items-start gap-3 cursor-pointer">
             <Checkbox checked={accepted} onCheckedChange={setAccepted} data-testid="accept-regulation" />
-            <span className="text-sm text-slate-700">J&apos;accepte le <a href="/reglement-exposant.pdf" target="_blank" className="underline text-blue-600">règlement exposant du Forum de la Rentrée 2026</a> et je m&apos;engage à respecter les conditions de participation (présence aux horaires choisis, attestation d&apos;assurance, caution de 20 000 XPF).</span>
+            <span className="text-sm text-slate-700">J&apos;accepte le <a href="/reglement-exposant.pdf" target="_blank" className="underline text-aracom-orange">règlement exposant du Forum de la Rentrée 2026</a> et je m&apos;engage à respecter les conditions de participation (présence aux horaires choisis, attestation d&apos;assurance, caution de 20 000 XPF).</span>
           </label>
         </div>
 
