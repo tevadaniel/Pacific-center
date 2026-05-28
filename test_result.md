@@ -2683,4 +2683,62 @@ agent_communication:
 
 agent_communication:
   - agent: "main"
+
+# ═════════════════════════════════════════════════════════════════════════
+# PHASES C + D + E — UI CESSION (Landing + Cockpit + Portail Exposant)
+# ═════════════════════════════════════════════════════════════════════════
+
+frontend:
+  - task: "PHASE C — Landing page bénéficiaire /cession-offer/[id] (3 actions)"
+    implemented: true
+    working: true
+    file: "app/cession-offer/[id]/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE C — Nouvelle route /cession-offer/[id]?token=xxx. Landing publique pour le #1 en liste d'attente. Lit l'offre via GET /api/exposant/cession-offer/:id?token, affiche package complet (site, stand, animations) avec cédant ANONYMISÉ. 3 actions UX progressives: (1) ✅ Accepter (vert emerald) → POST respond {action:'accept'}. (2) 💬 Accepter avec suggestion (orange aracom) → ouvre dialog avec textarea, POST respond {action:'accept_with_suggestion', suggestion}. (3) ❌ Refuser définitivement (rose) → ouvre dialog de confirmation avec warning irréversibilité, POST respond {action:'refuse_definitively'}. Après réponse, écran de confirmation avec emoji approprié (✅/💬/❌). Gestion d'erreur (offre expirée/introuvable/non autorisée) avec design system aracom (beige+rose). Lint OK. Screenshot validé."
+
+  - task: "PHASE D — Cockpit Aracom 'File de cession' (queue admin)"
+    implemented: true
+    working: "NA"
+    file: "components/aracom/cession-queue-view.jsx, app/aracom/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "PHASE D — Nouvel onglet 'File de cession' dans le menu cockpit Aracom (entre File de validation et Cautions). Composant CessionQueueView : (1) 4 cards KPI cliquables (pending_approval/available_for_promotion/transferred/cancelled) filtrant la liste. (2) Tableau enrichi avec : Date demande, Cédant (org+email), Site/Stand, # animations, Statut badge coloré, Bénéficiaire (org+email si offered), Waitlist count, Actions (Détails/Approuver/Annuler). (3) Dialog Préview détaillée avec metadata. (4) Dialog confirmation annulation. (5) Badge menu pending_cessions ajouté à /api/menu-badges (compte stand_assignments avec cession_status='pending_approval'). Mapping cockpit BADGE_MAP['file-cession']='pending_cessions' + tooltip. Lint OK."
+
+  - task: "PHASE D — Bouton 'Céder mon créneau' Portail Exposant + États cession"
+    implemented: true
+    working: "NA"
+    file: "app/exposant/page.js (composant CessionButton inline)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "PHASE D — Composant CessionButton ajouté inline dans /app/exposant/page.js. Logique d'affichage selon state: (a) stand non validé → bouton masqué. (b) request_status='validated' + pas de cession_status → bouton 'Céder' (amber). (c) cession_status='pending_approval' → badge '⏳ Cession en attente d'ARACOM'. (d) cession_status='available_for_promotion' → badge '🔔 Cession offerte à un candidat'. (e) cession_status='transferred' → masqué. Click 'Céder' ouvre dialog confirmation avec warning + textarea motif optionnel. POST /api/exposant/registrations/:id/cede-slot. Imports Dialog ajoutés."
+
+  - task: "PHASE E — Lint + version bump + screenshots de validation"
+    implemented: true
+    working: true
+    file: "package.json (0.51.0 → 0.52.0), tous les nouveaux fichiers lintés"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE E — Toutes les phases A/B/C/D livrées. Lint OK sur cession-queue-view.jsx, cession-offer/[id]/page.js, exposant/page.js. Version bumpée 0.51.0 → 0.52.0 pour cache PWA. Screenshot landing /cession-offer/test-id validé visuellement (design system beige+orange+rose appliqué, layout responsive)."
+
+agent_communication:
+  - agent: "main"
+    message: "PHASES C+D+E TERMINÉES. UI complète : (1) /cession-offer/[id] landing publique avec 3 actions UX (accept/accept_with_suggestion/refuse_definitively) + dialogs inline + design system Aracom. (2) Cockpit 'File de cession' avec KPI cards filtrables, table enrichie, dialogs preview+cancel. (3) Bouton 'Céder mon créneau' portail exposant avec états (validated/pending/offered/transferred). (4) Badge menu pending_cessions. (5) Lint OK partout. Version 0.52.0. Recommended : tester end-to-end manuellement via le portail exposant (créer une cession → admin valide → email reçu avec magic link → ouvrir landing → tester 3 actions). Backend déjà validé en Phase B (14/15 tests)."
+
     message: "PHASE A livrée. Foundation Phase B en place (package linking backend). Prochaines phases : B (cede-slot endpoints), C (UI 3 actions waitlist), D (portail exposant design system + Céder mon créneau)."

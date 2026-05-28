@@ -15,6 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import BusinessCard from '@/components/exposant/business-card';
 import RequestModificationDialog from '@/components/exposant/request-modification-dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
@@ -1852,6 +1853,89 @@ function ProfilBlock({ organization, registration, onRefresh }) {
 // =====================================================================
 // SITES & PLAN — un seul site, sélection rapide d'un stand libre OU rejoindre la liste d'attente
 // =====================================================================
+// 🆕 PHASE D — CessionButton : bouton "Céder mon créneau" affiché si stand validé par Aracom
+function CessionButton({ stand, registrationId, onRefresh }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const asn = stand?.assignment;
+  if (!asn) return null;
+  const cs = asn.cession_status;
+  // Si une cession est déjà en cours
+  if (cs === 'pending_approval') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+        ⏳ Cession en attente d&apos;ARACOM
+      </span>
+    );
+  }
+  if (cs === 'available_for_promotion') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+        🔔 Cession offerte à un candidat
+      </span>
+    );
+  }
+  if (cs === 'transferred') return null; // Stand déjà transféré
+  // Seul un créneau validé peut être cédé
+  if (asn.request_status !== 'validated') return null;
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/exposant/registrations/${registrationId}/cede-slot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      toast.success('🔁 Demande de cession envoyée à ARACOM. Vous serez notifié dès qu\'elle sera traitée.');
+      setOpen(false);
+      setReason('');
+      onRefresh && onRefresh();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        className="gap-1.5 border-amber-400 text-amber-700 hover:bg-amber-50"
+        title="Céder volontairement votre créneau au prochain en liste d'attente"
+      >
+        🔁 Céder
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Céder votre créneau ?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="bg-amber-50 border-l-4 border-amber-400 rounded-r p-3 text-amber-900">
+              <b>⚠️ Action volontaire</b><br />
+              Vous cédez votre <b>package complet</b> (stand <b>{asn.stand_code}</b> + animations liées) à un exposant en liste d&apos;attente. ARACOM doit approuver avant transfert effectif. Vous pourrez encore annuler tant que l&apos;offre n&apos;a pas été acceptée.
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 uppercase">Motif (optionnel)</label>
+              <Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Ex: contretemps, indisponibilité..." rows={3} />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Annuler</Button>
+            <Button onClick={submit} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white">
+              {busy && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Confirmer la cession
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+
 function SiteAndStandPicker({ registration, organization, onRefresh }) {
   const [venues, setVenues] = useState([]);
   const [stands, setStands] = useState([]);
@@ -1997,6 +2081,8 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
                     {venue?.name} • {registration.status === 'confirme' ? 'Confirmé par ARACOM ✅' : (registration.is_waitlist ? 'ARACOM tranchera selon les disponibilités' : 'En attente de validation ARACOM ⏳')}
                   </div>
                 </div>
+                {/* 🆕 PHASE D — Bouton "Céder mon créneau" (uniquement si stand validé par Aracom) */}
+                <CessionButton stand={myStand} registrationId={registration.id} onRefresh={onRefresh} />
                 {!isLocked && <Button variant="outline" size="sm" onClick={release} disabled={busy} className="gap-1.5"><Trash2 className="w-3.5 h-3.5" /> Libérer</Button>}
               </>
             ) : (
