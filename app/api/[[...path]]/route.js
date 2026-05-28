@@ -930,6 +930,130 @@ export async function GET(request, { params }) {
       return json({ deadline_at: d?.deadline_at || null });
     }
 
+    // 🆕 PHASE B — GET /api/admin/cessions — queue admin des demandes de cession
+    //   Retourne toutes les assignations avec cession_status non null (pending_approval/available_for_promotion/transferred/cancelled)
+    //   Enrichies avec organization (cedant), venue, stand, candidate (si offered_to), animations liées.
+    if (route === 'admin/cessions') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const statusFilter = url.searchParams.get('status'); // 'pending_approval' | 'available_for_promotion' | 'transferred' | 'all'
+      const filter = { cession_status: { $exists: true, $ne: null } };
+      if (statusFilter && statusFilter !== 'all') filter.cession_status = statusFilter;
+      const cessions = await db.collection('stand_assignments').find(filter).sort({ cession_requested_at: -1 }).toArray();
+      const items = [];
+      for (const c of cessions) {
+        const cedantReg = await db.collection('registrations').findOne({ id: c.registration_id });
+        const cedantOrg = cedantReg ? await db.collection('organizations').findOne({ id: cedantReg.organization_id }) : null;
+        const venue = c.venue_id ? await db.collection('venues').findOne({ id: c.venue_id }) : null;
+        const candidateReg = c.cession_offered_to ? await db.collection('registrations').findOne({ id: c.cession_offered_to }) : null;
+        const candidateOrg = candidateReg ? await db.collection('organizations').findOne({ id: candidateReg.organization_id }) : null;
+        const animations = await db.collection('animation_slots').find({
+          linked_stand_assignment_id: c.id,
+          status: { $ne: 'annulé' },
+        }).toArray();
+        // Compte le waitlist actuel sur ce stand
+        const waitlistCount = await db.collection('stand_assignments').countDocuments({
+          venue_stand_id: c.venue_stand_id,
+          request_status: 'waitlist',
+          status: { $nin: ['annule', 'cancelled'] },
+          refused_definitively: { $ne: true },
+        });
+        items.push({
+          assignment_id: c.id,
+          stand_code: c.stand_code,
+          venue: venue ? { id: venue.id, name: venue.name } : null,
+          cedant: cedantOrg ? { id: cedantOrg.id, name: cedantOrg.name, main_email: cedantOrg.main_email, registration_id: c.registration_id } : null,
+          cession_status: c.cession_status,
+          cession_requested_at: c.cession_requested_at,
+          cession_requested_by: c.cession_requested_by,
+          cession_reason: c.cession_reason,
+          cession_approved_at: c.cession_approved_at,
+          cession_offered_to: c.cession_offered_to,
+          cession_offered_at: c.cession_offered_at,
+          cession_completed_at: c.cession_completed_at,
+          candidate: candidateOrg ? { id: candidateOrg.id, name: candidateOrg.name, main_email: candidateOrg.main_email, registration_id: c.cession_offered_to } : null,
+          waitlist_count: waitlistCount,
+          animations: animations.map(a => ({
+            id: a.id, day_label: a.day_label, start_time: a.start_time, end_time: a.end_time,
+            location_type: a.location_type, title: a.title,
+          })),
+        });
+      }
+      return json({
+        ok: true,
+        items,
+        total: items.length,
+        counts: {
+          pending_approval: items.filter(i => i.cession_status === 'pending_approval').length,
+          available_for_promotion: items.filter(i => i.cession_status === 'available_for_promotion').length,
+          transferred: items.filter(i => i.cession_status === 'transferred').length,
+          cancelled: items.filter(i => i.cession_status === 'cancelled').length,
+        },
+      });
+    }
+
+    // 🆕 PHASE B — GET /api/exposant/cession-offer/:assignment_id
+    //   Retourne les détails d'une offre de cession pour la landing page de réponse.
+    //   Authentification : soit via x-user-id (utilisateur lié à l'org cible), soit via ?token=xxx (magic link)
+    if (route.startsWith('exposant/cession-offer/') && !route.endsWith('/respond')) {
+      const asnId = route.split('/')[2];
+      const asn = await db.collection('stand_assignments').findOne({ id: asnId });
+      if (!asn) return err('Offre introuvable', 404);
+      if (asn.cession_status !== 'available_for_promotion' || !asn.cession_offered_to) {
+        return err('Cette offre n\'est plus disponible', 410);
+      }
+      // Auth check : token from URL OR user.organization_id matches the target
+      const token = url.searchParams.get('token');
+      const targetReg = await db.collection('registrations').findOne({ id: asn.cession_offered_to });
+      if (!targetReg) return err('Inscription cible introuvable', 404);
+      let authorized = false;
+      if (token) {
+        const tk = await db.collection('access_tokens').findOne({
+          token,
+          purpose: 'cession_offer',
+          registration_id: asn.cession_offered_to,
+        });
+        if (tk && (!tk.expires_at || new Date(tk.expires_at) > new Date())) authorized = true;
+      }
+      if (!authorized && ctx.role === 'aracom_admin') authorized = true;
+      if (!authorized && ctx.userId) {
+        const user = await db.collection('users').findOne({ id: ctx.userId });
+        if (user && user.organization_id === targetReg.organization_id) authorized = true;
+      }
+      if (!authorized) return err('Non autorisé à consulter cette offre', 403);
+      // Build response
+      const targetOrg = await db.collection('organizations').findOne({ id: targetReg.organization_id });
+      const cedantReg = await db.collection('registrations').findOne({ id: asn.registration_id });
+      const cedantOrg = cedantReg ? await db.collection('organizations').findOne({ id: cedantReg.organization_id }) : null;
+      const venue = asn.venue_id ? await db.collection('venues').findOne({ id: asn.venue_id }) : null;
+      const animations = await db.collection('animation_slots').find({
+        linked_stand_assignment_id: asn.id,
+        status: { $ne: 'annulé' },
+      }).toArray();
+      // Pool de créneaux libres du même site/jour pour permettre une "suggestion d'alternative"
+      const sameVenueFreeSlots = await db.collection('animation_slots').find({
+        venue_id: asn.venue_id,
+        status: { $ne: 'annulé' },
+        request_status: { $in: ['pending', 'validated'] },
+      }).toArray();
+      return json({
+        ok: true,
+        assignment_id: asn.id,
+        cession_offered_at: asn.cession_offered_at,
+        cession_offer_expires_at: asn.cession_offer_expires_at,
+        target: { registration_id: targetReg.id, organization_name: targetOrg?.name },
+        // Cedant anonymisé : on ne révèle pas son identité
+        venue: venue ? { id: venue.id, name: venue.name, code: venue.code } : null,
+        stand_code: asn.stand_code,
+        animations: animations.map(a => ({
+          id: a.id, day_label: a.day_label, event_date: a.event_date,
+          start_time: a.start_time, end_time: a.end_time,
+          location_type: a.location_type, title: a.title, description: a.description,
+        })),
+        // Slots déjà utilisés sur ce site/jour (pour info, pas anonyme côté admin uniquement)
+        occupied_slots_count: sameVenueFreeSlots.length,
+      });
+    }
+
     // 🆕 SESSION 47 — Status de la simulation (compteurs des records is_simulation:true)
     if (route === 'admin/simulation/status') {
       if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
@@ -5030,6 +5154,237 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return { promoted_assignment: promoted, email_template: template };
     }
 
+    // 🆕 PHASE B — Helper: propose le package cédé au prochain en liste d'attente
+    //   Trouve le #1 waitlist sur ce stand (en excluant refused_definitively + excludeIds),
+    //   met à jour cession_offered_to/cession_offered_at, envoie email avec magic link.
+    //   Retourne { ok, offered_to, organization_name, magic_link } ou { ok:false, reason }
+    async function offerCessionToNextWaitlist(asn, excludeRegIds = []) {
+      // Trouve waitlist #1 du stand cédé (en excluant ceux qui ont refusé définitivement OU dans excludeRegIds)
+      const waitlistCandidates = await db.collection('stand_assignments').find({
+        venue_stand_id: asn.venue_stand_id,
+        request_status: 'waitlist',
+        status: { $nin: ['annule', 'cancelled'] },
+        refused_definitively: { $ne: true },
+        id: { $ne: asn.id },
+        registration_id: { $nin: excludeRegIds },
+      }).sort({ waitlist_position: 1, request_submitted_at: 1 }).toArray();
+      if (waitlistCandidates.length === 0) {
+        // Personne en attente → cession reste available, admin pourra réessayer
+        await db.collection('stand_assignments').updateOne(
+          { id: asn.id },
+          { $set: { cession_offered_to: null, cession_offered_at: null, cession_no_candidate: true, updated_at: new Date() } }
+        );
+        return { ok: false, reason: 'Aucun candidat en liste d\'attente', offered_to: null };
+      }
+      const candidate = waitlistCandidates[0];
+      const candidateReg = await db.collection('registrations').findOne({ id: candidate.registration_id });
+      const candidateOrg = candidateReg ? await db.collection('organizations').findOne({ id: candidateReg.organization_id }) : null;
+      // Génère un access_token magic link
+      const tokenId = uuid();
+      await db.collection('access_tokens').insertOne({
+        id: tokenId,
+        token: tokenId,
+        registration_id: candidate.registration_id,
+        organization_id: candidateReg?.organization_id,
+        purpose: 'cession_offer',
+        metadata: { stand_assignment_id: asn.id, stand_code: asn.stand_code },
+        created_at: new Date(),
+        expires_at: new Date(Date.now() + 14 * 24 * 3600 * 1000), // 14 jours
+      });
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+      const magicLink = `${baseUrl}/cession-offer/${asn.id}?token=${tokenId}`;
+      // Update cession state
+      await db.collection('stand_assignments').updateOne(
+        { id: asn.id },
+        {
+          $set: {
+            cession_offered_to: candidate.registration_id,
+            cession_offered_at: new Date(),
+            cession_offer_expires_at: new Date(Date.now() + 14 * 24 * 3600 * 1000),
+            cession_no_candidate: false,
+            updated_at: new Date(),
+          },
+        }
+      );
+      // Activity log
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: 'system',
+        action: 'CESSION_OFFERED',
+        description: `Offre de cession envoyée à reg ${candidate.registration_id} (waitlist #${candidate.waitlist_position || 1}) pour stand ${asn.stand_code || ''}`,
+        metadata: { stand_assignment_id: asn.id, candidate_registration_id: candidate.registration_id, magic_link },
+        created_at: new Date(),
+      });
+      // Send email
+      try {
+        const venue = await db.collection('venues').findOne({ id: asn.venue_id });
+        const animations = await db.collection('animation_slots').find({
+          linked_stand_assignment_id: asn.id,
+          request_status: { $in: ['pending', 'validated'] },
+        }).toArray();
+        const animsHtml = animations.length
+          ? `<ul>${animations.map(a => `<li>${a.day_label === 'samedi' ? 'Samedi' : 'Vendredi'} ${a.start_time}–${a.end_time} ${a.location_type === 'sur_stand' ? '(sur stand)' : '(zone démo)'}${a.title ? ' — <i>' + a.title + '</i>' : ''}</li>`).join('')}</ul>`
+          : '<p><i>Aucun créneau d\'animation lié.</i></p>';
+        if (candidateOrg?.main_email) {
+          await sendMailAuto({
+            to: candidateOrg.main_email,
+            subject: `🔔 Un créneau vient de se libérer pour vous — Forum 2026`,
+            html: `<h2 style="color:#E8500A">🔔 Un créneau vient de se libérer !</h2>
+              <p>Bonjour <b>${candidateOrg?.name || ''}</b>,</p>
+              <p>Vous étiez en liste d'attente. Un créneau vient de se libérer et vous est proposé :</p>
+              <ul>
+                <li><b>Site :</b> ${venue?.name || ''}</li>
+                <li><b>Stand :</b> ${asn.stand_code || ''}</li>
+              </ul>
+              <p><b>Créneaux d'animation inclus :</b></p>
+              ${animsHtml}
+              <p style="margin:24px 0;text-align:center">
+                <a href="${magicLink}" style="display:inline-block;padding:14px 28px;background:#E8500A;color:white;text-decoration:none;border-radius:8px;font-weight:bold">Voir et répondre à l'offre →</a>
+              </p>
+              <p style="font-size:13px;color:#666">Vous aurez 3 choix : ✅ Accepter · 💬 Accepter avec une suggestion · ❌ Refuser définitivement.<br>Cette offre expire dans 14 jours.</p>`,
+          }, db).catch(() => null);
+        }
+      } catch {}
+      return {
+        ok: true,
+        offered_to: candidate.registration_id,
+        organization_name: candidateOrg?.name,
+        magic_link: magicLink,
+        waitlist_position: candidate.waitlist_position,
+      };
+    }
+
+    // 🆕 PHASE B — Helper: transfert effectif du package (stand + animations) au nouveau bénéficiaire
+    //   - L'ancien stand_assignment passe en cession_status='transferred', status='annule'
+    //   - Crée un nouveau stand_assignment pour le bénéficiaire (request_status='pending' pour validation Aracom)
+    //   - Transfère tous les animation_slots liés (linked_stand_assignment_id) au bénéficiaire
+    //   - L'ancien exposant : ses anciens animations passent en status='annulé'
+    //   - Retourne { ok, new_stand_assignment_id, transferred_animations: [] }
+    async function transferCessionPackage(asn, targetReg, ctx, opts = {}) {
+      try {
+        const targetOrg = await db.collection('organizations').findOne({ id: targetReg.organization_id });
+        const venue = await db.collection('venues').findOne({ id: asn.venue_id });
+        // 1. Mark old stand_assignment as transferred
+        await db.collection('stand_assignments').updateOne(
+          { id: asn.id },
+          {
+            $set: {
+              cession_status: 'transferred',
+              cession_completed_at: new Date(),
+              cession_transferred_to_registration: targetReg.id,
+              status: 'annule', // ancien stand assignment annulé
+              updated_at: new Date(),
+            },
+          }
+        );
+        // 2. Update old registration: clear stand_code, set status to 'annule'
+        await db.collection('registrations').updateOne(
+          { id: asn.registration_id },
+          { $set: { stand_code: null, status: 'annule', cession_ceded_to: targetReg.id, updated_at: new Date() } }
+        );
+        // 3. Create NEW stand_assignment for target — same stand, request_status='pending' (Aracom validate)
+        const newAsnId = uuid();
+        const newAsn = {
+          id: newAsnId,
+          registration_id: targetReg.id,
+          venue_id: asn.venue_id,
+          venue_stand_id: asn.venue_stand_id,
+          stand_code: asn.stand_code,
+          assigned_at: new Date(),
+          assigned_by: ctx?.userId || 'system',
+          status: 'provisoire',
+          request_status: 'pending',
+          request_submitted_at: new Date(),
+          waitlist_position: null,
+          source: 'cession_transfer',
+          cession_origin_assignment_id: asn.id,
+          cession_origin_registration_id: asn.registration_id,
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+        await db.collection('stand_assignments').insertOne(newAsn);
+        // 4. Update target registration: assign stand_code, venue_id
+        await db.collection('registrations').updateOne(
+          { id: targetReg.id },
+          { $set: { stand_code: asn.stand_code, venue_id: asn.venue_id, updated_at: new Date() } }
+        );
+        // 5. Transfer animation_slots: clone old ones (linked_stand_assignment_id=asn.id) to target
+        const linkedSlots = await db.collection('animation_slots').find({
+          linked_stand_assignment_id: asn.id,
+          status: { $ne: 'annulé' },
+        }).toArray();
+        const newAnimationIds = [];
+        for (const slot of linkedSlots) {
+          // Marquer l'ancien slot comme annulé
+          await db.collection('animation_slots').updateOne(
+            { id: slot.id },
+            { $set: { status: 'annulé', cession_transferred_to_registration: targetReg.id, updated_at: new Date() } }
+          );
+          // Créer un nouveau slot pour le bénéficiaire (request_status='pending')
+          const newSlotId = uuid();
+          await db.collection('animation_slots').insertOne({
+            ...slot,
+            _id: undefined, id: newSlotId,
+            registration_id: targetReg.id,
+            organization_name: targetOrg?.name,
+            discipline: targetOrg?.discipline,
+            status: 'planifié',
+            request_status: 'pending',
+            request_submitted_at: new Date(),
+            waitlist_position: null,
+            validated_at: null,
+            validated_by: null,
+            linked_stand_assignment_id: newAsnId,
+            source: 'cession_transfer',
+            cession_origin_slot_id: slot.id,
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+          newAnimationIds.push(newSlotId);
+        }
+        // 6. Update new stand_assignment with linked_animation_slot_ids
+        await db.collection('stand_assignments').updateOne(
+          { id: newAsnId },
+          { $set: { linked_animation_slot_ids: newAnimationIds, package_locked_at: new Date(), updated_at: new Date() } }
+        );
+        // 7. Activity log
+        await db.collection('activity_logs').insertOne({
+          id: uuid(),
+          actor_user_id: ctx?.userId || 'system',
+          action: 'CESSION_TRANSFERRED',
+          description: `Transfert package stand ${asn.stand_code} de reg ${asn.registration_id} vers reg ${targetReg.id} (${targetOrg?.name || ''})`,
+          metadata: {
+            origin_assignment_id: asn.id,
+            origin_registration_id: asn.registration_id,
+            new_assignment_id: newAsnId,
+            target_registration_id: targetReg.id,
+            stand_code: asn.stand_code,
+            animation_count: newAnimationIds.length,
+            suggestion: opts?.suggestion || null,
+          },
+          created_at: new Date(),
+        });
+        // 8. Notifier l'ancien exposant
+        try {
+          const oldOrg = await db.collection('organizations').findOne({ id: (await db.collection('registrations').findOne({ id: asn.registration_id }))?.organization_id });
+          if (oldOrg?.main_email) {
+            await sendMailAuto({
+              to: oldOrg.main_email,
+              subject: `✅ Votre cession a été finalisée — stand ${asn.stand_code || ''}`,
+              html: `<h2 style="color:#E8500A">✅ Cession finalisée</h2>
+                <p>Bonjour <b>${oldOrg.name || ''}</b>,</p>
+                <p>Votre demande de cession a été traitée avec succès. Votre package <b>${venue?.name || ''} · Stand ${asn.stand_code || ''}</b> a été transféré à un nouvel exposant en liste d'attente.</p>
+                <p>Merci pour votre participation.</p>`,
+            }, db).catch(() => null);
+          }
+        } catch {}
+        return { ok: true, new_stand_assignment_id: newAsnId, transferred_animations: newAnimationIds };
+      } catch (e) {
+        console.error('[transferCessionPackage] error:', e);
+        return { ok: false, error: e.message };
+      }
+    }
+
     if (route.startsWith('admin/validation/') && route.endsWith('/validate')) {
       if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
       const targetId = route.split('/')[2];
@@ -5186,6 +5541,266 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return json({ ok: true, deadline_at: dl });
     }
 
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🆕 PHASE B — CESSION DE CRÉNEAU ("Céder mon créneau")
+    // ═════════════════════════════════════════════════════════════════════════
+    // Workflow : Un exposant validé peut céder son package (stand + animations).
+    // 1. Exposant ou Admin initie → cession_status='pending_approval' (si exposant) ou 'available_for_promotion' (si admin)
+    // 2. Admin approuve → cession_status='available_for_promotion' → offer envoyée au #1 waitlist
+    // 3. #1 waitlist accepte/accepte-avec-suggestion/refuse-définitivement
+    // 4. Si accept → transfert package (stand_assignment + animation_slots) au #1 waitlist
+    // 5. Si refuse → offer suivante au #2, etc.
+
+    // POST /api/exposant/registrations/:regId/cede-slot — exposant initie la cession
+    if (route.startsWith('exposant/registrations/') && route.endsWith('/cede-slot')) {
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Verify auth: must be admin OR linked to this org via user.organization_id
+      if (ctx.role !== 'aracom_admin') {
+        const user = ctx.userId ? await db.collection('users').findOne({ id: ctx.userId }) : null;
+        if (!user || user.organization_id !== reg.organization_id) {
+          return err('Vous n\'avez pas l\'autorisation de céder ce créneau', 403);
+        }
+      }
+      const asn = await db.collection('stand_assignments').findOne({
+        registration_id: regId,
+        status: { $nin: ['annule', 'cancelled'] },
+      });
+      if (!asn) return err('Aucun stand assigné à céder', 404);
+      if (asn.request_status !== 'validated') {
+        return err('Seul un créneau validé par ARACOM peut être cédé', 400);
+      }
+      if (asn.cession_status && asn.cession_status !== 'cancelled') {
+        return err(`Une cession est déjà en cours (statut : ${asn.cession_status})`, 400);
+      }
+      const reason = body?.reason || '';
+      await db.collection('stand_assignments').updateOne(
+        { id: asn.id },
+        {
+          $set: {
+            cession_requested_at: new Date(),
+            cession_requested_by: 'exposant',
+            cession_requested_by_user_id: ctx.userId || null,
+            cession_status: 'pending_approval',
+            cession_reason: reason,
+            cession_cancelled_at: null,
+            updated_at: new Date(),
+          },
+        }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || null,
+        action: 'CESSION_REQUESTED_BY_EXPOSANT',
+        description: `Demande de cession du package stand ${asn.stand_code || ''} par exposant (reg ${regId})`,
+        metadata: { registration_id: regId, stand_assignment_id: asn.id, stand_code: asn.stand_code, reason },
+        created_at: new Date(),
+      });
+      // Notify admin via email
+      try {
+        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+        const venue = await db.collection('venues').findOne({ id: reg.venue_id });
+        await sendMailAuto({
+          to: 'agence@aracom-conseil.fr',
+          subject: `🔁 Demande de cession de créneau — ${org?.name || 'Exposant'}`,
+          html: `<h2 style="color:#E8500A">🔁 Nouvelle demande de cession</h2>
+            <p>L'exposant <b>${org?.name || ''}</b> souhaite céder son créneau :</p>
+            <ul>
+              <li><b>Site :</b> ${venue?.name || ''}</li>
+              <li><b>Stand :</b> ${asn.stand_code || ''}</li>
+              <li><b>Email exposant :</b> ${org?.main_email || ''}</li>
+              ${reason ? `<li><b>Motif :</b> ${reason}</li>` : ''}
+            </ul>
+            <p>Veuillez approuver ou refuser depuis le cockpit ARACOM → File de cession.</p>`,
+        }, db).catch(() => null);
+      } catch {}
+      return json({ ok: true, action: 'cession_requested', cession_status: 'pending_approval', assignment_id: asn.id });
+    }
+
+    // POST /api/admin/registrations/:regId/cede-slot — admin initie cession direct (skip approval)
+    if (route.startsWith('admin/registrations/') && route.endsWith('/cede-slot')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const asn = await db.collection('stand_assignments').findOne({
+        registration_id: regId,
+        status: { $nin: ['annule', 'cancelled'] },
+      });
+      if (!asn) return err('Aucun stand assigné à céder', 404);
+      if (asn.request_status !== 'validated') {
+        return err('Seul un créneau validé peut être cédé', 400);
+      }
+      const reason = body?.reason || 'Cession initiée par ARACOM';
+      await db.collection('stand_assignments').updateOne(
+        { id: asn.id },
+        {
+          $set: {
+            cession_requested_at: new Date(),
+            cession_requested_by: 'admin',
+            cession_requested_by_user_id: ctx.userId || 'u-admin',
+            cession_status: 'available_for_promotion',
+            cession_approved_at: new Date(),
+            cession_approved_by: ctx.userId || 'u-admin',
+            cession_reason: reason,
+            cession_cancelled_at: null,
+            updated_at: new Date(),
+          },
+        }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'CESSION_INITIATED_BY_ADMIN',
+        description: `Cession initiée par ARACOM pour stand ${asn.stand_code || ''} (reg ${regId})`,
+        metadata: { registration_id: regId, stand_assignment_id: asn.id, stand_code: asn.stand_code, reason },
+        created_at: new Date(),
+      });
+      // Auto-offer to #1 waitlist
+      const offerResult = await offerCessionToNextWaitlist(asn);
+      return json({ ok: true, action: 'cession_initiated_by_admin', assignment_id: asn.id, offer: offerResult });
+    }
+
+    // POST /api/admin/cession/:assignment_id/approve — admin approuve une demande exposant
+    if (route.startsWith('admin/cession/') && route.endsWith('/approve')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const asnId = route.split('/')[2];
+      const asn = await db.collection('stand_assignments').findOne({ id: asnId });
+      if (!asn) return err('Assignation introuvable', 404);
+      if (asn.cession_status !== 'pending_approval') {
+        return err(`Statut cession invalide (${asn.cession_status}). Doit être 'pending_approval'`, 400);
+      }
+      await db.collection('stand_assignments').updateOne(
+        { id: asnId },
+        {
+          $set: {
+            cession_status: 'available_for_promotion',
+            cession_approved_at: new Date(),
+            cession_approved_by: ctx.userId || 'u-admin',
+            updated_at: new Date(),
+          },
+        }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'CESSION_APPROVED',
+        description: `Cession approuvée pour stand ${asn.stand_code || ''}`,
+        metadata: { registration_id: asn.registration_id, stand_assignment_id: asnId, stand_code: asn.stand_code },
+        created_at: new Date(),
+      });
+      // Trigger offer to #1
+      const offerResult = await offerCessionToNextWaitlist({ ...asn, cession_status: 'available_for_promotion' });
+      return json({ ok: true, action: 'cession_approved', assignment_id: asnId, offer: offerResult });
+    }
+
+    // POST /api/admin/cession/:assignment_id/cancel — annuler une cession (avant transfert)
+    if (route.startsWith('admin/cession/') && route.endsWith('/cancel')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const asnId = route.split('/')[2];
+      const asn = await db.collection('stand_assignments').findOne({ id: asnId });
+      if (!asn) return err('Assignation introuvable', 404);
+      if (asn.cession_status === 'transferred') {
+        return err('Cession déjà finalisée, impossible d\'annuler', 400);
+      }
+      await db.collection('stand_assignments').updateOne(
+        { id: asnId },
+        {
+          $set: {
+            cession_status: 'cancelled',
+            cession_cancelled_at: new Date(),
+            cession_cancelled_by: ctx.userId || 'u-admin',
+            cession_offered_to: null,
+            cession_offered_at: null,
+            updated_at: new Date(),
+          },
+        }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'CESSION_CANCELLED',
+        description: `Cession annulée pour stand ${asn.stand_code || ''}`,
+        metadata: { registration_id: asn.registration_id, stand_assignment_id: asnId },
+        created_at: new Date(),
+      });
+      return json({ ok: true, action: 'cession_cancelled', assignment_id: asnId });
+    }
+
+    // POST /api/exposant/cession-offer/:assignment_id/respond
+    //   Body: { action: 'accept' | 'accept_with_suggestion' | 'refuse_definitively',
+    //           suggestion?: string, alternative_animation_slot_id?: string,
+    //           target_registration_id?: string }
+    if (route.startsWith('exposant/cession-offer/') && route.endsWith('/respond')) {
+      const asnId = route.split('/')[2];
+      const asn = await db.collection('stand_assignments').findOne({ id: asnId });
+      if (!asn) return err('Offre introuvable', 404);
+      if (asn.cession_status !== 'available_for_promotion' || !asn.cession_offered_to) {
+        return err('Cette offre n\'est plus disponible', 410);
+      }
+      const targetRegId = body?.target_registration_id || asn.cession_offered_to;
+      // Auth: must be admin OR linked to the offered registration's org
+      const targetReg = await db.collection('registrations').findOne({ id: targetRegId });
+      if (!targetReg) return err('Inscription cible introuvable', 404);
+      if (ctx.role !== 'aracom_admin') {
+        const user = ctx.userId ? await db.collection('users').findOne({ id: ctx.userId }) : null;
+        if (!user || user.organization_id !== targetReg.organization_id) {
+          return err('Vous n\'avez pas l\'autorisation de répondre à cette offre', 403);
+        }
+      }
+      const { action, suggestion, alternative_animation_slot_id } = body || {};
+      if (!['accept', 'accept_with_suggestion', 'refuse_definitively'].includes(action)) {
+        return err('Action invalide. Doit être: accept | accept_with_suggestion | refuse_definitively', 400);
+      }
+
+      if (action === 'refuse_definitively') {
+        // Marquer le user comme refused_definitively pour ce stand
+        await db.collection('stand_assignments').updateMany(
+          { venue_stand_id: asn.venue_stand_id, registration_id: targetRegId },
+          { $set: { request_status: 'refused', refused_definitively: true, refused_definitively_at: new Date(), updated_at: new Date() } }
+        );
+        await db.collection('activity_logs').insertOne({
+          id: uuid(),
+          actor_user_id: ctx.userId || null,
+          action: 'CESSION_OFFER_REFUSED_DEFINITIVELY',
+          description: `Refus définitif de l'offre par reg ${targetRegId}`,
+          metadata: { stand_assignment_id: asnId, target_registration_id: targetRegId },
+          created_at: new Date(),
+        });
+        // Offer to next waitlist
+        const nextOffer = await offerCessionToNextWaitlist(asn, [targetRegId]);
+        return json({ ok: true, action: 'refused_definitively', next_offer: nextOffer });
+      }
+
+      // accept OR accept_with_suggestion → TRANSFERT DU PACKAGE
+      const transferResult = await transferCessionPackage(asn, targetReg, ctx, { suggestion, alternative_animation_slot_id });
+      if (!transferResult.ok) return err(transferResult.error || 'Erreur lors du transfert', 500);
+
+      if (action === 'accept_with_suggestion' && suggestion) {
+        // Email admin avec suggestion pour arbitrage
+        try {
+          const targetOrg = await db.collection('organizations').findOne({ id: targetReg.organization_id });
+          const venue = await db.collection('venues').findOne({ id: asn.venue_id });
+          await sendMailAuto({
+            to: 'agence@aracom-conseil.fr',
+            subject: `💬 Cession acceptée avec suggestion — ${targetOrg?.name || 'Exposant'}`,
+            html: `<h2 style="color:#E8500A">💬 Cession acceptée — suggestion à arbitrer</h2>
+              <p><b>${targetOrg?.name || ''}</b> a accepté le package mais propose une modification :</p>
+              <ul>
+                <li><b>Site :</b> ${venue?.name || ''}</li>
+                <li><b>Stand :</b> ${asn.stand_code || ''}</li>
+                <li><b>Suggestion :</b> <i>${(suggestion || '').replace(/</g, '&lt;')}</i></li>
+              </ul>
+              <p>À arbitrer dans le cockpit.</p>`,
+          }, db).catch(() => null);
+        } catch {}
+      }
+      return json({ ok: true, action: action, transfer: transferResult });
+    }
+
+    if (false && route === 'cession_placeholder') { /* keep block separator */ }
 
     // ═════════════════════════════════════════════════════════════════════════
     // 🆕 SESSION 47 — SIMULATION E2E (mode QA test des fonctions réelles)
