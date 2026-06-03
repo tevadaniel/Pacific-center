@@ -60,6 +60,7 @@ import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/ara
 import SimulationModal from '@/components/aracom/simulation-modal';
 import ValidationQueueView from '@/components/aracom/validation-queue-view';
 import CessionQueueView from '@/components/aracom/cession-queue-view';
+import QuickActionBar from '@/components/aracom/quick-action-bar';
 
 // 🎨 SESSION 29 — Menus intelligents : 6 groupes accordéon cohérents, Exposants en tête
 //    • Renaming : libellés explicites (ex: "Liste exposants" → "Liste & fiches")
@@ -248,6 +249,7 @@ export default function AracomPage() {
         </div>
       }
     >
+      <QuickActionBar onGoto={setTab} activeTab={activeTab} />
       {activeTab === 'dashboard' && <DashboardView onGoto={setTab} />}
       {activeTab === 'cockpit-multi' && <MultiSiteCockpit />}
       {activeTab === 'prospection' && <ProspectionAracomView />}

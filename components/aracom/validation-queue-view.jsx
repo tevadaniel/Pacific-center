@@ -54,6 +54,9 @@ export default function ValidationQueueView() {
   // Sélection bulk
   const [selectedIds, setSelectedIds] = useState(new Set());
 
+  // 🆕 Hotkey support : index de la ligne focus (-1 = aucune)
+  const [focusIdx, setFocusIdx] = useState(-1);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -185,6 +188,56 @@ export default function ValidationQueueView() {
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
   };
+
+  // 🆕 Hotkeys clavier — V = valider, R = refuser, ↑/↓ = naviguer, ESC = défocus
+  //   Ignore quand un input/textarea/dialog est focus.
+  useEffect(() => {
+    const isTypingTarget = (el) => {
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+    };
+    const onKey = (e) => {
+      if (isTypingTarget(document.activeElement)) return;
+      if (busy || refusing || bulkRefusing || showDeadlineEditor || emailQueue.length > 0) return;
+      const list = filtered;
+      if (list.length === 0) return;
+      const key = e.key.toLowerCase();
+      if (key === 'arrowdown' || key === 'j') {
+        e.preventDefault();
+        setFocusIdx((i) => Math.min(list.length - 1, (i < 0 ? -1 : i) + 1));
+      } else if (key === 'arrowup' || key === 'k') {
+        e.preventDefault();
+        setFocusIdx((i) => Math.max(0, (i <= 0 ? 0 : i - 1)));
+      } else if (key === 'escape') {
+        setFocusIdx(-1);
+      } else if (key === 'v') {
+        if (focusIdx < 0 || focusIdx >= list.length) return;
+        const it = list[focusIdx];
+        if (it.request_status !== 'pending' && it.request_status !== 'waitlist') return;
+        const blockedByAnim = it.type === 'stand' && it.animations_complete === false;
+        if (blockedByAnim) {
+          toast.error('❌ Animation obligatoire manquante — validation bloquée');
+          return;
+        }
+        e.preventDefault();
+        validateOne(it);
+      } else if (key === 'r') {
+        if (focusIdx < 0 || focusIdx >= list.length) return;
+        const it = list[focusIdx];
+        if (it.request_status !== 'pending' && it.request_status !== 'waitlist') return;
+        e.preventDefault();
+        setRefusing(it);
+        setRefuseReason('');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, focusIdx, busy, refusing, bulkRefusing, showDeadlineEditor, emailQueue]);
+
+  // Reset focus si filtres changent
+  useEffect(() => { setFocusIdx(-1); }, [statusFilter, typeFilter, siteFilter, search]);
 
   // 🆕 SESSION 47.14 — Ouvre la composer mail avec un template pré-rempli pour 1 destinataire
   const openMailComposer = (template) => {
@@ -356,14 +409,26 @@ export default function ValidationQueueView() {
       {/* Table */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <CardTitle className="text-base flex items-center gap-2">
               <ListChecks className="w-5 h-5 text-indigo-600" />
               File FIFO — {filtered.length} demande{filtered.length > 1 ? 's' : ''}
             </CardTitle>
-            <Button size="sm" variant="ghost" onClick={load} disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Actualiser
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-1 text-[11px] text-slate-600">
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border font-mono">↑↓</kbd>
+                <span>naviguer</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-emerald-100 border-emerald-300 border text-emerald-800 font-mono ml-2">V</kbd>
+                <span>valider</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-rose-100 border-rose-300 border text-rose-800 font-mono ml-2">R</kbd>
+                <span>refuser</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border font-mono ml-2">Esc</kbd>
+                <span>désélectionner</span>
+              </div>
+              <Button size="sm" variant="ghost" onClick={load} disabled={loading}>
+                <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Actualiser
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -388,7 +453,11 @@ export default function ValidationQueueView() {
                 </thead>
                 <tbody>
                   {filtered.map((it, idx) => (
-                    <tr key={it.id} className={`border-b hover:bg-slate-50 ${selectedIds.has(it.id) ? 'bg-blue-50' : ''}`}>
+                    <tr
+                      key={it.id}
+                      onClick={() => setFocusIdx(idx)}
+                      className={`border-b hover:bg-slate-50 cursor-pointer ${selectedIds.has(it.id) ? 'bg-blue-50' : ''} ${focusIdx === idx ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-400' : ''}`}
+                    >
                       <td className="px-3 py-2"><Checkbox checked={selectedIds.has(it.id)} onCheckedChange={() => toggleOne(it.id)} /></td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1 text-xs">
