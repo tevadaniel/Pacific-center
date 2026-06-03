@@ -242,6 +242,52 @@ export default function WizardPage({ registrationId, isPublic = false }) {
               );
             })}
           </div>
+          {/* 🆕 PHASE G2 — Strip contextuel "Mes sélections en cours" */}
+          {(() => {
+            const r = state.registration || {};
+            const b = state.booking || {};
+            const venueId = b.venue_id || r.venue_id;
+            const attendingDays = (b.attending_days && b.attending_days.length ? b.attending_days : r.attending_days) || [];
+            const standCode = b.stand_code || r.stand_code;
+            const discipline = state.organization?.discipline;
+            const hasAny = venueId || attendingDays.length > 0 || standCode || discipline;
+            if (!hasAny) return null;
+            const venue = venueId ? (availability?.venues || []).find(v => v.id === venueId) : null;
+            const animsCount = Array.isArray(state.animations) ? state.animations.length : 0;
+            const minRequired = Math.max(1, attendingDays.length);
+            const animsOK = animsCount >= minRequired;
+            return (
+              <div className="mt-2 pt-2 border-t border-aracom-gold/30 flex items-center gap-1 md:gap-2 flex-wrap text-[10px] md:text-[11px]">
+                <span className="font-bold text-aracom-orange uppercase tracking-wider text-[9px]">📌 Mes choix</span>
+                {discipline && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-aracom-gold/20 border border-aracom-gold/50 text-aracom-black">
+                    🏷️ {discipline}
+                  </span>
+                )}
+                {venue && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-aracom-orange/10 border border-aracom-orange/50 text-aracom-black">
+                    📍 {venue.name}
+                  </span>
+                )}
+                {attendingDays.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-aracom-orange/10 border border-aracom-orange/50 text-aracom-black">
+                    📅 {attendingDays.map(d => d === 'vendredi' ? 'Ven' : 'Sam').join('+')}
+                  </span>
+                )}
+                {standCode && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-400 text-emerald-900 font-mono font-bold">
+                    🎪 {standCode}
+                  </span>
+                )}
+                {animsCount > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full ${animsOK ? 'bg-emerald-100 border-emerald-400 text-emerald-900' : 'bg-amber-100 border-amber-400 text-amber-900'} border`}>
+                    🎭 {animsCount}/{minRequired}
+                  </span>
+                )}
+                <span className="ml-auto text-aracom-black/50 text-[9px] italic">💡 Auto-sauvegardé</span>
+              </div>
+            );
+          })()}
         </div>
       </header>
 

@@ -20,6 +20,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
+import StickyContextBar from '@/components/exposant/sticky-context-bar';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import SimulationModal from '@/components/aracom/simulation-modal';
@@ -278,6 +279,27 @@ export default function ExposantPortal() {
         organizationName={o?.name}
         userRole={user?.role}
       >
+      {/* 🆕 PHASE G1 — Bandeau contextuel STICKY (toujours visible, dynamique) */}
+      {r?.id && (
+        <StickyContextBar
+          registration={r}
+          organization={o}
+          venue={v}
+          standAssignment={r.stand_assignment || (data.allSites || []).find(s => s.id === r.id)?.assignment || null}
+          animations={slotsArr}
+          cautionStatus={d?.status === 'recue' ? 'received' : d?.status === 'rendue' ? 'returned' : 'due'}
+          onJumpTo={(target) => {
+            if (target === 'documents') {
+              window.location.href = `/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`;
+            } else {
+              handleTabChange(target);
+              if (typeof window !== 'undefined') {
+                setTimeout(() => window.scrollTo({ top: 240, behavior: 'smooth' }), 100);
+              }
+            }
+          }}
+        />
+      )}
       <div className="space-y-6">
         {/* 🔐 Bandeau gestion mot de passe — visible seulement à l'exposant (pas en mode aperçu admin) */}
         {user?.role === 'exposant' && o?.id && (

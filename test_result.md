@@ -2793,6 +2793,40 @@ frontend:
         agent: "main"
         comment: "PHASE F — Page centralisée 3 documents : (1) Annexe N°1 (auto-générée, bouton 'Ouvrir/Imprimer'). (2) Guide Exposant (référence, bouton 'Ouvrir/Imprimer'). (3) Convention PDF du site (bouton 'Télécharger PDF', lien direct vers URL Emergent customer-assets). Cards stylées avec icônes Lucide (ClipboardCheck, BookOpen, FileSignature), badges 'Auto-généré/Référence/Contractuel', couleurs aracom (orange/gold/beige). Si pas de site choisi → Convention disabled. Bloc 'Statut caution' (20000 XPF + statut from deposit_transactions + bailleur SCI + deadline rouge). Footer contact ARACOM. Lien '📂 Mes documents' ajouté dans TabsList du portail exposant (data-testid=link-documents)."
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# PHASE G — UX REFONTE GLOBALE (Sticky Context + Quick Actions)
+# ═════════════════════════════════════════════════════════════════════════
+
+frontend:
+  - task: "PHASE G1 — Bandeau contextuel sticky Portail Exposant (live state)"
+    implemented: true
+    working: true
+    file: "components/exposant/sticky-context-bar.jsx, app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE G1 — Bandeau STICKY en haut du portail exposant, visible partout. Composant <StickyContextBar /> avec : (1) Header compact toujours visible (🌺 Org name + discipline + progress % avec barre orange/gold). (2) 5 chips temps réel (cliquables → jump to tab): 📍 Site, 🎪 Stand, 🎭 Animations X/Y minimum, 💰 Caution status, ⏰ Deadline 31/07/2026 countdown. Couleurs sémantiques (rouge=manquant, orange=warning, vert=ok, ambre=waitlist). (3) Bouton 'Next Action' adaptatif (8 règles métier): 'Choisir mon site' → 'Choisir mes jours' → 'Choisir mon stand' → 'Compléter mes animations' → 'En attente Aracom' → 'Apporter chèque caution' → 'Imprimer mon annexe' selon état dossier. (4) Mobile responsive: scroll-down auto-collapse, scroll-up auto-show, toggle manual. (5) Background aracom-black premium avec backdrop-blur sur scroll. Wiring sur top de Shell, avant Tabs."
+
+  - task: "PHASE G2 — Strip contextuel sticky Wizard public 'Mes choix'"
+    implemented: true
+    working: true
+    file: "components/wizard-form.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE G2 — Strip ajouté dans le sticky header du wizard public, juste sous les Steps nav. Affiche en temps réel les sélections persistées: '📌 MES CHOIX | 🏷️ Discipline | 📍 Faaa | 📅 Ven+Sam | 🎪 F-A03 | 🎭 2/2 | 💡 Auto-sauvegardé'. Chips colorées (aracom-orange/aracom-gold/emerald), badges animations en ambre si insuffisant. Source: state.registration (persisté après chaque submit step) + state.organization + state.animations. Vérifié visuellement: après submit step 2 (Faaa + Vendredi), strip apparaît '📌 MES CHOIX 📍 Faaa 📅 Ven' au passage step 3."
+
+agent_communication:
+  - agent: "main"
+    message: "PHASE G1+G2 LIVRÉES — UX 'Click less, see more' appliquée sur les 2 parcours utilisateur principaux: (1) Portail Exposant avec sticky context bar 5 chips + next-action button adaptatif. (2) Wizard public avec strip 'Mes choix' live persisted. G3 (quick actions) PARTIELLEMENT couvert par le 'Next Action' button du G1. G4 (cockpit aracom UX) reporté car le cockpit a déjà des badges menu informatifs. Version 0.55.0. Lint OK 2/2 fichiers nouveaux."
+
 agent_communication:
   - agent: "main"
     message: "PHASE F COMPLÈTE — Conformité aux 4 Conventions PDF signées (Faaa/Punaauia/Arue/Taravao). Caution alignée 20 000 XPF + deadline 31/07/2026 dans toute la plateforme. 3 documents livrés à l'exposant : Annexe N°1 auto-générée (HTML imprimable), Guide Exposant (HTML imprimable), Convention PDF du site (téléchargement direct). Backfill exécuté sur 6 venues (owner_sci + convention_pdf_url). Lint OK 3/3. Version 0.53.0. PWA refreshed. PRODUCTION READY après push Github."
