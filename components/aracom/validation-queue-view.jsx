@@ -413,7 +413,24 @@ export default function ValidationQueueView() {
                           <MapPin className="w-3 h-3" /> {it.venue?.name || '—'}
                         </div>
                         {it.type === 'stand' ? (
-                          <div className="text-xs font-mono mt-1">{it.stand_code || '—'}</div>
+                          <div className="text-xs mt-1">
+                            <div className="font-mono">{it.stand_code || '—'}</div>
+                            {/* 🆕 Badge animations status (règle obligatoire 1/jour) */}
+                            {it.attending_days && it.attending_days.length > 0 && (
+                              it.animations_complete ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 mt-1">
+                                  🎭 {it.animations_count} animation(s) ✓
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 mt-1"
+                                  title={`Animations manquantes : ${(it.missing_animation_days || []).join(', ')}`}
+                                >
+                                  ⚠️ Sans animation ({(it.missing_animation_days || []).map(d => d === 'samedi' ? 'Sam' : 'Ven').join('+')})
+                                </span>
+                              )
+                            )}
+                          </div>
                         ) : (
                           <div className="text-xs mt-1">
                             {it.day_label === 'samedi' ? 'Sam' : 'Ven'} {it.start_time}–{it.end_time}
@@ -437,16 +454,26 @@ export default function ValidationQueueView() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right pr-4">
-                        {(it.request_status === 'pending' || it.request_status === 'waitlist') && (
-                          <div className="flex gap-1 justify-end">
-                            <Button size="sm" disabled={busy} className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => validateOne(it)}>
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button size="sm" disabled={busy} variant="outline" className="h-7 border-rose-300 text-rose-700 hover:bg-rose-50" onClick={() => { setRefusing(it); setRefuseReason(''); }}>
-                              <XCircle className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
-                        )}
+                        {(it.request_status === 'pending' || it.request_status === 'waitlist') && (() => {
+                          // 🆕 Bloque la validation des stands sans animation complète
+                          const blockedByAnim = it.type === 'stand' && it.animations_complete === false;
+                          return (
+                            <div className="flex gap-1 justify-end">
+                              <Button
+                                size="sm"
+                                disabled={busy || blockedByAnim}
+                                className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"
+                                onClick={() => validateOne(it)}
+                                title={blockedByAnim ? `❌ Animation obligatoire manquante pour : ${(it.missing_animation_days || []).join(', ')}` : 'Valider'}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button size="sm" disabled={busy} variant="outline" className="h-7 border-rose-300 text-rose-700 hover:bg-rose-50" onClick={() => { setRefusing(it); setRefuseReason(''); }}>
+                                <XCircle className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}

@@ -850,6 +850,17 @@ export async function GET(request, { params }) {
               nextInfo = { name: nOrg?.name, waitlist_position: next.waitlist_position, assignment_id: next.id };
             }
           }
+          // 🆕 GARDE-FOU ANIMATION — Détection des jours sans animation pour ce stand
+          //   Permet à l'UI de signaler les dossiers incomplets AVANT validation.
+          const attendingDays = reg.attending_days || [];
+          const linkedAnims = await db.collection('animation_slots').find({
+            registration_id: reg.id,
+            status: { $ne: 'annulé' },
+            request_status: { $in: ['pending', 'validated'] },
+          }).toArray();
+          const daysWithAnim = new Set(linkedAnims.map(a => a.day_label));
+          const missingAnimationDays = attendingDays.filter(d => !daysWithAnim.has(d));
+          const animationsComplete = missingAnimationDays.length === 0 && attendingDays.length > 0;
           items.push({
             type: 'stand',
             id: s.id,
@@ -857,7 +868,7 @@ export async function GET(request, { params }) {
             organization: { id: org?.id, name: org?.name, main_email: org?.main_email },
             venue: { id: venue?.id, name: venue?.name },
             stand_code: stand?.stand_code,
-            attending_days: reg.attending_days || [],
+            attending_days: attendingDays,
             request_status: s.request_status,
             waitlist_position: s.waitlist_position,
             request_submitted_at: s.request_submitted_at,
@@ -865,6 +876,10 @@ export async function GET(request, { params }) {
             validated_by: s.validated_by,
             refused_reason: s.refused_reason,
             next_in_waitlist: nextInfo,
+            // 🆕 Animation status pour la queue admin
+            animations_count: linkedAnims.length,
+            animations_complete: animationsComplete,
+            missing_animation_days: missingAnimationDays,
           });
         }
       }
@@ -5503,6 +5518,34 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         kind = 'animation';
       }
       if (!asn) return err('Demande introuvable', 404);
+
+      // 🆕 GARDE-FOU CRITIQUE — Règle métier : 1 animation obligatoire par jour de présence
+      //   Lors de la validation d'un STAND, on vérifie qu'au moins 1 animation
+      //   (pending ou validated) existe pour CHAQUE jour de présence de l'exposant.
+      //   Sans ça, ARACOM ne peut pas valider — le dossier est incomplet.
+      if (kind === 'stand' && !body?.force_validate) {
+        const reg = await db.collection('registrations').findOne({ id: asn.registration_id });
+        const attendingDays = reg?.attending_days || [];
+        if (attendingDays.length > 0) {
+          const existingAnims = await db.collection('animation_slots').find({
+            registration_id: asn.registration_id,
+            status: { $ne: 'annulé' },
+            request_status: { $in: ['pending', 'validated'] },
+          }).toArray();
+          const daysWithAnim = new Set(existingAnims.map(a => a.day_label));
+          const missingDays = attendingDays.filter(d => !daysWithAnim.has(d));
+          if (missingDays.length > 0) {
+            const daysLabel = missingDays.map(d => d === 'samedi' ? 'samedi 15/08' : 'vendredi 14/08').join(', ');
+            return err(
+              `❌ Validation impossible : ce dossier n'a pas d'animation déclarée pour ${daysLabel}. ` +
+              `La règle impose 1 animation OBLIGATOIRE par jour de présence. ` +
+              `Demandez à l'exposant de compléter ses animations, ou ajoutez "force_validate: true" pour passer outre (déconseillé).`,
+              422
+            );
+          }
+        }
+      }
+
       const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
       await db.collection(collName).updateOne(
         { id: targetId },
@@ -5512,8 +5555,8 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         id: uuid(),
         actor_user_id: ctx.userId || 'u-admin',
         action: 'VALIDATION_VALIDATE',
-        description: `Validation ${kind} ${targetId}`,
-        metadata: { kind, target_id: targetId, registration_id: asn.registration_id },
+        description: `Validation ${kind} ${targetId}${body?.force_validate ? ' (FORCED — sans animation complète)' : ''}`,
+        metadata: { kind, target_id: targetId, registration_id: asn.registration_id, forced: !!body?.force_validate },
         created_at: new Date(),
       });
       // 🆕 SESSION 47.14 — Génère un template d'email validé pour le composer ARACOM
@@ -5588,16 +5631,46 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
 
     if (route === 'admin/validation/bulk') {
       if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const { ids, type, action, reason } = body;
+      const { ids, type, action, reason, force_validate } = body;
       if (!Array.isArray(ids) || !ids.length) return err('ids[] requis');
       if (!['validate', 'refuse'].includes(action)) return err('action invalide');
       if (!['stand', 'animation'].includes(type)) return err('type invalide');
       const collName = type === 'stand' ? 'stand_assignments' : 'animation_slots';
+
+      // 🆕 GARDE-FOU CRITIQUE — Lors d'une validation BULK de stands, on bloque ceux
+      //   qui n'ont pas leurs animations complètes (1 par jour de présence obligatoire).
+      const targetsPreCheck = await db.collection(collName).find({ id: { $in: ids } }).toArray();
+      if (action === 'validate' && type === 'stand' && !force_validate) {
+        const blocked = [];
+        for (const asn of targetsPreCheck) {
+          const reg = await db.collection('registrations').findOne({ id: asn.registration_id });
+          const attendingDays = reg?.attending_days || [];
+          if (attendingDays.length === 0) continue;
+          const existingAnims = await db.collection('animation_slots').find({
+            registration_id: asn.registration_id,
+            status: { $ne: 'annulé' },
+            request_status: { $in: ['pending', 'validated'] },
+          }).toArray();
+          const daysWithAnim = new Set(existingAnims.map(a => a.day_label));
+          const missingDays = attendingDays.filter(d => !daysWithAnim.has(d));
+          if (missingDays.length > 0) {
+            blocked.push({ id: asn.id, stand_code: asn.stand_code, registration_id: asn.registration_id, missing_days: missingDays });
+          }
+        }
+        if (blocked.length > 0) {
+          return err(
+            `❌ Validation bulk impossible pour ${blocked.length} stand(s) sans animation complète. ` +
+            `Animations manquantes pour : ${blocked.map(b => `${b.stand_code} (${b.missing_days.join('+')})`).join('; ')}. ` +
+            `Ajoutez "force_validate: true" pour passer outre (déconseillé), ou demandez à l'exposant de compléter.`,
+            422
+          );
+        }
+      }
+
       const set = action === 'validate'
         ? { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() }
         : { request_status: 'refused', refused_reason: reason || 'Refusé en masse', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() };
-      // 🆕 SESSION 47.14 — Récupère les assignations AVANT update pour générer les templates email + promouvoir
-      const targets = await db.collection(collName).find({ id: { $in: ids } }).toArray();
+      const targets = targetsPreCheck;
       const result = await db.collection(collName).updateMany({ id: { $in: ids } }, { $set: set });
       const emailTemplates = [];
       const promotedTemplates = [];
