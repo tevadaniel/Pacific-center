@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Checkbox } from '@/components/ui/checkbox';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
+import StandViewToggle from '@/components/stand-view-toggle';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
 import { ChatbotFloating } from '@/components/chatbot-widget';
@@ -2228,7 +2229,7 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
             <p className="text-xs text-slate-500 mt-1">Vue d&apos;ensemble : votre stand est mis en évidence en bleu.</p>
           </CardHeader>
           <CardContent>
-            <SmartVenueMap stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} onStandClick={!isLocked ? (st) => reserve(st) : null} />
+            <StandViewToggle stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} onStandClick={!isLocked ? (st) => reserve(st) : null} />
           </CardContent>
         </Card>
       )}

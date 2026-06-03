@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast, Toaster } from 'sonner';
 import { Check, ChevronRight, ChevronLeft, Lock, Plus, Minus, MapPin, Calendar, Clock, Music, FileText, ShieldCheck, Sparkles, Loader2, AlertCircle, Edit, Download } from 'lucide-react';
 import SmartVenueMap from '@/components/smart-venue-map';
+import StandViewToggle from '@/components/stand-view-toggle';
 import UrgencyBanner from '@/components/wizard/urgency-banner';
 import SubmitFinalizeModal from '@/components/wizard/submit-finalize-modal';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
@@ -960,8 +961,8 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
         ) : stands.length === 0 ? (
           <div className="py-6 text-center text-amber-700 bg-amber-50 rounded-lg border border-amber-200">Le plan de ce site n&apos;est pas encore disponible. Contactez ARACOM.</div>
         ) : (
-          <div className="border rounded-lg overflow-hidden bg-slate-50">
-            <SmartVenueMap
+          <div className="border rounded-lg overflow-hidden bg-slate-50 p-2">
+            <StandViewToggle
               venue={selectedVenue}
               stands={stands}
               highlightStandCode={b.stand_code}
