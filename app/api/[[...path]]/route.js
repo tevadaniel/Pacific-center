@@ -609,9 +609,12 @@ async function doSeed(force = false) {
     venueIdByName[v.name] = venueId;
     await db.collection('venues').insertOne({
       id: venueId, edition_id: EDITION_ID, name: v.name, code: v.code,
-      capacity_stands: v.stand_count, address: `${v.name}, Polynésie française`,
+      capacity_stands: v.stand_count, address: v.full_address || `${v.name}, Polynésie française`,
       is_active: true,
       is_available_2026: v.is_available_2026 !== false,
+      // 🆕 PHASE F1 — Convention & propriétaire
+      owner_sci: v.owner_sci || null,
+      convention_pdf_url: v.convention_pdf_url || null,
       created_at: new Date(), updated_at: new Date(),
     });
     const stands = [];
@@ -929,6 +932,108 @@ export async function GET(request, { params }) {
       const d = await db.collection('app_settings').findOne({ key: 'validation_deadline' });
       return json({ deadline_at: d?.deadline_at || null });
     }
+
+    // 🆕 PHASE F — GET /api/convention/config — règles Convention (caution, dates, obligations)
+    //   Public — lu par les pages exposant pour affichage cohérent.
+    if (route === 'convention/config') {
+      const { CONVENTION_CONFIG } = await import('@/lib/convention-config');
+      return json({ ok: true, config: CONVENTION_CONFIG });
+    }
+
+    // 🆕 PHASE F — GET /api/venues/:venueId/convention — redirige vers PDF Convention du site
+    if (route.startsWith('venues/') && route.endsWith('/convention')) {
+      const venueId = route.split('/')[1];
+      const venue = await db.collection('venues').findOne({ id: venueId });
+      if (!venue) return err('Site introuvable', 404);
+      if (!venue.convention_pdf_url) return err('Aucune convention disponible pour ce site', 404);
+      return json({ ok: true, venue_id: venueId, venue_name: venue.name, owner_sci: venue.owner_sci, pdf_url: venue.convention_pdf_url });
+    }
+
+    // 🆕 PHASE F — GET /api/exposant/annexe/:regId — Données pré-remplies pour Annexe imprimable
+    //   Retourne identité exposant + site + stand + animations + caution status.
+    if (route.startsWith('exposant/annexe/')) {
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      // Auth: admin OR user.organization_id match
+      if (ctx.role !== 'aracom_admin') {
+        const user = ctx.userId ? await db.collection('users').findOne({ id: ctx.userId }) : null;
+        if (!user || user.organization_id !== reg.organization_id) return err('Non autorisé', 403);
+      }
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const standAsn = await db.collection('stand_assignments').findOne({
+        registration_id: regId,
+        status: { $nin: ['annule', 'cancelled'] },
+      });
+      const animations = await db.collection('animation_slots').find({
+        registration_id: regId,
+        status: { $ne: 'annulé' },
+      }).sort({ event_date: 1, start_time: 1 }).toArray();
+      // Caution status (lit deposit_transactions)
+      const depositTx = await db.collection('deposit_transactions').findOne({
+        organization_id: reg.organization_id,
+        edition_id: EDITION_ID,
+        type: 'caution_received',
+      });
+      const cautionRendue = await db.collection('deposit_transactions').findOne({
+        organization_id: reg.organization_id,
+        edition_id: EDITION_ID,
+        type: 'caution_returned',
+      });
+      let caution_status = 'due'; // À recevoir
+      if (cautionRendue) caution_status = 'returned';
+      else if (depositTx) caution_status = 'received';
+      const contact = await db.collection('exposant_contacts').findOne({ organization_id: reg.organization_id, is_primary: { $ne: false } });
+      return json({
+        ok: true,
+        registration: {
+          id: reg.id,
+          status: reg.status,
+          attending_days: reg.attending_days || [],
+          attending_day_times: reg.attending_day_times || {},
+          stand_code: reg.stand_code,
+          is_waitlist: reg.is_waitlist || false,
+        },
+        organization: org ? {
+          name: org.name,
+          discipline: org.discipline,
+          main_email: org.main_email || contact?.email,
+          phone: org.phone || contact?.phone,
+          tahiti_number: org.tahiti_number || null,
+          address: org.address || null,
+          contact_name: contact?.full_name || null,
+          contact_role: contact?.role || null,
+        } : null,
+        venue: venue ? {
+          id: venue.id, name: venue.name, code: venue.code,
+          address: venue.address, owner_sci: venue.owner_sci,
+          convention_pdf_url: venue.convention_pdf_url,
+        } : null,
+        stand_assignment: standAsn ? {
+          id: standAsn.id, stand_code: standAsn.stand_code,
+          request_status: standAsn.request_status, status: standAsn.status,
+        } : null,
+        animations: animations.map(a => ({
+          id: a.id, day_label: a.day_label, event_date: a.event_date,
+          start_time: a.start_time, end_time: a.end_time,
+          location_type: a.location_type, slot_type: a.slot_type,
+          title: a.title, description: a.description, target_audience: a.target_audience,
+          material_needs: a.material_needs,
+          request_status: a.request_status,
+        })),
+        caution: {
+          status: caution_status, // 'due' | 'received' | 'returned'
+          amount_xpf: 20000,
+          received_at: depositTx?.created_at || null,
+          returned_at: cautionRendue?.created_at || null,
+        },
+      });
+    }
+
+    // 🆕 PHASE F — POST /api/admin/backfill-venues-convention — Met à jour les venues existantes avec les URLs Convention
+    if (route === 'admin/backfill-venues-convention' && false) { /* GET-only block separator */ }
+
 
     // 🆕 PHASE B — GET /api/admin/cessions — queue admin des demandes de cession
     //   Retourne toutes les assignations avec cession_status non null (pending_approval/available_for_promotion/transferred/cancelled)
@@ -5543,9 +5648,30 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return json({ ok: true, deadline_at: dl });
     }
 
+    // 🆕 PHASE F — POST /api/admin/backfill-venues-convention
+    //   Met à jour les venues existantes avec owner_sci + convention_pdf_url depuis VENUE_INFO
+    if (route === 'admin/backfill-venues-convention') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const { VENUE_INFO } = await import('@/lib/seed-data');
+      let updated = 0;
+      for (const v of VENUE_INFO) {
+        const venueId = `venue-${v.code.toLowerCase()}`;
+        const r = await db.collection('venues').updateOne(
+          { id: venueId },
+          {
+            $set: {
+              owner_sci: v.owner_sci || null,
+              convention_pdf_url: v.convention_pdf_url || null,
+              address: v.full_address || `${v.name}, Polynésie française`,
+              updated_at: new Date(),
+            },
+          }
+        );
+        if (r.matchedCount > 0) updated++;
+      }
+      return json({ ok: true, action: 'backfill_venues_convention', venues_updated: updated });
+    }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // 🆕 PHASE B — CESSION DE CRÉNEAU ("Céder mon créneau")
     // ═════════════════════════════════════════════════════════════════════════
     // Workflow : Un exposant validé peut céder son package (stand + animations).
     // 1. Exposant ou Admin initie → cession_status='pending_approval' (si exposant) ou 'available_for_promotion' (si admin)

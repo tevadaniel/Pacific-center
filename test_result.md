@@ -2738,6 +2738,65 @@ frontend:
         comment: "PHASE E — Toutes les phases A/B/C/D livrées. Lint OK sur cession-queue-view.jsx, cession-offer/[id]/page.js, exposant/page.js. Version bumpée 0.51.0 → 0.52.0 pour cache PWA. Screenshot landing /cession-offer/test-id validé visuellement (design system beige+orange+rose appliqué, layout responsive)."
 
 agent_communication:
+
+# ═════════════════════════════════════════════════════════════════════════
+# PHASE F — CONFORMITÉ CONVENTIONS PDF + ANNEXE AUTO + GUIDE EXPOSANT
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "PHASE F — Convention config + venues backfill + GET annexe data"
+    implemented: true
+    working: true
+    file: "lib/convention-config.js, lib/seed-data.js, app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE F BACKEND livré : (1) /lib/convention-config.js — config officielle (caution 20000 XPF, deadline 2026-07-31, dates événement, obligations/interdictions/restrictions de la Convention PDF). (2) /lib/seed-data.js VENUE_INFO enrichi avec owner_sci (Faaa=SCI MANANUI, Punaauia=SCI ATIIO, Arue=S.C.I. TAMAHANA, Taravao=S.C.I. TEMAHAME NUI) + convention_pdf_url + full_address. (3) Seed venues désormais persiste owner_sci + convention_pdf_url. (4) Endpoint GET /api/convention/config (public) — retourne CONVENTION_CONFIG. (5) GET /api/venues/:id/convention — retourne pdf_url + venue_name + owner_sci. (6) GET /api/exposant/annexe/:regId — données pré-remplies pour Annexe imprimable (org, contact, venue, stand_assignment, animations, caution status from deposit_transactions). Auth: admin OR user.org match. (7) POST /api/admin/backfill-venues-convention — met à jour venues existantes. EXÉCUTÉ AVEC SUCCÈS: 6 venues updated. Backend testé visuellement via screenshot Annexe (reg-arue-A-C01 → Arue/S.C.I. TAMAHANA/Stand A-C01 OK)."
+
+frontend:
+  - task: "PHASE F — Page Annexe imprimable /exposant/annexe/[regId]"
+    implemented: true
+    working: true
+    file: "app/exposant/annexe/[regId]/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE F — Annexe N°1 auto-générée HTML imprimable. Style Aracom (header bordure orange, sections avec barre orange à gauche, table-row striée). 6 blocs : (1) Identité Exposant (Activité, Entité, Représentée par, N° Tahiti, Adresse, Tel, Email) avec champs pointillés si manquant (à remplir à la main). (2) Site et stand (avec owner_sci correct par site, stand_code highlighted en orange, status validation). (3) Jours et horaires (tableau avec horaires Forum + horaires de présence personnalisés). (4) Animations prévues (tableau jour/créneau/lieu/titre/statut) — warning si aucune (animation obligatoire). (5) Caution (20 000 XPF, statut depuis deposit_transactions, rappel deadline 31/07). (6) Engagements (liste résumé). + Zone signature Exposant + Organisateur (Coraline DUPIEUX). Bouton 'Imprimer / Exporter PDF' sticky top (window.print). Print-friendly @page A4 margin 12mm. Vérifié visuellement avec reg-arue-A-C01."
+
+  - task: "PHASE F — Page Guide Exposant /exposant/guide"
+    implemented: true
+    working: true
+    file: "app/exposant/guide/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE F — Guide officiel Exposant 11 sections imprimable. Style premium Aracom: couverture aracom-black avec emoji 🌺 + badge 'GUIDE OFFICIEL' orange + titre 'Forum de la Rentrée 2026' + dates + 4 sites. Sommaire 2-colonnes en beige. Sections numérotées avec icônes emoji + barre orange. Sections: (1) Bienvenue, (2) Dates/horaires, (3) Stand fourni, (4) À apporter, (5) Animation obligatoire, (6) Caution 20000 XPF, (7) Strictement interdit, (8) PLV, (9) Assurances, (10) Bonnes pratiques, (11) Contact ARACOM (agence@aracom-conseil.fr, 40 47 88 50, Coraline DUPIEUX). Footer aracom-black. Print-friendly @page A4 margin 10mm. Bouton 'Imprimer / PDF' sticky. Screenshot validé."
+
+  - task: "PHASE F — Page Mes Documents /exposant/documents"
+    implemented: true
+    working: true
+    file: "app/exposant/documents/page.js, app/exposant/page.js (lien dans tabs)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "PHASE F — Page centralisée 3 documents : (1) Annexe N°1 (auto-générée, bouton 'Ouvrir/Imprimer'). (2) Guide Exposant (référence, bouton 'Ouvrir/Imprimer'). (3) Convention PDF du site (bouton 'Télécharger PDF', lien direct vers URL Emergent customer-assets). Cards stylées avec icônes Lucide (ClipboardCheck, BookOpen, FileSignature), badges 'Auto-généré/Référence/Contractuel', couleurs aracom (orange/gold/beige). Si pas de site choisi → Convention disabled. Bloc 'Statut caution' (20000 XPF + statut from deposit_transactions + bailleur SCI + deadline rouge). Footer contact ARACOM. Lien '📂 Mes documents' ajouté dans TabsList du portail exposant (data-testid=link-documents)."
+
+agent_communication:
+  - agent: "main"
+    message: "PHASE F COMPLÈTE — Conformité aux 4 Conventions PDF signées (Faaa/Punaauia/Arue/Taravao). Caution alignée 20 000 XPF + deadline 31/07/2026 dans toute la plateforme. 3 documents livrés à l'exposant : Annexe N°1 auto-générée (HTML imprimable), Guide Exposant (HTML imprimable), Convention PDF du site (téléchargement direct). Backfill exécuté sur 6 venues (owner_sci + convention_pdf_url). Lint OK 3/3. Version 0.53.0. PWA refreshed. PRODUCTION READY après push Github."
+
   - agent: "main"
     message: "PHASES C+D+E TERMINÉES. UI complète : (1) /cession-offer/[id] landing publique avec 3 actions UX (accept/accept_with_suggestion/refuse_definitively) + dialogs inline + design system Aracom. (2) Cockpit 'File de cession' avec KPI cards filtrables, table enrichie, dialogs preview+cancel. (3) Bouton 'Céder mon créneau' portail exposant avec états (validated/pending/offered/transferred). (4) Badge menu pending_cessions. (5) Lint OK partout. Version 0.52.0. Recommended : tester end-to-end manuellement via le portail exposant (créer une cession → admin valide → email reçu avec magic link → ouvrir landing → tester 3 actions). Backend déjà validé en Phase B (14/15 tests)."
 
