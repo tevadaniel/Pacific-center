@@ -327,7 +327,7 @@ export default function ExposantPortal() {
               {/* Ligne 1 — PDFs auto-générés (toujours dispo) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <a
-                  href={`/api/exposant/documents/convention/${r.id}`}
+                  href={`/exposant/annexe/${r.id}`}
                   target="_blank"
                   rel="noreferrer"
                   data-portal-section="convention"
@@ -339,14 +339,14 @@ export default function ExposantPortal() {
                     <FileText className="w-4 h-4 text-aracom-gold" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-aracom-gold/70">Convention</div>
-                    <div className="text-sm font-medium truncate">Convention de participation</div>
+                    <div className="text-[10px] uppercase tracking-wider text-aracom-gold/70">Annexe N°1</div>
+                    <div className="text-sm font-medium truncate">📋 Fiche de réservation</div>
                   </div>
                   <Download className="w-4 h-4 text-aracom-gold opacity-70 group-hover:opacity-100" />
                 </a>
 
                 <a
-                  href={`/api/exposant/documents/guide/${r.id}`}
+                  href={`/exposant/guide`}
                   target="_blank"
                   rel="noreferrer"
                   className="group flex items-center gap-3 p-3 rounded-lg bg-aracom-gold text-aracom-black hover:bg-aracom-beige-clair transition shadow-sm"
@@ -357,10 +357,41 @@ export default function ExposantPortal() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] uppercase tracking-wider text-aracom-black/70">Guide</div>
-                    <div className="text-sm font-medium truncate">Guide de l&apos;exposant</div>
+                    <div className="text-sm font-medium truncate">📖 Guide de l&apos;exposant</div>
                   </div>
                   <Download className="w-4 h-4 text-aracom-black opacity-70 group-hover:opacity-100" />
                 </a>
+
+                {/* 🆕 PHASE F+G — Convention PDF du site (3ème document officiel) */}
+                {v?.convention_pdf_url ? (
+                  <a
+                    href={v.convention_pdf_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="group flex items-center gap-3 p-3 rounded-lg bg-aracom-orange text-white hover:bg-aracom-orange/90 transition shadow-sm"
+                    data-testid="download-convention-pdf"
+                  >
+                    <div className="w-9 h-9 rounded-md bg-white/15 flex items-center justify-center">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] uppercase tracking-wider text-white/80">Convention</div>
+                      <div className="text-sm font-medium truncate">📜 Convention {v?.name || ''}</div>
+                    </div>
+                    <Download className="w-4 h-4 opacity-80 group-hover:opacity-100" />
+                  </a>
+                ) : (
+                  <div className="group flex items-center gap-3 p-3 rounded-lg bg-slate-100 text-slate-400 opacity-70" title="Choisissez un site pour télécharger la Convention">
+                    <div className="w-9 h-9 rounded-md bg-slate-200 flex items-center justify-center">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] uppercase tracking-wider">Convention</div>
+                      <div className="text-sm italic truncate">Choisir d&apos;abord un site</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Reçu de caution : visible si caution reçue (sinon état grisé) */}
                 {cautionReceiptDoc ? (

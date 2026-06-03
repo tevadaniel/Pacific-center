@@ -3,19 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Loader2, Printer, Download, ArrowLeft } from 'lucide-react';
-
-async function api(path) {
-  const r = await fetch(`/api${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      'x-user-role': 'aracom_admin', // permet à l'utilisateur de récupérer ses données pendant tests
-      'x-user-id': 'u-admin',
-    },
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || r.statusText);
-  return d;
-}
+import { api } from '@/lib/auth-client';
 
 function fmtDate(date) {
   if (!date) return '—';
@@ -34,7 +22,7 @@ export default function AnnexePage() {
 
   useEffect(() => {
     if (!regId) return;
-    api(`/exposant/annexe/${regId}`)
+    api(`/api/exposant/annexe/${regId}`)
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));

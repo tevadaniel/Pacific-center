@@ -4,19 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, FileText, ExternalLink, Printer, Download, BookOpen, ClipboardCheck, FileSignature, ArrowLeft, Mail } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
-
-async function api(path) {
-  const r = await fetch(`/api${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      'x-user-role': 'aracom_admin',
-      'x-user-id': 'u-admin',
-    },
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || r.statusText);
-  return d;
-}
+import { api, getSession } from '@/lib/auth-client';
 
 export default function MesDocumentsPage() {
   const [reg, setReg] = useState(null);
@@ -38,10 +26,22 @@ export default function MesDocumentsPage() {
           if (params.get('regId')) regId = params.get('regId');
         }
         if (!regId) {
-          setError('Aucune inscription trouvée. Veuillez d\'abord vous connecter au portail exposant.');
+          // Auto-detect via session → /api/auth/me → org → my-sites → 1st reg
+          try {
+            const me = await api('/api/auth/me');
+            if (me?.organization?.id) {
+              const sites = await api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(me.organization.id)}`);
+              if (Array.isArray(sites) && sites.length > 0) {
+                regId = sites[0].id;
+              }
+            }
+          } catch {}
+        }
+        if (!regId) {
+          setError('Aucune inscription trouvée. Connectez-vous au portail exposant d\'abord.');
           return;
         }
-        const data = await api(`/exposant/annexe/${regId}`);
+        const data = await api(`/api/exposant/annexe/${regId}`);
         setReg({ ...data.registration, _full: data });
         setVenue(data.venue);
       } catch (e) { setError(e.message); }

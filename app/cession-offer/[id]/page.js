@@ -6,15 +6,21 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { toast, Toaster } from 'sonner';
 import { Loader2, CheckCircle2, MessageSquare, XCircle, MapPin, Calendar, Clock, AlertTriangle } from 'lucide-react';
+import { api as authApi } from '@/lib/auth-client';
 
 async function api(path, opts = {}) {
-  const r = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    ...opts,
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || r.statusText);
-  return d;
+  // Si un token magic link est présent, on l'envoie en query.
+  // Sinon, on utilise la session de l'utilisateur (cookies + headers x-user-id/role).
+  if (opts.method && opts.method !== 'GET') {
+    const r = await fetch(`/api${path}`, {
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+      ...opts,
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    return d;
+  }
+  return authApi(`/api${path}`, opts);
 }
 
 export default function CessionOfferPage() {
@@ -57,8 +63,12 @@ export default function CessionOfferPage() {
         ...extra,
       };
       const url = `/exposant/cession-offer/${asnId}/respond${token ? `?token=${token}` : ''}`;
-      const headers = token ? {} : { 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' };
-      const d = await api(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      // Si pas de token magic, utiliser la session utilisateur (api du auth-client)
+      const d = await api(url, {
+        method: 'POST',
+        headers: token ? {} : undefined,
+        body: JSON.stringify(body),
+      });
       let msg = '✅ Réponse enregistrée';
       if (action === 'accept') msg = '✅ Vous avez accepté ce créneau. ARACOM validera dans les prochaines heures.';
       if (action === 'accept_with_suggestion') msg = '💬 Votre acceptation avec suggestion a été transmise à ARACOM pour arbitrage.';
