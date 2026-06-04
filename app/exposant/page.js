@@ -569,7 +569,7 @@ export default function ExposantPortal() {
             <TabsTrigger value="infos" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">📦 Infos pratiques</TabsTrigger>
             <TabsTrigger value="jourj" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">📅 Jour J</TabsTrigger>
             <a
-              href={`/exposant/documents${registration?.id ? `?regId=${registration.id}` : ''}`}
+              href={`/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`}
               className="px-3 py-1.5 text-sm rounded-md hover:bg-aracom-orange/10 text-aracom-orange font-semibold transition flex items-center gap-1"
               title="Annexe + Guide + Convention PDF"
               data-testid="link-documents"
