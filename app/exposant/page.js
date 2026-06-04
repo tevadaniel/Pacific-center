@@ -23,6 +23,7 @@ import StandViewToggle from '@/components/stand-view-toggle';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
 import ExposantStatusBanner from '@/components/exposant/exposant-status-banner';
+import WelcomeRecapBanner from '@/components/exposant/welcome-recap-banner';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import SimulationModal from '@/components/aracom/simulation-modal';
@@ -303,6 +304,13 @@ export default function ExposantPortal() {
         />
       )}
       <div className="space-y-6">
+        {/* 🆕 SESSION 48e — Bandeau de Bienvenue & Récap Convention (TOUT EN HAUT, avant tout) */}
+        <WelcomeRecapBanner
+          organization={o}
+          registration={r}
+          isLocked={isLocked}
+        />
+
         {/* 🔐 Bandeau gestion mot de passe — visible seulement à l'exposant (pas en mode aperçu admin) */}
         {user?.role === 'exposant' && o?.id && (
           <ExposantPasswordManager
