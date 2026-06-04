@@ -18,6 +18,8 @@ import { handleCautionAppointmentsPost } from '@/lib/api/handlers/caution-appoin
 import { handleCautionReceiptsPost } from '@/lib/api/handlers/caution-receipts';
 import { handleExposantDocumentsGet } from '@/lib/api/handlers/exposant-documents';
 import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handlers/dashboard';
+import { handleValidationQueueGet } from '@/lib/api/handlers/validation-queue';
+import { handleValidationPost } from '@/lib/api/handlers/validation-post';
 
 // 🛡️ SESSION 28s/43-fix — Build version STABLE par déploiement (plus de Date.now() qui change à chaque HMR/instance)
 //     Source : .next/BUILD_ID (Next.js l'écrit une fois par build, stable) + fallback hash de package.json.
@@ -804,149 +806,11 @@ export async function GET(request, { params }) {
     const dashboardResp = await handleDashboardGet({ db, request, url, route });
     if (dashboardResp) return dashboardResp;
 
-    // 🆕 SESSION 47.13 — Validation queue ARACOM : liste FIFO de toutes les demandes
-    // GET /api/admin/validation-queue?status=&type=&site=&date=
-    if (route === 'admin/validation-queue') {
-      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const statusFilter = url.searchParams.get('status'); // pending|waitlist|validated|refused|all
-      const typeFilter = url.searchParams.get('type'); // stand|animation|all
-      const siteFilter = url.searchParams.get('site');
-      const dateFilter = url.searchParams.get('date'); // 2026-08-14 etc.
-
-      const matchStand = { status: { $nin: ['annule', 'cancelled'] } };
-      const matchAnim = { status: { $ne: 'annulé' } };
-      if (statusFilter && statusFilter !== 'all') {
-        matchStand.request_status = statusFilter;
-        matchAnim.request_status = statusFilter;
-      } else {
-        matchStand.request_status = { $in: ['pending', 'waitlist', 'validated', 'refused'] };
-        matchAnim.request_status = { $in: ['pending', 'waitlist', 'validated', 'refused'] };
-      }
-      if (dateFilter) {
-        matchAnim.event_date = dateFilter;
-      }
-
-      const items = [];
-      // 1. Stands
-      if (!typeFilter || typeFilter === 'all' || typeFilter === 'stand') {
-        const stands = await db.collection('stand_assignments').find(matchStand).sort({ request_submitted_at: 1 }).toArray();
-        for (const s of stands) {
-          const reg = await db.collection('registrations').findOne({ id: s.registration_id });
-          if (!reg) continue;
-          if (siteFilter && reg.venue_id !== siteFilter) continue;
-          const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-          const venue = await db.collection('venues').findOne({ id: reg.venue_id });
-          const stand = await db.collection('venue_stands').findOne({ id: s.venue_stand_id });
-          // Next-in-waitlist
-          let nextInfo = null;
-          if (s.request_status === 'pending' || s.request_status === 'validated') {
-            const next = await db.collection('stand_assignments').findOne(
-              { venue_stand_id: s.venue_stand_id, request_status: 'waitlist', id: { $ne: s.id } },
-              { sort: { waitlist_position: 1, request_submitted_at: 1 } }
-            );
-            if (next) {
-              const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
-              const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
-              nextInfo = { name: nOrg?.name, waitlist_position: next.waitlist_position, assignment_id: next.id };
-            }
-          }
-          // 🆕 GARDE-FOU ANIMATION — Détection des jours sans animation pour ce stand
-          //   Permet à l'UI de signaler les dossiers incomplets AVANT validation.
-          const attendingDays = reg.attending_days || [];
-          const linkedAnims = await db.collection('animation_slots').find({
-            registration_id: reg.id,
-            status: { $ne: 'annulé' },
-            request_status: { $in: ['pending', 'validated'] },
-          }).toArray();
-          const daysWithAnim = new Set(linkedAnims.map(a => a.day_label));
-          const missingAnimationDays = attendingDays.filter(d => !daysWithAnim.has(d));
-          const animationsComplete = missingAnimationDays.length === 0 && attendingDays.length > 0;
-          items.push({
-            type: 'stand',
-            id: s.id,
-            registration_id: reg.id,
-            organization: { id: org?.id, name: org?.name, main_email: org?.main_email },
-            venue: { id: venue?.id, name: venue?.name },
-            stand_code: stand?.stand_code,
-            attending_days: attendingDays,
-            request_status: s.request_status,
-            waitlist_position: s.waitlist_position,
-            request_submitted_at: s.request_submitted_at,
-            validated_at: s.validated_at,
-            validated_by: s.validated_by,
-            refused_reason: s.refused_reason,
-            next_in_waitlist: nextInfo,
-            // 🆕 Animation status pour la queue admin
-            animations_count: linkedAnims.length,
-            animations_complete: animationsComplete,
-            missing_animation_days: missingAnimationDays,
-          });
-        }
-      }
-      // 2. Animations
-      if (!typeFilter || typeFilter === 'all' || typeFilter === 'animation') {
-        const anims = await db.collection('animation_slots').find(matchAnim).sort({ request_submitted_at: 1 }).toArray();
-        for (const a of anims) {
-          if (siteFilter && a.venue_id !== siteFilter) continue;
-          let nextInfo = null;
-          if (a.request_status === 'pending' || a.request_status === 'validated') {
-            const next = await db.collection('animation_slots').findOne(
-              { venue_id: a.venue_id, day_label: a.day_label, location_type: a.location_type, start_time: a.start_time, request_status: 'waitlist', id: { $ne: a.id } },
-              { sort: { waitlist_position: 1, request_submitted_at: 1 } }
-            );
-            if (next) {
-              const nReg = await db.collection('registrations').findOne({ id: next.registration_id });
-              const nOrg = nReg ? await db.collection('organizations').findOne({ id: nReg.organization_id }) : null;
-              nextInfo = { name: nOrg?.name, waitlist_position: next.waitlist_position, assignment_id: next.id };
-            }
-          }
-          items.push({
-            type: 'animation',
-            id: a.id,
-            registration_id: a.registration_id,
-            organization: { id: null, name: a.organization_name, main_email: null },
-            venue: { id: a.venue_id, name: a.venue_name },
-            day_label: a.day_label,
-            event_date: a.event_date,
-            start_time: a.start_time,
-            end_time: a.end_time,
-            location_type: a.location_type,
-            title: a.title,
-            request_status: a.request_status,
-            waitlist_position: a.waitlist_position,
-            request_submitted_at: a.request_submitted_at,
-            validated_at: a.validated_at,
-            validated_by: a.validated_by,
-            refused_reason: a.refused_reason,
-            next_in_waitlist: nextInfo,
-          });
-        }
-      }
-      // Tri FIFO global
-      items.sort((x, y) => new Date(x.request_submitted_at || 0) - new Date(y.request_submitted_at || 0));
-
-      // Deadline configurée
-      const deadlineDoc = await db.collection('app_settings').findOne({ key: 'validation_deadline' });
-
-      return json({
-        ok: true,
-        items,
-        total: items.length,
-        deadline_at: deadlineDoc?.deadline_at || null,
-        counts: {
-          pending: items.filter(i => i.request_status === 'pending').length,
-          waitlist: items.filter(i => i.request_status === 'waitlist').length,
-          validated: items.filter(i => i.request_status === 'validated').length,
-          refused: items.filter(i => i.request_status === 'refused').length,
-        },
-      });
-    }
-
-    // GET /api/admin/validation-deadline (lit la config)
-    if (route === 'admin/validation-deadline') {
-      const d = await db.collection('app_settings').findOne({ key: 'validation_deadline' });
-      return json({ deadline_at: d?.deadline_at || null });
-    }
+    // ✅ SESSION 48 — Validation queue GET (extraits vers /app/lib/api/handlers/validation-queue.js)
+    //   - GET /api/admin/validation-queue?status=&type=&site=&date=
+    //   - GET /api/admin/validation-deadline
+    const validationQueueResp = await handleValidationQueueGet({ db, request, url, route });
+    if (validationQueueResp) return validationQueueResp;
 
     // 🆕 PHASE F — GET /api/convention/config — règles Convention (caution, dates, obligations)
     //   Public — lu par les pages exposant pour affichage cohérent.
@@ -3274,6 +3138,13 @@ export async function POST(request, { params }) {
     const cautionReceiptsResp = await handleCautionReceiptsPost({ db, request, route, p, body, deps: { buildRefundAttestationHTML } });
     if (cautionReceiptsResp) return cautionReceiptsResp;
 
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ SESSION 48 — Handler validation POST (validate/refuse/bulk/deadline)
+    // (extrait dans /app/lib/api/handlers/validation-post.js)
+    // ═══════════════════════════════════════════════════════════════════
+    const validationPostResp = await handleValidationPost({ db, request, route, body });
+    if (validationPostResp) return validationPostResp;
+
     // ════════════════════════════════════════════════════════════════
     // 🆕 SESSION 29 — Endpoints FicheExposant V2 (Documents + Portail)
     // ════════════════════════════════════════════════════════════════
@@ -5166,115 +5037,12 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
 
     // ═════════════════════════════════════════════════════════════════════════
     // 🆕 SESSION 47.13 — REFONTE SYSTÈME RÉSERVATION : validation queue ARACOM
+    //   ✅ SESSION 48 — Handlers extraits vers /app/lib/api/handlers/validation-post.js
+    //                  Helpers buildExposantEmailTemplate + promoteNextInWaitlist y sont aussi.
+    //                  Dispatcher : handleValidationPost (appelé plus haut).
     // ═════════════════════════════════════════════════════════════════════════
-    // POST /api/admin/validation/:id/validate — Valide une assignation stand OU animation_slot
-    // POST /api/admin/validation/:id/refuse — Refuse (body: {reason})
-    // POST /api/admin/validation/bulk — Action bulk (body: {ids, type: 'stand'|'animation', action: 'validate'|'refuse', reason?})
-    // POST /api/admin/validation-deadline — Configure la deadline (body: {deadline: ISO date})
 
-    // 🆕 SESSION 47.14 — Helper : génère un template d'email "suggéré" pour l'exposant
-    // (validated / refused / promoted). Le frontend ouvrira le composer avec ce template
-    // pré-rempli pour qu'ARACOM puisse le modifier avant envoi.
-    async function buildExposantEmailTemplate(registration_id, action, context = {}) {
-      try {
-        const reg = await db.collection('registrations').findOne({ id: registration_id });
-        if (!reg) return null;
-        const org = await db.collection('organizations').findOne({ id: reg.organization_id });
-        if (!org) return null;
-        const orgName = org.name || 'votre association';
-        const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
-        const venueName = venue?.name || '';
-        const kind = context.kind === 'animation' ? 'animation' : 'stand';
-        const standCode = context.stand_code || reg.stand_code || '';
-        const standOrAnim = kind === 'stand'
-          ? (standCode ? `<b>stand ${standCode}</b>` : 'votre stand')
-          : (context.day_label ? `créneau d'animation du ${context.day_label === 'samedi' ? 'samedi' : 'vendredi'} ${context.start_time || ''}–${context.end_time || ''}` : 'votre créneau d\'animation');
-        let subject = '';
-        let body = '';
-        if (action === 'validated') {
-          subject = `[Forum 2026] ✅ Votre ${kind === 'stand' ? 'stand' : 'créneau d\'animation'} est confirmé !`;
-          body = `<p>Bonjour ${orgName},</p>
-<p>Excellente nouvelle ! Votre demande pour ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''} vient d'être <b>validée par ARACOM</b>. 🎉</p>
-<p>Votre place est maintenant officiellement confirmée pour le Forum de la Rentrée des 14 & 15 août 2026.</p>
-<p>Vous pouvez désormais finaliser votre dossier (caution, convention, documents) directement depuis votre espace personnel.</p>
-<p>[[MON_ESPACE]]</p>
-<p>À très bientôt,<br/>L'équipe ARACOM</p>`;
-        } else if (action === 'refused') {
-          const reason = context.reason || 'Demande refusée';
-          subject = `[Forum 2026] Concernant votre demande de ${kind === 'stand' ? 'stand' : 'créneau'}`;
-          body = `<p>Bonjour ${orgName},</p>
-<p>Nous vous remercions pour votre intérêt pour le Forum de la Rentrée 2026.</p>
-<p>Malheureusement, votre demande pour ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''} <b>n'a pas pu être retenue</b>.</p>
-<p><b>Motif :</b> ${reason}</p>
-<p>Nous restons à votre disposition pour vous proposer une alternative (autre stand, autre site ou autre créneau). N'hésitez pas à nous recontacter ou à modifier votre demande depuis votre espace.</p>
-<p>[[MON_ESPACE]]</p>
-<p>Cordialement,<br/>L'équipe ARACOM</p>`;
-        } else if (action === 'promoted') {
-          subject = `[Forum 2026] 🎉 Vous êtes promu(e) — votre ${kind === 'stand' ? 'stand' : 'créneau'} est disponible !`;
-          body = `<p>Bonjour ${orgName},</p>
-<p>Bonne nouvelle ! Vous étiez en <b>liste d'attente</b> sur ${standOrAnim}${venueName ? ` sur le site <b>${venueName}</b>` : ''}. La place s'étant libérée, votre demande passe automatiquement <b>en attente de validation</b> par ARACOM.</p>
-<p>Aucune action n'est requise de votre part pour l'instant — ARACOM va examiner votre dossier et vous tiendra informé.e dans les meilleurs délais.</p>
-<p>[[MON_ESPACE]]</p>
-<p>Cordialement,<br/>L'équipe ARACOM</p>`;
-        }
-        return {
-          registration_id,
-          organization_name: orgName,
-          organization_email: org.main_email || null,
-          subject,
-          body_html: body,
-          mail_type: action === 'validated' ? 'confirmation' : (action === 'promoted' ? 'info_pratique' : 'info_pratique'),
-        };
-      } catch (e) {
-        console.error('[buildExposantEmailTemplate] error', e?.message);
-        return null;
-      }
-    }
 
-    // 🆕 SESSION 47.14 — Helper : promeut effectivement le 1er en waitlist sur un stand/slot refusé
-    // - Trouve le waitlist #1
-    // - Bascule en request_status='pending', waitlist_position=null
-    // - Décrémente waitlist_position de tous les autres waitlist (#2 → #1, etc.)
-    // - Retourne {promoted_assignment, email_template} ou null si personne en waitlist
-    async function promoteNextInWaitlist(refusedAsn, kind) {
-      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
-      const statusField = kind === 'stand' ? 'status' : 'status';
-      const filter = kind === 'stand'
-        ? { venue_stand_id: refusedAsn.venue_stand_id, request_status: 'waitlist', [statusField]: { $nin: ['annule', 'cancelled', 'annulé'] }, id: { $ne: refusedAsn.id } }
-        : { venue_id: refusedAsn.venue_id, day_label: refusedAsn.day_label, location_type: refusedAsn.location_type, start_time: refusedAsn.start_time, end_time: refusedAsn.end_time, request_status: 'waitlist', [statusField]: { $ne: 'annulé' }, id: { $ne: refusedAsn.id } };
-      const waitlist = await db.collection(collName).find(filter).sort({ waitlist_position: 1, request_submitted_at: 1 }).toArray();
-      if (waitlist.length === 0) return null;
-      const promoted = waitlist[0];
-      // Promote #1 → pending
-      await db.collection(collName).updateOne(
-        { id: promoted.id },
-        { $set: { request_status: 'pending', waitlist_position: null, promoted_at: new Date(), updated_at: new Date() } }
-      );
-      // Decrement positions of the rest
-      for (let i = 1; i < waitlist.length; i++) {
-        await db.collection(collName).updateOne(
-          { id: waitlist[i].id },
-          { $set: { waitlist_position: Math.max(1, (waitlist[i].waitlist_position || i + 1) - 1), updated_at: new Date() } }
-        );
-      }
-      await db.collection('activity_logs').insertOne({
-        id: uuid(),
-        actor_user_id: 'system',
-        action: 'WAITLIST_AUTO_PROMOTE',
-        description: `Promotion auto de l'exposant ${promoted.registration_id} suite au refus de ${refusedAsn.registration_id}`,
-        metadata: { kind, promoted_id: promoted.id, refused_id: refusedAsn.id },
-        created_at: new Date(),
-      });
-      // Build email template for the promoted exposant
-      const template = await buildExposantEmailTemplate(promoted.registration_id, 'promoted', {
-        kind,
-        stand_code: promoted.stand_code,
-        day_label: promoted.day_label,
-        start_time: promoted.start_time,
-        end_time: promoted.end_time,
-      });
-      return { promoted_assignment: promoted, email_template: template };
-    }
 
     // 🆕 PHASE B — Helper: propose le package cédé au prochain en liste d'attente
     //   Trouve le #1 waitlist sur ce stand (en excluant refused_definitively + excludeIds),
@@ -5507,219 +5275,6 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       }
     }
 
-    if (route.startsWith('admin/validation/') && route.endsWith('/validate')) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const targetId = route.split('/')[2];
-      // Cherche d'abord dans stand_assignments
-      let asn = await db.collection('stand_assignments').findOne({ id: targetId });
-      let kind = 'stand';
-      if (!asn) {
-        asn = await db.collection('animation_slots').findOne({ id: targetId });
-        kind = 'animation';
-      }
-      if (!asn) return err('Demande introuvable', 404);
-
-      // 🆕 GARDE-FOU CRITIQUE — Règle métier : 1 animation obligatoire par jour de présence
-      //   Lors de la validation d'un STAND, on vérifie qu'au moins 1 animation
-      //   (pending ou validated) existe pour CHAQUE jour de présence de l'exposant.
-      //   Sans ça, ARACOM ne peut pas valider — le dossier est incomplet.
-      if (kind === 'stand' && !body?.force_validate) {
-        const reg = await db.collection('registrations').findOne({ id: asn.registration_id });
-        const attendingDays = reg?.attending_days || [];
-        if (attendingDays.length > 0) {
-          const existingAnims = await db.collection('animation_slots').find({
-            registration_id: asn.registration_id,
-            status: { $ne: 'annulé' },
-            request_status: { $in: ['pending', 'validated'] },
-          }).toArray();
-          const daysWithAnim = new Set(existingAnims.map(a => a.day_label));
-          const missingDays = attendingDays.filter(d => !daysWithAnim.has(d));
-          if (missingDays.length > 0) {
-            const daysLabel = missingDays.map(d => d === 'samedi' ? 'samedi 15/08' : 'vendredi 14/08').join(', ');
-            return err(
-              `❌ Validation impossible : ce dossier n'a pas d'animation déclarée pour ${daysLabel}. ` +
-              `La règle impose 1 animation OBLIGATOIRE par jour de présence. ` +
-              `Demandez à l'exposant de compléter ses animations, ou ajoutez "force_validate: true" pour passer outre (déconseillé).`,
-              422
-            );
-          }
-        }
-      }
-
-      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
-      await db.collection(collName).updateOne(
-        { id: targetId },
-        { $set: { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() } }
-      );
-      await db.collection('activity_logs').insertOne({
-        id: uuid(),
-        actor_user_id: ctx.userId || 'u-admin',
-        action: 'VALIDATION_VALIDATE',
-        description: `Validation ${kind} ${targetId}${body?.force_validate ? ' (FORCED — sans animation complète)' : ''}`,
-        metadata: { kind, target_id: targetId, registration_id: asn.registration_id, forced: !!body?.force_validate },
-        created_at: new Date(),
-      });
-      // 🆕 SESSION 47.14 — Génère un template d'email validé pour le composer ARACOM
-      const emailTemplate = await buildExposantEmailTemplate(asn.registration_id, 'validated', {
-        kind,
-        stand_code: asn.stand_code,
-        day_label: asn.day_label,
-        start_time: asn.start_time,
-        end_time: asn.end_time,
-      });
-      return json({ ok: true, kind, target_id: targetId, request_status: 'validated', email_template: emailTemplate });
-    }
-
-    if (route.startsWith('admin/validation/') && route.endsWith('/refuse')) {
-      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const targetId = route.split('/')[2];
-      const reason = body?.reason || 'Refusé par ARACOM';
-      let asn = await db.collection('stand_assignments').findOne({ id: targetId });
-      let kind = 'stand';
-      if (!asn) {
-        asn = await db.collection('animation_slots').findOne({ id: targetId });
-        kind = 'animation';
-      }
-      if (!asn) return err('Demande introuvable', 404);
-      const collName = kind === 'stand' ? 'stand_assignments' : 'animation_slots';
-      await db.collection(collName).updateOne(
-        { id: targetId },
-        { $set: { request_status: 'refused', refused_reason: reason, validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() } }
-      );
-      await db.collection('activity_logs').insertOne({
-        id: uuid(),
-        actor_user_id: ctx.userId || 'u-admin',
-        action: 'VALIDATION_REFUSE',
-        description: `Refus ${kind} ${targetId} : ${reason}`,
-        metadata: { kind, target_id: targetId, registration_id: asn.registration_id, reason },
-        created_at: new Date(),
-      });
-      // 🆕 SESSION 47.14 — PROMOTION EFFECTIVE du 1er en waitlist (était seulement signalée avant)
-      const promotion = await promoteNextInWaitlist(asn, kind);
-      // 🆕 Template email pour l'exposant refusé
-      const refusedTemplate = await buildExposantEmailTemplate(asn.registration_id, 'refused', {
-        kind,
-        stand_code: asn.stand_code,
-        day_label: asn.day_label,
-        start_time: asn.start_time,
-        end_time: asn.end_time,
-        reason,
-      });
-      // Backward-compat : next_in_waitlist (legacy field)
-      let nextInfo = null;
-      if (promotion?.promoted_assignment) {
-        const pReg = await db.collection('registrations').findOne({ id: promotion.promoted_assignment.registration_id });
-        const pOrg = pReg ? await db.collection('organizations').findOne({ id: pReg.organization_id }) : null;
-        nextInfo = {
-          assignment_id: promotion.promoted_assignment.id,
-          registration_id: promotion.promoted_assignment.registration_id,
-          organization_name: pOrg?.name,
-          waitlist_position: 1,
-        };
-      }
-      return json({
-        ok: true,
-        kind,
-        target_id: targetId,
-        request_status: 'refused',
-        reason,
-        next_in_waitlist: nextInfo,
-        email_template: refusedTemplate,
-        promoted_email_template: promotion?.email_template || null,
-      });
-    }
-
-    if (route === 'admin/validation/bulk') {
-      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const { ids, type, action, reason, force_validate } = body;
-      if (!Array.isArray(ids) || !ids.length) return err('ids[] requis');
-      if (!['validate', 'refuse'].includes(action)) return err('action invalide');
-      if (!['stand', 'animation'].includes(type)) return err('type invalide');
-      const collName = type === 'stand' ? 'stand_assignments' : 'animation_slots';
-
-      // 🆕 GARDE-FOU CRITIQUE — Lors d'une validation BULK de stands, on bloque ceux
-      //   qui n'ont pas leurs animations complètes (1 par jour de présence obligatoire).
-      const targetsPreCheck = await db.collection(collName).find({ id: { $in: ids } }).toArray();
-      if (action === 'validate' && type === 'stand' && !force_validate) {
-        const blocked = [];
-        for (const asn of targetsPreCheck) {
-          const reg = await db.collection('registrations').findOne({ id: asn.registration_id });
-          const attendingDays = reg?.attending_days || [];
-          if (attendingDays.length === 0) continue;
-          const existingAnims = await db.collection('animation_slots').find({
-            registration_id: asn.registration_id,
-            status: { $ne: 'annulé' },
-            request_status: { $in: ['pending', 'validated'] },
-          }).toArray();
-          const daysWithAnim = new Set(existingAnims.map(a => a.day_label));
-          const missingDays = attendingDays.filter(d => !daysWithAnim.has(d));
-          if (missingDays.length > 0) {
-            blocked.push({ id: asn.id, stand_code: asn.stand_code, registration_id: asn.registration_id, missing_days: missingDays });
-          }
-        }
-        if (blocked.length > 0) {
-          return err(
-            `❌ Validation bulk impossible pour ${blocked.length} stand(s) sans animation complète. ` +
-            `Animations manquantes pour : ${blocked.map(b => `${b.stand_code} (${b.missing_days.join('+')})`).join('; ')}. ` +
-            `Ajoutez "force_validate: true" pour passer outre (déconseillé), ou demandez à l'exposant de compléter.`,
-            422
-          );
-        }
-      }
-
-      const set = action === 'validate'
-        ? { request_status: 'validated', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', updated_at: new Date() }
-        : { request_status: 'refused', refused_reason: reason || 'Refusé en masse', validated_at: new Date(), validated_by: ctx.userId || 'u-admin', status: 'annule', updated_at: new Date() };
-      const targets = targetsPreCheck;
-      const result = await db.collection(collName).updateMany({ id: { $in: ids } }, { $set: set });
-      const emailTemplates = [];
-      const promotedTemplates = [];
-      for (const asn of targets) {
-        const tpl = await buildExposantEmailTemplate(asn.registration_id, action === 'validate' ? 'validated' : 'refused', {
-          kind: type,
-          stand_code: asn.stand_code,
-          day_label: asn.day_label,
-          start_time: asn.start_time,
-          end_time: asn.end_time,
-          reason: reason || 'Refusé en masse',
-        });
-        if (tpl) emailTemplates.push(tpl);
-        if (action === 'refuse') {
-          const promo = await promoteNextInWaitlist(asn, type);
-          if (promo?.email_template) promotedTemplates.push(promo.email_template);
-        }
-      }
-      await db.collection('activity_logs').insertOne({
-        id: uuid(),
-        actor_user_id: ctx.userId || 'u-admin',
-        action: `VALIDATION_BULK_${action.toUpperCase()}`,
-        description: `Bulk ${action} ${type} : ${result.modifiedCount} record(s)${promotedTemplates.length ? `, ${promotedTemplates.length} promu(s)` : ''}`,
-        metadata: { type, action, ids, reason, modified: result.modifiedCount, promoted_count: promotedTemplates.length },
-        created_at: new Date(),
-      });
-      return json({
-        ok: true,
-        action,
-        type,
-        modified: result.modifiedCount,
-        email_templates: emailTemplates,
-        promoted_email_templates: promotedTemplates,
-      });
-    }
-
-    if (route === 'admin/validation-deadline') {
-      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
-      const { deadline } = body;
-      if (!deadline) return err('deadline ISO requise');
-      const dl = new Date(deadline);
-      if (isNaN(dl.getTime())) return err('Format de date invalide');
-      await db.collection('app_settings').updateOne(
-        { key: 'validation_deadline' },
-        { $set: { key: 'validation_deadline', deadline_at: dl, updated_at: new Date(), updated_by: ctx.userId || 'u-admin' } },
-        { upsert: true }
-      );
-      return json({ ok: true, deadline_at: dl });
-    }
 
     // 🆕 PHASE F — POST /api/admin/backfill-venues-convention
     //   Met à jour les venues existantes avec owner_sci + convention_pdf_url depuis VENUE_INFO
