@@ -26,6 +26,7 @@ import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveCo
 import { REGISTRATION_STATUS, REGISTRATION_STATUS_LABEL, REGISTRATION_STATUS_COLOR, PRIORITY_LEVELS, PRIORITY_DEFINITIONS, PROSPECT_STATUS_DEFINITIONS, DEPOSIT_STATUS, DEPOSIT_STATUS_LABEL, DISCIPLINES, DEPOSIT_AMOUNT_XPF, DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL } from '@/lib/constants';
 import { FileUploadButton } from '@/components/file-upload';
 import SmartVenueMap from '@/components/smart-venue-map';
+import StandViewToggle from '@/components/stand-view-toggle';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV } from '@/lib/csv-export';
 import { exportFullXLSX } from '@/lib/xlsx-export';
 import PushToggle from '@/components/push-toggle';
@@ -1599,12 +1600,13 @@ function SitesView() {
       </div>
 
       {selected && (
-        <SmartVenueMap
+        <StandViewToggle
           stands={stands}
           venue={venues.find(v => v.id === selected)}
           onStandClick={(s) => setEditStand(s)}
           onStandsReload={reload}
           editable={true}
+          storageKey="aracom_stand_view_mode"
         />
       )}
 

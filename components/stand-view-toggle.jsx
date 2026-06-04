@@ -21,20 +21,21 @@ export default function StandViewToggle({
   showFilters = true,
   compact = false,
   defaultMode = 'map',
+  storageKey = 'fr26_stand_view_mode',
 }) {
   const [mode, setMode] = useState(defaultMode);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const saved = localStorage.getItem('fr26_stand_view_mode');
+    const saved = localStorage.getItem(storageKey);
     if (saved === 'map' || saved === 'grid') setMode(saved);
     setHydrated(true);
-  }, []);
+  }, [storageKey]);
 
   const setModePersist = (m) => {
     setMode(m);
-    if (typeof window !== 'undefined') localStorage.setItem('fr26_stand_view_mode', m);
+    if (typeof window !== 'undefined') localStorage.setItem(storageKey, m);
   };
 
   // Don't render until hydrated to avoid hydration mismatch
