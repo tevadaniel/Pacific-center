@@ -19,6 +19,7 @@ import {
   User, Phone, FileText, MapPin, History, ListChecks, Wallet,
   FileBox, Sparkles, Activity, StickyNote, AlertTriangle, Trash2,
   Mail, ExternalLink, Building2, Users as UsersIcon, CalendarClock,
+  FileCheck2,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,7 @@ import DeleteOrgDialog from './delete-org-dialog';
 import SendExposantMailDialog from './send-exposant-mail-dialog';
 import DocumentsTab from './documents-tab';
 import PortalTab from './portal-tab';
+import FicheRecapBlock from './fiche-recap-block';
 import AiInsightTrigger from '@/components/ai-insight-trigger';
 import { useExposantPanel } from './exposant-panel-context';
 
@@ -687,6 +689,21 @@ export default function FicheExposantV2({ id, onClose }) {
       {/* ═══════════════════ SECTION 11 : PORTAIL EXPOSANT ═══════════════════ */}
       <CollapsibleSection icon={ExternalLink} title="Portail exposant">
         <PortalTab registration={reg} organization={org} documents={docs} />
+      </CollapsibleSection>
+
+      {/* ═══════════════════ SECTION 12 : FICHE RÉCAP & CONFIRMATION ═══════════════════ */}
+      <CollapsibleSection
+        icon={FileCheck2}
+        title="Fiche récap & Confirmation"
+        defaultOpen
+        badge={reg.confirmation_sent_at ? <Badge className="bg-emerald-600 text-white text-[10px] ml-1">Envoyé</Badge> : <Badge className="bg-amber-500 text-white text-[10px] ml-1">À envoyer</Badge>}
+      >
+        <FicheRecapBlock
+          registration={reg}
+          organization={org}
+          venue={venue}
+          onRefresh={load}
+        />
       </CollapsibleSection>
 
       </div>

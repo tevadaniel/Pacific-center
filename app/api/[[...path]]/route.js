@@ -3559,6 +3559,109 @@ export async function POST(request, { params }) {
       return json({ ok: true, sent_to: org.main_email, url: access_url });
     }
 
+    // 🆕 SESSION 48d — POST /api/admin/registrations/:id/send-confirmation
+    //   Envoie un email de confirmation officielle à l'exposant avec :
+    //     • Résumé auto-généré (stand, animations, jours, site)
+    //     • Lien direct vers la fiche annexe HTML imprimable
+    //     • Lien vers le portail exposant pour signer convention + payer caution
+    //   Marque registration.confirmation_sent_at + confirmation_sent_by.
+    //   Réservé ARACOM.
+    if (route.startsWith('admin/registrations/') && route.endsWith('/send-confirmation')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+      if (!org?.main_email) return err('Email exposant manquant', 400);
+      const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+      const stand = reg.venue_stand_id ? await db.collection('venue_stands').findOne({ id: reg.venue_stand_id }) : null;
+      const anims = await db.collection('animation_slots').find({
+        registration_id: regId,
+        status: { $ne: 'annulé' },
+      }).sort({ event_date: 1, start_time: 1 }).toArray();
+
+      const subject = (body?.subject || `[Forum Rentrée 2026] Votre inscription est confirmée — Stand ${reg.stand_code || ''}`).trim();
+      const bodyExtra = body?.body_extra || '';
+
+      // Génère le résumé HTML auto
+      const days = (reg.attending_days || []).map(d => d === 'samedi' ? 'samedi 15 août' : 'vendredi 14 août').join(' + ');
+      const animLines = anims.map(a => {
+        const dLabel = a.day_label === 'samedi' ? 'Samedi' : 'Vendredi';
+        const loc = a.location_type === 'zone_demo' ? '🟧 Zone démo' : '🟦 Sur stand';
+        return `<li><b>${dLabel} ${a.start_time}–${a.end_time}</b> · ${loc} · ${a.title || 'Animation'}</li>`;
+      }).join('') || '<li><em>Aucune animation enregistrée.</em></li>';
+
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.headers.get('origin') || '';
+      const annexeUrl = `${baseUrl}/exposant/annexe/${reg.id}`;
+      const portalUrl = `${baseUrl}/exposant`;
+
+      const html = `
+        <div style="font-family:Inter,Arial,sans-serif;max-width:600px;margin:0 auto;color:#1f2937;">
+          <div style="background:linear-gradient(135deg,#10b981,#059669);color:white;padding:24px;border-radius:12px 12px 0 0;">
+            <h1 style="margin:0;font-size:22px;">✅ Inscription confirmée</h1>
+            <p style="margin:4px 0 0;opacity:.9;font-size:14px;">Forum de la Rentrée 2026 · ${venue?.name || ''}</p>
+          </div>
+          <div style="background:white;padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;">
+            ${bodyExtra ? `<div style="white-space:pre-wrap;color:#374151;line-height:1.5;margin-bottom:18px;">${bodyExtra.replace(/[<>]/g, c => ({'<':'&lt;','>':'&gt;'}[c]))}</div>` : ''}
+            <div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0;">
+              <h3 style="margin:0 0 8px;font-size:14px;color:#059669;">📋 Récapitulatif de votre inscription</h3>
+              <p style="margin:4px 0;font-size:13px;"><b>Structure :</b> ${org.name}</p>
+              <p style="margin:4px 0;font-size:13px;"><b>Site :</b> ${venue?.name || '—'}</p>
+              <p style="margin:4px 0;font-size:13px;"><b>Stand :</b> ${reg.stand_code || '—'}${stand?.capacity ? ` (${stand.capacity} pers.)` : ''}</p>
+              <p style="margin:4px 0;font-size:13px;"><b>Jours :</b> ${days || '—'}</p>
+              <p style="margin:8px 0 4px;font-size:13px;font-weight:600;">Animations programmées :</p>
+              <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;">${animLines}</ul>
+            </div>
+            <div style="text-align:center;margin:24px 0;">
+              <a href="${annexeUrl}" style="display:inline-block;padding:12px 24px;background:#E8500A;color:white;text-decoration:none;border-radius:8px;font-weight:600;margin:4px;">📄 Voir ma fiche officielle</a>
+              <a href="${portalUrl}" style="display:inline-block;padding:12px 24px;background:#1f2937;color:white;text-decoration:none;border-radius:8px;font-weight:600;margin:4px;">🏠 Mon espace exposant</a>
+            </div>
+            <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px;border-radius:6px;font-size:12px;color:#78350f;margin:16px 0;">
+              <b>⚠️ Prochaines étapes :</b><br>
+              1. Signer la convention (téléchargeable depuis votre espace)<br>
+              2. Régler la <b>caution de 20 000 XPF</b> (chèque, virement ou espèces)<br>
+              3. Préparer vos animations et votre matériel
+            </div>
+            <p style="font-size:12px;color:#6b7280;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:12px;">
+              Questions ? Contactez-nous à <a href="mailto:contact@aracom.pf" style="color:#E8500A;">contact@aracom.pf</a>.<br>
+              Cordialement,<br><b>L'équipe ARACOM</b>
+            </p>
+          </div>
+        </div>
+      `;
+
+      try {
+        await sendMail({ to: org.main_email, subject, html });
+      } catch (e) {
+        console.error('[send-confirmation]', e);
+        return err('Envoi mail échoué: ' + e.message, 500);
+      }
+
+      // Marque la registration
+      await db.collection('registrations').updateOne(
+        { id: regId },
+        { $set: {
+            confirmation_sent_at: new Date(),
+            confirmation_sent_by: ctx.userId || 'u-admin',
+            confirmation_sent_to: org.main_email,
+            updated_at: new Date(),
+          }
+        }
+      );
+
+      // Log
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'CONFIRMATION_EMAIL_SENT',
+        description: `Email de confirmation envoyé à ${org.main_email} pour stand ${reg.stand_code || regId}`,
+        metadata: { registration_id: regId, recipient: org.main_email, subject },
+        created_at: new Date(),
+      });
+
+      return json({ ok: true, recipient: org.main_email, sent_at: new Date().toISOString() });
+    }
+
     // ─── POST /api/registrations/:id/regenerate-token — Régénère le token magique
     if (route.match(/^registrations\/[^/]+\/regenerate-token$/)) {
       const regId = p[1];

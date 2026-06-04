@@ -57,6 +57,16 @@ export default function ExposantStatusBanner({
           <span className="font-bold text-emerald-900">Inscription confirmée</span>
           <span className="text-emerald-800"> · Votre dossier est définitif. Pour toute modification, contactez ARACOM.</span>
         </div>
+        {r.id && (
+          <a
+            href={`/exposant/annexe/${r.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shrink-0"
+          >
+            📄 Ma fiche officielle
+          </a>
+        )}
         <Badge className="bg-emerald-600 text-white text-[10px] shrink-0">🔒 VERROUILLÉ</Badge>
       </div>
     );
