@@ -1085,27 +1085,41 @@ function Step4Animation({ state, availability, draft, setDraft, onNext, onBack, 
   useEffect(() => { setAnims(initialAnims); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [attendingDays.join(',')]);
 
   // 🆕 Auto-sélection du 1er créneau libre quand l'utilisateur entre dans Step4
+  //   🆕 SESSION 48b — utilise la sous-grille appropriée selon location_type
   useEffect(() => {
     setAnims(prev => {
       let changed = false;
       const next = prev.map(a => {
         if (a.start_time && a.end_time) return a;
         const grid = animationGrid[a.day_label];
-        if (!grid || !Array.isArray(grid.slots)) return a;
-        const free = grid.slots.find(s => !s.occupied || s.registration_id === registrationId);
+        if (!grid) return a;
+        const kind = (a.location_type === 'zone_demo' || a.location_type === 'zone_animation' || a.location_type === 'scene') ? 'demo' : 'stand';
+        const slotsArr = kind === 'demo'
+          ? (Array.isArray(grid.slots_demo) ? grid.slots_demo : [])
+          : (Array.isArray(grid.slots_stand) ? grid.slots_stand : (Array.isArray(grid.slots) ? grid.slots : []));
+        if (slotsArr.length === 0) return a;
+        const free = slotsArr.find(s => !s.occupied || s.registration_id === registrationId);
         if (!free) return a;
         changed = true;
         return { ...a, start_time: free.start, end_time: free.end };
       });
       if (changed) setDraft(d => ({ ...d, animations: next }));
-      return changed ? next : prev;
+      return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [venueId, attendingDays.join(',')]);
+  }, [animationGrid, registrationId]);
 
   const updateAnim = (day, field, value) => {
     setAnims(prev => {
-      const next = prev.map(a => a.day_label === day ? { ...a, [field]: value } : a);
+      const next = prev.map(a => {
+        if (a.day_label !== day) return a;
+        // 🆕 SESSION 48b — changement de location_type : on reset start_time/end_time
+        //   pour que l'auto-sélection prenne un slot dans la bonne grille (30 min vs 45 min).
+        if (field === 'location_type' && a.location_type !== value) {
+          return { ...a, location_type: value, start_time: '', end_time: '' };
+        }
+        return { ...a, [field]: value };
+      });
       setDraft(d => ({ ...d, animations: next }));
       return next;
     });
@@ -1256,9 +1270,13 @@ function AnimationBlock({ anim, idx, config, grid, registrationId, update }) {
   const dayLabel = a.day_label === 'samedi' ? 'Samedi 15 août 2026' : 'Vendredi 14 août 2026';
   const typeInfo = (config.ANIMATION_TYPES || []).find(t => t.value === a.slot_type);
 
-  // 🆕 SESSION 44 — Grille DYNAMIQUE (durée = plage_totale ÷ N exposants attendus)
-  // 🆕 SESSION 47.13 — Slot cliquable même si occupé (pending/waitlist) → popup waitlist
-  const gridSlots = Array.isArray(grid?.slots) ? grid.slots : [];
+  // 🆕 SESSION 48b — Sélection de la sous-grille selon location_type :
+  //   • sur_stand → slots_stand (30 min)
+  //   • zone_demo / zone_animation / scene → slots_demo (45 min)
+  const locKind = (a.location_type === 'zone_demo' || a.location_type === 'zone_animation' || a.location_type === 'scene') ? 'demo' : 'stand';
+  const gridSlots = locKind === 'demo'
+    ? (Array.isArray(grid?.slots_demo) ? grid.slots_demo : [])
+    : (Array.isArray(grid?.slots_stand) ? grid.slots_stand : (Array.isArray(grid?.slots) ? grid.slots : []));
   const animSlots = gridSlots.map(slot => {
     const isOccupiedByOther = slot.occupied && slot.registration_id !== registrationId;
     const isSel = a.start_time === slot.start && a.end_time === slot.end;
@@ -1266,9 +1284,10 @@ function AnimationBlock({ anim, idx, config, grid, registrationId, update }) {
     const isLockedByAracom = isOccupiedByOther && slot.request_status === 'validated';
     return { ...slot, isOccupied: isOccupiedByOther, isSel, isLockedByAracom };
   });
-  const isFull = grid?.is_full === true;
+  const capacity = locKind === 'demo' ? (grid?.capacity_demo ?? gridSlots.length) : (grid?.capacity_stand ?? gridSlots.length);
+  const isFull = gridSlots.length > 0 && gridSlots.every(s => s.occupied);
   const waitlistCount = grid?.waitlist_count || 0;
-  const duration = grid?.duration_min || 30;
+  const duration = locKind === 'demo' ? (grid?.duration_demo_min || 45) : (grid?.duration_stand_min || 30);
 
   return (
     <div className="border-2 border-violet-200 rounded-lg p-4 bg-violet-50/30 space-y-4">

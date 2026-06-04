@@ -1159,23 +1159,35 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     { label: 'vendredi', date: '2026-08-14', display: 'Vendredi 14 août' },
     { label: 'samedi', date: '2026-08-15', display: 'Samedi 15 août' },
   ];
+  // 🆕 SESSION 48b — Créneaux NORMALISÉS par lieu d'animation :
+  //   • Sur stand (zone exposant) = 30 min  (auparavant 60 min)
+  //   • Zone démo                  = 45 min (auparavant 30 min)
+  // Plage : vendredi 11h–17h, samedi 9h–17h (pause déjeuner 12h–13h pour zone démo)
   const STAND_SLOTS_FRIDAY = [
-    { start: '11:00', end: '12:00' }, { start: '12:00', end: '13:00' },
-    { start: '13:00', end: '14:00' }, { start: '14:00', end: '15:00' },
-    { start: '15:00', end: '16:00' }, { start: '16:00', end: '17:00' },
-  ];
-  const STAND_SLOTS_SATURDAY = [
-    { start: '09:00', end: '10:00' }, { start: '10:00', end: '11:00' },
-    ...STAND_SLOTS_FRIDAY,
-  ];
-  const DEMO_SLOTS = [
-    { start: '09:00', end: '09:30' }, { start: '09:30', end: '10:00' },
-    { start: '10:00', end: '10:30' }, { start: '10:30', end: '11:00' },
     { start: '11:00', end: '11:30' }, { start: '11:30', end: '12:00' },
+    { start: '12:00', end: '12:30' }, { start: '12:30', end: '13:00' },
     { start: '13:00', end: '13:30' }, { start: '13:30', end: '14:00' },
     { start: '14:00', end: '14:30' }, { start: '14:30', end: '15:00' },
     { start: '15:00', end: '15:30' }, { start: '15:30', end: '16:00' },
     { start: '16:00', end: '16:30' }, { start: '16:30', end: '17:00' },
+  ];
+  const STAND_SLOTS_SATURDAY = [
+    { start: '09:00', end: '09:30' }, { start: '09:30', end: '10:00' },
+    { start: '10:00', end: '10:30' }, { start: '10:30', end: '11:00' },
+    ...STAND_SLOTS_FRIDAY,
+  ];
+  const DEMO_SLOTS = [
+    // Matin (avant pause déjeuner) — utilisable surtout le samedi
+    { start: '09:00', end: '09:45' },
+    { start: '09:45', end: '10:30' },
+    { start: '10:30', end: '11:15' },
+    { start: '11:15', end: '12:00' },
+    // Après-midi
+    { start: '13:00', end: '13:45' },
+    { start: '13:45', end: '14:30' },
+    { start: '14:30', end: '15:15' },
+    { start: '15:15', end: '16:00' },
+    { start: '16:00', end: '16:45' },
   ];
 
   const slotChoicesForCurrent = () => {
@@ -1253,7 +1265,7 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           event_date,
           start_time: slot.start,
           end_time: slot.end,
-          duration_minutes: form.location_type === 'zone_demo' ? 30 : 60,
+          duration_minutes: form.location_type === 'zone_demo' ? 45 : 30,
           title: form.title,
           description: form.description || null,
           material_needs: form.material_needs || null,
@@ -1330,7 +1342,7 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           event_date,
           start_time: slot.start,
           end_time: slot.end,
-          duration_minutes: editDraft.location_type === 'zone_demo' ? 30 : 60,
+          duration_minutes: editDraft.location_type === 'zone_demo' ? 45 : 30,
           title: editDraft.title,
           description: editDraft.description || null,
           material_needs: editDraft.material_needs || null,
@@ -1386,7 +1398,7 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
         📍 Site : <b>{venueName || '—'}</b>
         {attendingDays.length > 0 && <> · Jours prévus : <b>{attendingDays.includes('vendredi') ? 'Ven' : ''}{attendingDays.length === 2 ? ' + ' : ''}{attendingDays.includes('samedi') ? 'Sam' : ''}</b></>}
         <br />
-        🟦 <b>Sur stand</b> = 1h propre à votre stand · 🟧 <b>Zone démo</b> = 30 min partagé (1 seul exposant à la fois)
+        🟦 <b>Sur stand</b> = 30 min sur votre stand · 🟧 <b>Zone démo</b> = 45 min partagé (1 seul exposant à la fois)
         {isLocked && <div className="mt-1 text-amber-700 font-semibold">🔒 Inscription verrouillée — modifications restreintes</div>}
       </div>
 
@@ -1424,8 +1436,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                           onChange={(e) => setEditDraft((f) => ({ ...f, location_type: e.target.value, slot_index: 0 }))}
                           className="w-full h-7 text-[11px] rounded-md border border-input bg-white px-1.5"
                         >
-                          <option value="sur_stand">🟦 Sur stand (1h)</option>
-                          <option value="zone_demo">🟧 Zone démo (30 min)</option>
+                          <option value="sur_stand">🟦 Sur stand (30 min)</option>
+                          <option value="zone_demo">🟧 Zone démo (45 min)</option>
                         </select>
                       </div>
                       <div className="col-span-2">
@@ -1581,8 +1593,8 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                 onChange={(e) => setForm((f) => ({ ...f, location_type: e.target.value, slot_index: 0 }))}
                 className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
               >
-                <option value="sur_stand">🟦 Sur stand (1h)</option>
-                <option value="zone_demo">🟧 Zone démo (30 min)</option>
+                <option value="sur_stand">🟦 Sur stand (30 min)</option>
+                <option value="zone_demo">🟧 Zone démo (45 min)</option>
               </select>
             </div>
           </div>

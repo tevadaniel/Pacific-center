@@ -1087,13 +1087,34 @@ function ParcoursWizard({ registration, organization, venue, docs, slots, valida
         </Card>
       )}
       {isPending && !hasRdv && !isLocked && (
-        <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50">
-          <CardContent className="p-5 flex items-start gap-4">
-            <div className="text-4xl">⏳</div>
-            <div className="flex-1">
-              <div className="text-lg font-bold text-amber-900">Demande de validation en cours</div>
-              <p className="text-sm text-amber-800">Votre demande a été envoyée à ARACOM le {new Date(validationRequest.requested_at).toLocaleDateString('fr-FR')}. Nous vous fixerons un rendez-vous très prochainement.</p>
+        <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50 shadow-lg sticky top-[64px] z-30">
+          <CardContent className="p-4 flex items-start gap-3">
+            <div className="text-3xl shrink-0">⏳</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-amber-900 flex items-center gap-2 flex-wrap">
+                Demande soumise à ARACOM
+                <Badge className="bg-amber-200 text-amber-900 text-[10px]">EN ATTENTE</Badge>
+              </div>
+              <p className="text-sm text-amber-800 mt-1">
+                Envoyée le {new Date(validationRequest.requested_at).toLocaleDateString('fr-FR')}.
+                {' '}<b>Vous pouvez encore modifier vos choix</b> (stand, animations, profil) tant qu&apos;ARACOM n&apos;a pas confirmé.
+                {' '}Une fois validée, votre dossier sera <b>verrouillé</b>.
+              </p>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="bg-white hover:bg-amber-100 border-amber-300 text-amber-900 gap-1 shrink-0"
+              onClick={() => {
+                // Scroll vers Étape 1 pour modification
+                if (typeof window !== 'undefined') {
+                  const target = document.querySelector('[data-step="step1"]') || document.querySelector('h3, h4');
+                  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }}
+            >
+              ✏️ Modifier ma sélection
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -1170,7 +1191,7 @@ function Step1Card({ registration, venue, attendingDays, isLocked, done, onRefre
   };
 
   return (
-    <Card className={done ? 'border-emerald-300' : 'border-violet-300 ring-2 ring-violet-100'}>
+    <Card data-step="step1" className={done ? 'border-emerald-300' : 'border-violet-300 ring-2 ring-violet-100'}>
       <StepHeader n={1} title="Mes jours de présence + mon stand" done={done} locked={isLocked} />
       <CardContent className="space-y-3 pt-4">
         <p className="text-sm text-slate-600">Sélectionnez le ou les jours où votre association sera présente. Décochez un jour pour vous désinscrire (vos animations associées seront supprimées).</p>
@@ -2315,7 +2336,7 @@ function AnimationsBlock({ registrationId, venueId, venueName, slots = [], onRef
           day_label: editing.day,
           start_time: editing.start,
           end_time: editing.end,
-          duration_minutes: editing.location_type === 'zone_demo' ? 30 : 60,
+          duration_minutes: editing.location_type === 'zone_demo' ? 45 : 30,
           title: form.title,
           description: form.description,
           slot_type: editing.location_type,
