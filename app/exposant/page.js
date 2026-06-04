@@ -22,6 +22,7 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import StandViewToggle from '@/components/stand-view-toggle';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
+import ExposantStatusBanner from '@/components/exposant/exposant-status-banner';
 import { ChatbotFloating } from '@/components/chatbot-widget';
 import LiveAvailabilityFloater from '@/components/exposant/live-availability-floater';
 import SimulationModal from '@/components/aracom/simulation-modal';
@@ -470,17 +471,19 @@ export default function ExposantPortal() {
           }}
         />
 
-        {isPreReserved && (
-          <Card className="border-amber-300 bg-amber-50/40">
-            <CardContent className="p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-semibold text-amber-900">Votre stand est pré-réservé</div>
-                <p className="text-sm text-amber-800 mt-0.5">Le stand <b className="font-mono">{r.stand_code}</b> sur le site <b>{v?.name}</b> vous est réservé. <b>ARACOM le confirmera définitivement dès réception de votre caution de 20 000 XPF</b> (chèque, virement ou espèces).</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* 🆕 SESSION 48c — Bandeau de statut UNIFIÉ (1 seul affiché selon priorité) */}
+        <ExposantStatusBanner
+          registration={r}
+          venue={v}
+          validationRequest={validationRequest}
+          onEdit={() => {
+            handleTabChange('parcours');
+            setTimeout(() => {
+              const target = document.querySelector('[data-step="step1"]') || document.querySelector('h3, h4');
+              if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+          }}
+        />
 
         {/* CTA "Confirmer ma présence" — visible quand site + stand + au moins 1 anim */}
         {!isLocked && (() => {
@@ -497,18 +500,6 @@ export default function ExposantPortal() {
             />
           );
         })()}
-
-        {isLocked && (
-          <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="text-4xl">🔒</div>
-              <div className="flex-1">
-                <div className="text-lg font-bold text-emerald-900">Inscription verrouillée par ARACOM</div>
-                <p className="text-sm text-emerald-800">Votre site, votre stand et vos créneaux d&apos;animation sont définitifs. Pour toute modification, contactez ARACOM directement.</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* 🎯 BRIEFING EXPOSANT — Prochaine étape + résumé du restant + bouton d'action */}
         {!isLocked && <ExposantBriefing onAction={(tab, step) => {
@@ -540,20 +531,6 @@ export default function ExposantPortal() {
           }}
           context="portal"
         />
-
-        {/* 🆕 SESSION 47.15 — Bandeau permanent quand l'exposant est en liste d'attente */}
-        {r?.is_waitlist && (
-          <div className="my-3 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-400 rounded-lg p-4 flex items-start gap-3 shadow-sm">
-            <span className="text-2xl shrink-0">⏳</span>
-            <div className="flex-1 text-sm">
-              <div className="font-bold text-amber-900 text-base mb-1">Vous êtes en liste d&apos;attente</div>
-              <div className="text-amber-800 leading-snug">
-                Votre demande sur le site <b>{v?.name || data.allSites?.find(x => x.id === r?.id)?.venue?.name || 'sélectionné'}</b>{r?.stand_code ? ` (stand ${r.stand_code})` : ''} est placée en <b>liste d&apos;attente</b>. ARACOM vous recontactera pour confirmer votre demande ou vous proposer une alternative.
-              </div>
-              <div className="text-xs text-amber-700 italic mt-1">Vous pouvez continuer à compléter votre dossier (animations, documents) en attendant la validation.</div>
-            </div>
-          </div>
-        )}
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           {/* 🆕 SESSION 29 — Mon profil mis en valeur (orange) séparé visuellement des autres onglets */}
@@ -865,20 +842,28 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
     } catch (e) { toast.error(e.message); }
   };
 
+  const [showRules, setShowRules] = useState(false);
   return (
     <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2 text-blue-900">
           <Building2 className="w-5 h-5 text-blue-600" /> Mes sites de participation
           <Badge className="bg-blue-600 text-white">{allSites.length} / {maxSites}</Badge>
+          <button
+            type="button"
+            onClick={() => setShowRules(v => !v)}
+            className="ml-auto text-[11px] text-blue-700 hover:text-blue-900 underline font-medium"
+          >
+            {showRules ? 'Masquer les règles' : 'ℹ️ Règles d\'inscription'}
+          </button>
         </CardTitle>
-        <p className="text-xs text-blue-800 mt-1 leading-relaxed">
-          ℹ️ Vous pouvez vous inscrire sur <b>jusqu&apos;à {maxSites} site(s)</b>. Pour chaque site :
-          <br />• <b>1 stand maximum</b> par site (réservé via l&apos;Étape 1 du parcours)
-          <br />• <b>Au moins 1 animation par jour</b> (vendredi ET samedi) — Étape 2
-          <br />• <b>Caution de 20 000 XPF par site</b> (chèque, espèces ou virement)
-          <br />• Vous pouvez <b>modifier ou retirer un site</b> tant qu&apos;ARACOM n&apos;a pas reçu votre caution.
-        </p>
+        {showRules && (
+          <p className="text-xs text-blue-800 mt-1 leading-relaxed border-t border-blue-200 pt-2">
+            Vous pouvez vous inscrire sur <b>jusqu&apos;à {maxSites} site(s)</b>. Pour chaque site :
+            <br />• <b>1 stand maximum</b> · <b>1 animation par jour</b> · <b>Caution 20 000 XPF</b>
+            <br />• Modifications possibles tant qu&apos;ARACOM n&apos;a pas reçu votre caution.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-2">
         {allSites.map((s, idx) => {
@@ -1059,65 +1044,9 @@ function ParcoursWizard({ registration, organization, venue, docs, slots, valida
 
   return (
     <div className="space-y-4">
-      {/* Bandeau état global */}
-      {isLocked && (
-        <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="text-4xl">🔒</div>
-            <div className="flex-1">
-              <div className="text-lg font-bold text-emerald-900">Inscription verrouillée par ARACOM ✅</div>
-              <p className="text-sm text-emerald-800">Tout est en ordre ! Votre dossier est définitif. Pour toute modification, contactez ARACOM.</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {hasRdv && !isLocked && (
-        <Card className="border-blue-300 bg-gradient-to-br from-blue-50 to-sky-50">
-          <CardContent className="p-5 flex items-start gap-4">
-            <div className="text-4xl">📅</div>
-            <div className="flex-1">
-              <div className="text-lg font-bold text-blue-900">Rendez-vous fixé avec ARACOM</div>
-              <p className="text-sm text-blue-800">
-                {validationRequest.rdv_date && <><b>Date</b> : {new Date(validationRequest.rdv_date).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}<br /></>}
-                {validationRequest.rdv_location && <><b>Lieu</b> : {validationRequest.rdv_location}<br /></>}
-                Préparez les documents à apporter (convention signée, justificatif d&apos;assurance) et la <b>caution de 20 000 XPF</b>.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {isPending && !hasRdv && !isLocked && (
-        <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50 shadow-lg sticky top-[64px] z-30">
-          <CardContent className="p-4 flex items-start gap-3">
-            <div className="text-3xl shrink-0">⏳</div>
-            <div className="flex-1 min-w-0">
-              <div className="font-bold text-amber-900 flex items-center gap-2 flex-wrap">
-                Demande soumise à ARACOM
-                <Badge className="bg-amber-200 text-amber-900 text-[10px]">EN ATTENTE</Badge>
-              </div>
-              <p className="text-sm text-amber-800 mt-1">
-                Envoyée le {new Date(validationRequest.requested_at).toLocaleDateString('fr-FR')}.
-                {' '}<b>Vous pouvez encore modifier vos choix</b> (stand, animations, profil) tant qu&apos;ARACOM n&apos;a pas confirmé.
-                {' '}Une fois validée, votre dossier sera <b>verrouillé</b>.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white hover:bg-amber-100 border-amber-300 text-amber-900 gap-1 shrink-0"
-              onClick={() => {
-                // Scroll vers Étape 1 pour modification
-                if (typeof window !== 'undefined') {
-                  const target = document.querySelector('[data-step="step1"]') || document.querySelector('h3, h4');
-                  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-              }}
-            >
-              ✏️ Modifier ma sélection
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {/* 🆕 SESSION 48c — Les bandeaux de statut (locked, rdv, pending, waitlist, pré-réservé)
+          sont maintenant gérés UNIQUEMENT par <ExposantStatusBanner /> dans le parent.
+          On garde ici uniquement les composants spécifiques au parcours d'inscription. */}
 
       {/* ÉTAPE 1 — Dates + Stand */}
       <Step1Card
