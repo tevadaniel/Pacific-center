@@ -291,6 +291,20 @@ export default function ExposantPortal() {
           standAssignment={r.stand_assignment || (data.allSites || []).find(s => s.id === r.id)?.assignment || null}
           animations={slotsArr}
           cautionStatus={d?.status === 'recue' ? 'received' : d?.status === 'rendue' ? 'returned' : 'due'}
+          allSites={data.allSites || []}
+          availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false).map(vv => ({ id: vv.id, name: vv.name }))}
+          onSiteSwitch={(newRegId) => {
+            if (typeof window !== 'undefined') {
+              const u = new URL(window.location.href);
+              u.searchParams.set('reg', newRegId);
+              window.location.href = u.toString();
+            }
+          }}
+          onAddSite={() => {
+            // Scroll vers UrgencyBanner qui contient le sélecteur d'ajout de site
+            const target = document.querySelector('[data-testid="urgency-banner"], .urgency-banner');
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
           onJumpTo={(target) => {
             if (target === 'documents') {
               window.location.href = `/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`;
@@ -309,6 +323,7 @@ export default function ExposantPortal() {
           organization={o}
           registration={r}
           isLocked={isLocked}
+          activeVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false).map(vv => ({ id: vv.id, name: vv.name }))}
         />
 
         {/* 🔐 Bandeau gestion mot de passe — visible seulement à l'exposant (pas en mode aperçu admin) */}

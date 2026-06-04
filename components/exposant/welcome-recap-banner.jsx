@@ -17,12 +17,21 @@ import { CONVENTION_CONFIG } from '@/lib/convention-config';
  * - Auto-collapse si l'exposant est déjà verrouillé (workflow terminé)
  * - Compact, design system aracom (orange + slate)
  */
-export default function WelcomeRecapBanner({ organization, registration, isLocked }) {
+export default function WelcomeRecapBanner({ organization, registration, isLocked, activeVenues = [] }) {
   const [open, setOpen] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
   const orgName = organization?.name || '';
   const firstName = organization?.first_name || organization?.contact_name?.split(' ')[0] || '';
+
+  // 🆕 Liste dynamique de sites actifs (passée en prop, fallback CONVENTION_CONFIG)
+  const venuesList = Array.isArray(activeVenues) && activeVenues.length > 0
+    ? activeVenues
+    : [];
+  const venueCount = venuesList.length || 6;
+  const venueNames = venuesList.length > 0
+    ? venuesList.map(v => v.name).join(' · ')
+    : 'À définir';
 
   // Restaure la préférence et auto-ferme si déjà verrouillé
   useEffect(() => {
@@ -80,7 +89,7 @@ export default function WelcomeRecapBanner({ organization, registration, isLocke
           <p className="text-orange-100 text-sm mt-0.5 leading-snug">
             {orgName ? <><b className="text-white">{orgName}</b> participe au </> : 'Vous participez au '}
             <b className="text-white">Forum de la Rentrée 2026</b> · le rendez-vous incontournable
-            entre <b className="text-white">familles</b>, <b className="text-white">jeunes</b> et <b className="text-white">structures locales</b> sur 6 sites de Tahiti.
+            entre <b className="text-white">familles</b>, <b className="text-white">jeunes</b> et <b className="text-white">structures locales</b> sur {venueCount} centre{venueCount > 1 ? 's' : ''} <b className="text-white">Pacific Centers</b> à Tahiti.
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -117,7 +126,7 @@ export default function WelcomeRecapBanner({ organization, registration, isLocke
             ))}
             <li className="flex items-start gap-1.5 pt-1 mt-1 border-t border-orange-100">
               <MapPin className="w-3.5 h-3.5 text-aracom-orange shrink-0 mt-0.5" />
-              <span><b>6 sites</b> : Faaa · Punaauia · Arue · Mahina · Taravao · Centre danse</span>
+              <span><b>{venueCount} centre{venueCount > 1 ? 's' : ''} Pacific Centers</b>{venuesList.length > 0 ? ` : ${venueNames}` : ''}</span>
             </li>
             <li className="text-[11px] text-slate-500 italic mt-1">
               👨‍👩‍👧 Cible : familles, jeunes, associations sportives & culturelles, entreprises.
@@ -165,12 +174,16 @@ export default function WelcomeRecapBanner({ organization, registration, isLocke
         </div>
       </div>
 
-      {/* FOOTER : signature ARACOM */}
+      {/* FOOTER : organisateur + agence d'exécution */}
       <div className="px-4 py-2 bg-white/60 border-t border-orange-200 text-[11px] text-slate-600 flex items-center gap-2 flex-wrap">
         <Sparkles className="w-3.5 h-3.5 text-aracom-orange" />
-        <span>Organisé par <b>{CONVENTION_CONFIG.organizer.name}</b> ({CONVENTION_CONFIG.organizer.legal_name}) ·
-        Contact : <a href={`mailto:${CONVENTION_CONFIG.organizer.contact_email}`} className="text-aracom-orange underline">{CONVENTION_CONFIG.organizer.contact_email}</a> ·
-        Tél. {CONVENTION_CONFIG.organizer.contact_phone}</span>
+        <span>
+          Organisé par <b>{CONVENTION_CONFIG.organizer.name}</b>
+          {CONVENTION_CONFIG.agency?.name ? <> · Géré par <b>{CONVENTION_CONFIG.agency.name}</b></> : ''}
+          {CONVENTION_CONFIG.agency?.contact_email && (
+            <> · Contact : <a href={`mailto:${CONVENTION_CONFIG.agency.contact_email}`} className="text-aracom-orange underline">{CONVENTION_CONFIG.agency.contact_email}</a></>
+          )}
+        </span>
       </div>
     </div>
   );

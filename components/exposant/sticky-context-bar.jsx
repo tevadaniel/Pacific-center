@@ -29,11 +29,18 @@ export default function StickyContextBar({
   animations = [],
   cautionStatus = 'due',
   onJumpTo,
+  // 🆕 SESSION 48h — Données enrichies pour dropdowns site/stand/animation
+  allSites = [],          // [{id, venue, venue_name, stand_code, ...}]
+  availableVenues = [],   // [{id, name}] sites actifs disponibles
+  onSiteSwitch,           // (registrationId) => void
+  onAddSite,              // () => void
 }) {
   const [scrolled, setScrolled] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [manualCollapsed, setManualCollapsed] = useState(false);
+  // 🆕 État dropdown ouvert (1 à la fois) : 'site' | 'stand' | 'animations' | null
+  const [openDropdown, setOpenDropdown] = useState(null);
 
   // Détection scroll : sur mobile, repli auto au scroll-down, dépli au scroll-up
   useEffect(() => {
@@ -191,6 +198,7 @@ export default function StickyContextBar({
 
         {/* DÉTAILS ÉTAT (visible quand non-collapsed) */}
         {!collapsed && (
+          <>
           <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-1.5 md:gap-2 text-[11px]">
             <Chip
               icon={<MapPin className="w-3 h-3" />}
@@ -198,7 +206,9 @@ export default function StickyContextBar({
               value={venue?.name || '—'}
               ok={state.hasSite}
               missing={!state.hasSite}
-              onClick={() => onJumpTo && onJumpTo('parcours')}
+              isDropdown
+              isOpen={openDropdown === 'site'}
+              onClick={() => setOpenDropdown(openDropdown === 'site' ? null : 'site')}
             />
             <Chip
               icon="🎪"
@@ -207,7 +217,9 @@ export default function StickyContextBar({
               ok={state.hasStand && !state.isWaitlist}
               warning={state.isWaitlist}
               missing={!state.hasStand && !state.isWaitlist}
-              onClick={() => onJumpTo && onJumpTo('parcours')}
+              isDropdown
+              isOpen={openDropdown === 'stand'}
+              onClick={() => setOpenDropdown(openDropdown === 'stand' ? null : 'stand')}
             />
             <Chip
               icon="🎭"
@@ -215,7 +227,9 @@ export default function StickyContextBar({
               value={`${state.animsCount}/${state.minAnimsRequired}`}
               ok={state.animsOK}
               missing={state.hasStand && !state.animsOK}
-              onClick={() => onJumpTo && onJumpTo('parcours')}
+              isDropdown
+              isOpen={openDropdown === 'animations'}
+              onClick={() => setOpenDropdown(openDropdown === 'animations' ? null : 'animations')}
             />
             <Chip
               icon="💰"
@@ -223,7 +237,7 @@ export default function StickyContextBar({
               value={state.cautionReturned ? '🔄 Rendue' : state.cautionReceived ? '✅ Reçue' : '⏳ À recevoir'}
               ok={state.cautionReceived || state.cautionReturned}
               warning={!state.cautionReceived && !state.cautionReturned}
-              onClick={() => onJumpTo && onJumpTo('documents')}
+              onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('documents'); }}
             />
             <Chip
               icon="⏰"
@@ -232,9 +246,127 @@ export default function StickyContextBar({
               ok={!deadlineLeft.passed && !deadlineLeft.urgent && !deadlineLeft.warning}
               warning={deadlineLeft.warning}
               danger={deadlineLeft.urgent || deadlineLeft.passed}
-              onClick={() => onJumpTo && onJumpTo('documents')}
+              onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('documents'); }}
             />
           </div>
+
+          {/* 🆕 SESSION 48h — Dropdown panel (1 à la fois) — détails site/stand/animations */}
+          {openDropdown && (
+            <div className="mt-2 rounded-lg bg-white text-slate-800 shadow-xl border border-aracom-orange/30 overflow-hidden animate-in fade-in slide-in-from-top-1">
+              {openDropdown === 'site' && (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5" /> Mes sites
+                    </div>
+                    <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
+                  </div>
+                  {allSites.length === 0 ? (
+                    <div className="text-xs text-slate-500 italic px-1 py-2">Aucun site sélectionné</div>
+                  ) : (
+                    <ul className="space-y-1 mb-2">
+                      {allSites.map(s => {
+                        const isCurrent = s.id === registration?.id;
+                        return (
+                          <li key={s.id}>
+                            <button
+                              onClick={() => { setOpenDropdown(null); if (!isCurrent && onSiteSwitch) onSiteSwitch(s.id); }}
+                              disabled={isCurrent}
+                              className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-xs text-left transition ${isCurrent ? 'bg-aracom-orange/10 border border-aracom-orange/40 cursor-default' : 'hover:bg-slate-100 border border-transparent'}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-slate-900 truncate">{s.venue?.name || s.venue_name || 'Site'}</div>
+                                <div className="text-[10px] text-slate-500">
+                                  {s.stand_code ? `Stand ${s.stand_code}` : 'Pas de stand'}
+                                  {s.is_user_priority ? ' · ⭐ Priorité' : ''}
+                                </div>
+                              </div>
+                              {isCurrent && <span className="text-[10px] text-aracom-orange font-bold shrink-0">✓ Actif</span>}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  <div className="flex gap-1.5 pt-2 border-t border-slate-100">
+                    <button
+                      onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                      className="flex-1 px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700"
+                    >
+                      Modifier mes choix
+                    </button>
+                    {onAddSite && availableVenues.length > allSites.length && (
+                      <button
+                        onClick={() => { setOpenDropdown(null); onAddSite(); }}
+                        className="px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
+                      >
+                        ➕ Ajouter un site
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {openDropdown === 'stand' && (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
+                      🎪 Mon stand
+                    </div>
+                    <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
+                  </div>
+                  {registration?.stand_code ? (
+                    <div className="text-xs text-slate-700 mb-2 space-y-1">
+                      <div><b className="font-mono text-aracom-orange">{registration.stand_code}</b> {venue?.name ? `· ${venue.name}` : ''}</div>
+                      {standAssignment?.surface_m2 && <div className="text-[11px] text-slate-500">Surface : ~{standAssignment.surface_m2} m²</div>}
+                      {state.isWaitlist && <div className="text-[11px] text-amber-700">⏳ En liste d&apos;attente</div>}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 italic mb-2 px-1">Pas de stand sélectionné</div>
+                  )}
+                  <button
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    className="w-full px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
+                  >
+                    {registration?.stand_code ? 'Changer de stand' : 'Choisir un stand'}
+                  </button>
+                </div>
+              )}
+              {openDropdown === 'animations' && (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
+                      🎭 Mes animations ({state.animsCount}/{state.minAnimsRequired})
+                    </div>
+                    <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
+                  </div>
+                  {animations.length === 0 ? (
+                    <div className="text-xs text-slate-500 italic mb-2 px-1">Aucune animation enregistrée</div>
+                  ) : (
+                    <ul className="space-y-1 mb-2 max-h-56 overflow-y-auto">
+                      {animations.map(a => (
+                        <li key={a.id} className="px-2 py-1.5 rounded bg-slate-50 border border-slate-200 text-xs">
+                          <div className="font-semibold text-slate-800">
+                            {a.day_label === 'samedi' ? '📅 Samedi' : '📅 Vendredi'} · {a.start_time}–{a.end_time}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {a.location_type === 'zone_demo' ? '🟧 Zone démo (45 min)' : '🟦 Sur stand (30 min)'}
+                            {a.title ? ` · ${a.title}` : ''}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    className="w-full px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
+                  >
+                    Ajouter / Modifier une animation
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          </>
         )}
 
         {/* DESC NEXT ACTION (subtle, sous le bouton) */}
@@ -248,21 +380,25 @@ export default function StickyContextBar({
   );
 }
 
-function Chip({ icon, label, value, ok, warning, missing, danger, onClick }) {
+function Chip({ icon, label, value, ok, warning, missing, danger, onClick, isDropdown = false, isOpen = false }) {
   const bg = danger ? 'bg-rose-500/25 border-rose-400/50 text-rose-100'
     : missing ? 'bg-rose-500/15 border-rose-400/40 text-rose-200'
     : warning ? 'bg-amber-500/20 border-amber-400/50 text-amber-100'
     : ok ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-100'
     : 'bg-white/5 border-white/15 text-white/80';
+  const openRing = isOpen ? 'ring-2 ring-white/60' : '';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2 py-1 rounded border ${bg} hover:brightness-125 transition text-left min-w-0`}
+      className={`flex items-center gap-1.5 px-2 py-1 rounded border ${bg} ${openRing} hover:brightness-125 transition text-left min-w-0`}
     >
       <span className="text-[12px] shrink-0">{typeof icon === 'string' ? icon : icon}</span>
       <div className="min-w-0 flex-1">
-        <div className="text-[9px] uppercase tracking-wider opacity-80">{label}</div>
+        <div className="text-[9px] uppercase tracking-wider opacity-80 flex items-center gap-0.5">
+          <span>{label}</span>
+          {isDropdown && <span className={`text-[8px] opacity-70 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>}
+        </div>
         <div className="font-bold text-[11px] truncate">{value}</div>
       </div>
     </button>
