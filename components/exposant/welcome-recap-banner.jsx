@@ -128,9 +128,6 @@ export default function WelcomeRecapBanner({ organization, registration, isLocke
               <MapPin className="w-3.5 h-3.5 text-aracom-orange shrink-0 mt-0.5" />
               <span><b>{venueCount} centre{venueCount > 1 ? 's' : ''} Pacific Centers</b>{venuesList.length > 0 ? ` : ${venueNames}` : ''}</span>
             </li>
-            <li className="text-[11px] text-slate-500 italic mt-1">
-              👨‍👩‍👧 Cible : familles, jeunes, associations sportives & culturelles, entreprises.
-            </li>
           </ul>
         </div>
 

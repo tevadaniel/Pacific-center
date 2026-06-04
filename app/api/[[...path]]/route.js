@@ -7491,6 +7491,25 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return json({ ok: true, referent });
     }
 
+    // 🆕 SESSION 48i — Toggle activation de la vue PLAN (vs grille uniquement) côté Exposants (admin only)
+    //   Si désactivé, l'exposant ne voit plus le bouton "Plan" et est forcé en mode Grille.
+    //   Stocké sur le venue : map_view_enabled (default true).
+    if (route.match(/^venues\/[^/]+\/set-map-view-enabled$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const id = p[1];
+      const enabled = Boolean(body?.enabled);
+      await db.collection('venues').updateOne({ id }, { $set: { map_view_enabled: enabled, updated_at: new Date() } });
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'VENUE_TOGGLE_MAP_VIEW',
+        description: `Vue Plan ${enabled ? 'activée' : 'désactivée'} pour le site ${id}`,
+        metadata: { venue_id: id, map_view_enabled: enabled },
+        created_at: new Date(),
+      });
+      return json({ ok: true, map_view_enabled: enabled });
+    }
+
     // 🆕 SESSION 44 — Configuration de la PLAGE HORAIRE d'animation par site et par jour (admin only)
     // Body: { vendredi?: { start, end }, samedi?: { start, end } }
     if (route.match(/^venues\/[^/]+\/animation-windows$/)) {

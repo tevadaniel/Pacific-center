@@ -292,7 +292,26 @@ export default function ExposantPortal() {
           animations={slotsArr}
           cautionStatus={d?.status === 'recue' ? 'received' : d?.status === 'rendue' ? 'returned' : 'due'}
           allSites={data.allSites || []}
-          availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false).map(vv => ({ id: vv.id, name: vv.name }))}
+          availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false && vv.exposant_visible !== false).map(vv => ({ id: vv.id, name: vv.name }))}
+          venuesAvailability={(allVenues || []).reduce((acc, vv) => {
+            const total = vv.capacity_stands || 0;
+            const used = vv.assigned_stands || 0;
+            const free = Math.max(0, total - used);
+            acc[vv.id] = { available_stands: free, total_stands: total, capacity_full: total > 0 && free === 0 };
+            return acc;
+          }, {})}
+          onUpdateAttendingDays={async (newDays) => {
+            try {
+              await api(`/api/registrations/${r.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ attending_days: newDays }),
+              });
+              toast.success('Jours mis à jour');
+              load();
+            } catch (e) {
+              toast.error(e.message || 'Échec de la mise à jour');
+            }
+          }}
           onSiteSwitch={(newRegId) => {
             if (typeof window !== 'undefined') {
               const u = new URL(window.location.href);
@@ -300,8 +319,8 @@ export default function ExposantPortal() {
               window.location.href = u.toString();
             }
           }}
-          onAddSite={() => {
-            // Scroll vers UrgencyBanner qui contient le sélecteur d'ajout de site
+          onAddSite={(venueId) => {
+            // Scroll vers UrgencyBanner ou ajoute directement
             const target = document.querySelector('[data-testid="urgency-banner"], .urgency-banner');
             if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }}

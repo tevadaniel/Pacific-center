@@ -30,20 +30,29 @@ export default function StandViewToggle({
   storageKey = 'fr26_stand_view_mode',
   serverSyncRole = null,
 }) {
-  const [mode, setMode] = useState(defaultMode);
+  // 🆕 SESSION 48i — Si le venue a désactivé la vue plan, on force le mode "grid"
+  //   et on masque le toggle. ARACOM admin garde toujours les 2 vues (editable=true).
+  const mapDisabledForViewer = venue?.map_view_enabled === false && !editable;
+  const effectiveDefault = mapDisabledForViewer ? 'grid' : defaultMode;
+  const [mode, setMode] = useState(effectiveDefault);
   const [hydrated, setHydrated] = useState(false);
   const [serverSynced, setServerSynced] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (mapDisabledForViewer) {
+      setMode('grid');
+      setHydrated(true);
+      return;
+    }
     const saved = localStorage.getItem(storageKey);
     if (saved === 'map' || saved === 'grid') setMode(saved);
     setHydrated(true);
-  }, [storageKey]);
+  }, [storageKey, mapDisabledForViewer]);
 
   // 🆕 Sync serveur : récupère le mode imposé/proposé
   useEffect(() => {
-    if (!serverSyncRole) return;
+    if (!serverSyncRole || mapDisabledForViewer) return;
     let cancelled = false;
     (async () => {
       try {
@@ -53,7 +62,6 @@ export default function StandViewToggle({
         if (cancelled) return;
         if (data?.mode === 'map' || data?.mode === 'grid') {
           setMode(data.mode);
-          // Met à jour le localStorage local aussi pour cohérence visuelle après reload
           if (typeof window !== 'undefined') {
             try { localStorage.setItem(storageKey, data.mode); } catch {}
           }
@@ -62,9 +70,10 @@ export default function StandViewToggle({
       setServerSynced(true);
     })();
     return () => { cancelled = true; };
-  }, [serverSyncRole, storageKey]);
+  }, [serverSyncRole, storageKey, mapDisabledForViewer]);
 
   const setModePersist = (m) => {
+    if (mapDisabledForViewer && m === 'map') return; // empêche bascule si désactivé côté exposant
     setMode(m);
     if (typeof window !== 'undefined') localStorage.setItem(storageKey, m);
     // 🆕 Si admin : pousse aussi au serveur pour les exposants
@@ -89,7 +98,8 @@ export default function StandViewToggle({
 
   return (
     <div className="space-y-2">
-      {/* Toggle bar */}
+      {/* Toggle bar — masqué si l'admin a désactivé la vue plan pour ce site */}
+      {!mapDisabledForViewer && (
       <div className="flex items-center justify-end gap-1 pr-1">
         <div className="inline-flex rounded-lg border border-aracom-gold/40 bg-white p-0.5 shadow-sm">
           <button
@@ -116,6 +126,7 @@ export default function StandViewToggle({
           </button>
         </div>
       </div>
+      )}
 
       {/* Body */}
       {mode === 'map' ? (

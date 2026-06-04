@@ -30,10 +30,14 @@ export default function StickyContextBar({
   cautionStatus = 'due',
   onJumpTo,
   // 🆕 SESSION 48h — Données enrichies pour dropdowns site/stand/animation
-  allSites = [],          // [{id, venue, venue_name, stand_code, ...}]
-  availableVenues = [],   // [{id, name}] sites actifs disponibles
-  onSiteSwitch,           // (registrationId) => void
-  onAddSite,              // () => void
+  allSites = [],
+  availableVenues = [],
+  onSiteSwitch,
+  onAddSite,
+  // 🆕 SESSION 48j — Sélection date directement depuis le bandeau
+  onUpdateAttendingDays,
+  // venuesData : map venue.id => { available_stands, total_stands, capacity_full }
+  venuesAvailability = {},
 }) {
   const [scrolled, setScrolled] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -257,16 +261,52 @@ export default function StickyContextBar({
                 <div className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5" /> Mes sites
+                      <MapPin className="w-3.5 h-3.5" /> Mes sites & dates
                     </div>
                     <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
                   </div>
+
+                  {/* 🆕 SESSION 48j — Sélecteur de date pour le site en cours */}
+                  {venue && onUpdateAttendingDays && (
+                    <div className="mb-3 px-2 py-2 rounded bg-orange-50 border border-orange-200">
+                      <div className="text-[10px] uppercase tracking-wide font-bold text-aracom-orange mb-1">Mes jours sur ce site</div>
+                      <div className="flex gap-2 flex-wrap">
+                        {[
+                          { key: 'vendredi', label: '📅 Vendredi 14/08' },
+                          { key: 'samedi', label: '📅 Samedi 15/08' },
+                        ].map(d => {
+                          const checked = (registration?.attending_days || []).includes(d.key);
+                          return (
+                            <label key={d.key} className="flex items-center gap-1.5 cursor-pointer text-xs select-none">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const cur = registration?.attending_days || [];
+                                  const next = e.target.checked
+                                    ? [...new Set([...cur, d.key])]
+                                    : cur.filter(x => x !== d.key);
+                                  onUpdateAttendingDays(next);
+                                }}
+                                className="w-3.5 h-3.5 accent-aracom-orange"
+                              />
+                              <span className={checked ? 'font-semibold text-slate-900' : 'text-slate-600'}>{d.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {allSites.length === 0 ? (
                     <div className="text-xs text-slate-500 italic px-1 py-2">Aucun site sélectionné</div>
                   ) : (
                     <ul className="space-y-1 mb-2">
                       {allSites.map(s => {
                         const isCurrent = s.id === registration?.id;
+                        const vid = s.venue_id || s.venue?.id;
+                        const avail = venuesAvailability[vid] || {};
+                        const isWaitlistOnly = avail.capacity_full === true;
                         return (
                           <li key={s.id}>
                             <button
@@ -282,28 +322,56 @@ export default function StickyContextBar({
                                 </div>
                               </div>
                               {isCurrent && <span className="text-[10px] text-aracom-orange font-bold shrink-0">✓ Actif</span>}
+                              {!isCurrent && isWaitlistOnly && (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded shrink-0 font-semibold">⏳ Waitlist</span>
+                              )}
                             </button>
                           </li>
                         );
                       })}
                     </ul>
                   )}
-                  <div className="flex gap-1.5 pt-2 border-t border-slate-100">
-                    <button
-                      onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
-                      className="flex-1 px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700"
-                    >
-                      Modifier mes choix
-                    </button>
-                    {onAddSite && availableVenues.length > allSites.length && (
-                      <button
-                        onClick={() => { setOpenDropdown(null); onAddSite(); }}
-                        className="px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
-                      >
-                        ➕ Ajouter un site
-                      </button>
-                    )}
-                  </div>
+
+                  {/* 🆕 SESSION 48j — Sélecteur de nouveau site avec dispo */}
+                  {availableVenues.length > allSites.length && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <div className="text-[10px] uppercase tracking-wide font-bold text-slate-600 mb-1">Ajouter un site</div>
+                      <ul className="space-y-1 max-h-40 overflow-y-auto">
+                        {availableVenues
+                          .filter(av => !allSites.some(s => (s.venue_id || s.venue?.id) === av.id))
+                          .map(av => {
+                            const avail = venuesAvailability[av.id] || {};
+                            const isFull = avail.capacity_full === true;
+                            return (
+                              <li key={av.id}>
+                                <button
+                                  onClick={() => { setOpenDropdown(null); onAddSite && onAddSite(av.id); }}
+                                  className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-xs text-left transition border ${isFull ? 'bg-amber-50 hover:bg-amber-100 border-amber-200' : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200'}`}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-slate-900 truncate">{av.name}</div>
+                                    <div className="text-[10px] text-slate-600">
+                                      {typeof avail.available_stands === 'number' ? (
+                                        isFull ? '⏳ Complet — vous serez en liste d\'attente' : `✅ ${avail.available_stands} stand${avail.available_stands > 1 ? 's' : ''} libre${avail.available_stands > 1 ? 's' : ''}`
+                                      ) : 'Disponibilité inconnue'}
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] font-bold text-aracom-orange shrink-0">➕</span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                      </ul>
+                      <p className="text-[10px] text-amber-700 mt-1 italic">⚠️ Si un site est complet, vous serez ajouté en liste d&apos;attente. ARACOM vous tient au courant.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    className="w-full mt-2 px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700"
+                  >
+                    Modifier mes choix en détail
+                  </button>
                 </div>
               )}
               {openDropdown === 'stand' && (

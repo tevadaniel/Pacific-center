@@ -1263,7 +1263,7 @@ function ExposantLimitsConfig() {
   );
 }
 
-function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvailability, onTogglePacific, onToggleExposantVisible, onSaveReferent }) {
+function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvailability, onTogglePacific, onToggleExposantVisible, onToggleMapView, onSaveReferent }) {
   const [open, setOpen] = useState(false);
   const initial = venue.referent_aracom || {};
   const [name, setName] = useState(initial.name || '');
@@ -1319,6 +1319,18 @@ function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvail
           onCheckedChange={onToggleExposantVisible}
           className="data-[state=checked]:bg-blue-500 scale-75"
           title={!active ? 'Activez d\'abord le site globalement' : 'Visibilité pour le portail Exposants'}
+        />
+      </div>
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-emerald-100/50">
+        <span className={`flex items-center gap-1 ${!active ? 'text-slate-400' : 'text-slate-600'}`} title="Si activé, les exposants peuvent voir le plan interactif du site (sinon vue Grille uniquement)">
+          {venue.map_view_enabled !== false ? '🗺️' : '⊞'} Vue Plan
+        </span>
+        <Switch
+          checked={venue.map_view_enabled !== false}
+          disabled={!active}
+          onCheckedChange={onToggleMapView}
+          className="data-[state=checked]:bg-aracom-orange scale-75"
+          title="Active la vue Plan (carte interactive) pour les exposants. Sinon ils voient uniquement la vue Grille."
         />
       </div>
       <div className="pt-1.5 mt-1.5 border-t border-emerald-100/50">
@@ -1541,6 +1553,16 @@ function SitesView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  // 🆕 SESSION 48i — Toggle vue plan pour les exposants (par site)
+  const toggleMapView = async (v) => {
+    const newVal = !(v.map_view_enabled !== false);
+    try {
+      await api(`/api/venues/${v.id}/set-map-view-enabled`, { method: 'POST', body: JSON.stringify({ enabled: newVal }) });
+      toast.success(`Vue Plan ${newVal ? '🗺️ activée' : '⊞ désactivée (grille uniquement)'} pour ${v.name}`);
+      api('/api/venues').then(setVenues);
+    } catch (e) { toast.error(e.message); }
+  };
+
   const saveReferent = async (v, ref) => {
     try {
       await api(`/api/venues/${v.id}/set-referent`, { method: 'POST', body: JSON.stringify(ref) });
@@ -1580,6 +1602,7 @@ function SitesView() {
                   onToggleAvailability={() => toggleAvailability(v)}
                   onTogglePacific={() => togglePacificVisible(v)}
                   onToggleExposantVisible={() => toggleExposantVisible(v)}
+                  onToggleMapView={() => toggleMapView(v)}
                   onSaveReferent={(ref) => saveReferent(v, ref)}
                 />
               );
