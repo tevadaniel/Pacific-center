@@ -2921,8 +2921,7 @@ agent_communication:
     message: "SESSION 48 TESTING COMPLETE. Tested Quick Action Bar (sticky bar with 6 counters, navigation, hide/show, localStorage persistence) and Hotkeys V/R in file validation (arrow navigation, V validate, R refuse, Esc clear focus, input field detection). RESULTS: 22/25 tests passed (88% success rate). All critical features working perfectly: (1) Quick Action Bar - all 6 counters visible and clickable, navigation to correct tabs works, hide/show functionality with localStorage persistence works. (2) Hotkeys - arrow keys navigate rows with proper focus styling (bg-indigo-50 ring-indigo-400), V opens validation (with animation check), R opens refuse dialog, Esc clears focus, hotkeys correctly disabled in input fields. (3) Regression checks - dashboard loads, buttons present, no console errors. Minor issues: (1) 'MODE ACTION RAPIDE' text selector didn't match (but counters found), (2) V hotkey didn't show toast (item may be already validated), (3) Visual restore after clicking mini pill had timing issue (localStorage works). All minor issues are non-blocking and likely test-data or timing related. Feature is production-ready. Main agent should summarize and finish."
 
 test_plan:
-  current_focus:
-    - "QUICK ACTION BAR ARACOM + Hotkeys V/R (Session 48)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -2930,8 +2929,28 @@ test_plan:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 48
-  run_ui: true
+  test_sequence: 49
+  run_ui: false
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 48i — TOGGLE VUE PLAN PAR SITE (ADMIN) + DROPDOWN SITE EXPOSANT
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 48i — POST /api/venues/:id/set-map-view-enabled (toggle Vue Plan par site)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Nouvel endpoint admin pour activer/désactiver la vue Plan (carte interactive) côté exposants par site. Body: { enabled: boolean }. Stocke venues.map_view_enabled (bool). Log activity_logs avec action VENUE_TOGGLE_MAP_VIEW. Réservé aracom_admin (403 sinon). Lignes 7494-7511 dans route.js. À tester : (1) POST sans auth admin → 403, (2) POST avec enabled:false → 200 et venues.map_view_enabled=false, (3) GET /api/venues vérifier que map_view_enabled est exposé dans la réponse, (4) Re-toggle avec enabled:true → 200 et restore."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 9/9 TESTS PASSÉS (100%). SESSION 48i endpoint POST /api/venues/:id/set-map-view-enabled 100% fonctionnel. TEST 1 (Permission check): POST /api/venues/venue-faaa/set-map-view-enabled sans rôle admin (x-user-role=exposant) → 403 'Réservé aux admins' ✅. TEST 2 (Disable map view): POST avec body {enabled: false} et admin headers → 200 {ok: true, map_view_enabled: false} ✅. GET /api/venues confirme venue-faaa.map_view_enabled = false ✅. TEST 3 (Re-enable map view): POST avec body {enabled: true} et admin headers → 200 {ok: true, map_view_enabled: true} ✅. GET /api/venues confirme venue-faaa.map_view_enabled = true ✅. TEST 4 (Activity log): Vérification MongoDB confirme 2 entrées activity_logs avec action='VENUE_TOGGLE_MAP_VIEW', metadata contient venue_id='venue-faaa' + map_view_enabled (false puis true), description en français ('Vue Plan désactivée/activée pour le site venue-faaa') ✅. TEST 5 (Default state preserved): venue-pun.map_view_enabled reste None (non affecté par toggle venue-faaa) ✅. NON-REGRESSION (P1): GET /api/venues avec admin headers → 200 avec 6 venues ✅. GET /api/dashboard/kpis → 200 avec total=67 ✅. GET /api/auth/me sans auth → 401 ✅, avec admin headers → 200 avec user.id ✅. POST /api/auth/password-login (admin@aracom.pf / Projetaracom12) → 200 avec role=aracom_admin ✅. CONCLUSION: Endpoint 100% opérationnel selon spécifications. Permissions (403), toggle bidirectionnel (false/true), persistance DB, activity logs, isolation par venue, tous fonctionnent parfaitement. Aucune régression détectée. Feature production-ready."
 
   - task: "SESSION 48 — Validation handlers refactoring (validation-queue.js + validation-post.js)"
     implemented: true
@@ -2948,3 +2967,5 @@ metadata:
 agent_communication:
   - agent: "testing"
     message: "SESSION 48 regression test completed. Validation handlers refactoring (validation-queue.js + validation-post.js) verified with 11/13 tests passed (85%). ✅ ALL CRITICAL PATHS TESTED: GET validation-queue with filters ✅, GET validation-deadline ✅, POST set-deadline with validations ✅, Permission checks (403) ✅, Error handling (404, 400, 422) ✅, Bulk validation logic ✅. ✅ ZERO REGRESSIONS: All 7 sanity check endpoints passed (dashboard/kpis, menu-badges, registrations, auth/me, password-login, unlock-candidature, convention PDF). ⚠️ LIMITATION: P0-3 and P0-4 full happy path tests could not be executed because seed data doesn't populate request_status/attending_days fields (validation queue empty). However, animation guard logic (422 for missing animations, force_validate bypass) and refuse logic (email templates, waitlist promotion) were verified through code review and error handling tests. 🎯 RECOMMENDATION: Main agent should summarize and finish. Refactoring is production-ready with zero regressions detected."
+  - agent: "testing"
+    message: "SESSION 48i TESTING COMPLETE - 9/9 TESTS PASSED (100%). Tested new backend endpoint POST /api/venues/:id/set-map-view-enabled (toggle Vue Plan per venue). ✅ ALL TEST SCENARIOS PASSED: (1) Permission check: POST without admin role → 403 'Réservé aux admins' ✅. (2) Disable map view: POST with {enabled: false} as admin → 200 {ok: true, map_view_enabled: false}, GET /api/venues confirms venue-faaa.map_view_enabled = false ✅. (3) Re-enable map view: POST with {enabled: true} as admin → 200 {ok: true, map_view_enabled: true}, GET /api/venues confirms venue-faaa.map_view_enabled = true ✅. (4) Activity log: MongoDB verification confirms 2 entries with action='VENUE_TOGGLE_MAP_VIEW', metadata contains venue_id + map_view_enabled, descriptions in French ✅. (5) Default state preserved: venue-pun not affected by venue-faaa toggle ✅. ✅ NON-REGRESSION CHECKS (P1): GET /api/venues → 200 with 6 venues ✅, GET /api/dashboard/kpis → 200 ✅, GET /api/auth/me → 401/200 as appropriate ✅, POST /api/auth/password-login → 200 with role=aracom_admin ✅. 🎯 CONCLUSION: SESSION 48i endpoint is 100% functional and production-ready. All permissions, toggle logic, persistence, activity logging, and isolation work perfectly. Zero regressions detected. Main agent should summarize and finish."
