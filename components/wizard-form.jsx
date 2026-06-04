@@ -967,6 +967,7 @@ function Step3Stand({ state, availability, draft, setDraft, onNext, onBack, relo
               stands={stands}
               highlightStandCode={b.stand_code}
               onStandClick={onStandClick}
+              serverSyncRole="reader"
             />
           </div>
         )}

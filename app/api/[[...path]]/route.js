@@ -826,6 +826,14 @@ export async function GET(request, { params }) {
       return json({ ok: true, count: items.length, items: items.map(i => ({ ...i, _id: undefined })) });
     }
 
+    // 🆕 SESSION 48g — GET /api/settings/stand-view-mode
+    //   Mode de visualisation des stands imposé/proposé par ARACOM aux exposants.
+    //   Public : tout le monde peut lire.
+    if (route === 'settings/stand-view-mode') {
+      const setting = await db.collection('app_settings').findOne({ key: 'stand_view_mode' });
+      return json({ mode: setting?.value || 'map', updated_at: setting?.updated_at || null, updated_by: setting?.updated_by || null });
+    }
+
     // 🆕 PHASE F — GET /api/convention/config — règles Convention (caution, dates, obligations)
     //   Public — lu par les pages exposant pour affichage cohérent.
     if (route === 'convention/config') {
@@ -3151,6 +3159,29 @@ export async function POST(request, { params }) {
     // ═══════════════════════════════════════════════════════════════════
     const cautionReceiptsResp = await handleCautionReceiptsPost({ db, request, route, p, body, deps: { buildRefundAttestationHTML } });
     if (cautionReceiptsResp) return cautionReceiptsResp;
+
+    // 🆕 SESSION 48g — PUT/POST /api/settings/stand-view-mode
+    //   ARACOM impose un mode de visualisation des stands à tous les exposants.
+    //   Body : { mode: 'map' | 'grid' }. Réservé admins.
+    if (route === 'settings/stand-view-mode') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const mode = body?.mode;
+      if (mode !== 'map' && mode !== 'grid') return err('mode invalide (map|grid)');
+      await db.collection('app_settings').updateOne(
+        { key: 'stand_view_mode' },
+        { $set: { key: 'stand_view_mode', value: mode, updated_at: new Date(), updated_by: ctx.userId || 'u-admin' } },
+        { upsert: true }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'SETTING_STAND_VIEW_MODE',
+        description: `Mode visualisation stands : "${mode}" (visible par tous les exposants)`,
+        metadata: { mode },
+        created_at: new Date(),
+      });
+      return json({ ok: true, mode });
+    }
 
     // 🆕 SESSION 48b — POST /api/client-error-log
     //   Reçoit les erreurs JavaScript côté navigateur capturées par les error boundaries

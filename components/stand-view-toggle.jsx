@@ -9,6 +9,12 @@ import { Map, Grid3x3 } from 'lucide-react';
  * - Vue "Grille" : grille de boutons numérotés
  * - Persistance localStorage (clé fr26_stand_view_mode = 'map' | 'grid')
  * - Props identiques à SmartVenueMap pour drop-in replacement
+ *
+ * 🆕 SESSION 48g — Synchronisation serveur :
+ *   - serverSyncRole='admin'  : récupère le mode depuis le serveur ET y écrit à chaque toggle
+ *   - serverSyncRole='reader' : récupère le mode depuis le serveur (override localStorage) sans y écrire
+ *   - serverSyncRole=null     : comportement local uniquement (défaut)
+ *   L'admin peut ainsi imposer un mode de visualisation à tous les exposants.
  */
 export default function StandViewToggle({
   venue,
@@ -22,9 +28,11 @@ export default function StandViewToggle({
   compact = false,
   defaultMode = 'map',
   storageKey = 'fr26_stand_view_mode',
+  serverSyncRole = null,
 }) {
   const [mode, setMode] = useState(defaultMode);
   const [hydrated, setHydrated] = useState(false);
+  const [serverSynced, setServerSynced] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -33,9 +41,41 @@ export default function StandViewToggle({
     setHydrated(true);
   }, [storageKey]);
 
+  // 🆕 Sync serveur : récupère le mode imposé/proposé
+  useEffect(() => {
+    if (!serverSyncRole) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/settings/stand-view-mode', { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.mode === 'map' || data?.mode === 'grid') {
+          setMode(data.mode);
+          // Met à jour le localStorage local aussi pour cohérence visuelle après reload
+          if (typeof window !== 'undefined') {
+            try { localStorage.setItem(storageKey, data.mode); } catch {}
+          }
+        }
+      } catch {}
+      setServerSynced(true);
+    })();
+    return () => { cancelled = true; };
+  }, [serverSyncRole, storageKey]);
+
   const setModePersist = (m) => {
     setMode(m);
     if (typeof window !== 'undefined') localStorage.setItem(storageKey, m);
+    // 🆕 Si admin : pousse aussi au serveur pour les exposants
+    if (serverSyncRole === 'admin') {
+      fetch('/api/settings/stand-view-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ mode: m }),
+      }).catch(() => {});
+    }
   };
 
   // Don't render until hydrated to avoid hydration mismatch

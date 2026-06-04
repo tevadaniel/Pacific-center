@@ -1607,6 +1607,7 @@ function SitesView() {
           onStandsReload={reload}
           editable={true}
           storageKey="aracom_stand_view_mode"
+          serverSyncRole="admin"
         />
       )}
 
