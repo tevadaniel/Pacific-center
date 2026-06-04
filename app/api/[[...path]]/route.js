@@ -812,6 +812,20 @@ export async function GET(request, { params }) {
     const validationQueueResp = await handleValidationQueueGet({ db, request, url, route });
     if (validationQueueResp) return validationQueueResp;
 
+    // 🆕 SESSION 48b — GET /api/admin/client-error-logs
+    //   Retourne les 100 dernières erreurs JS clients capturées par les error boundaries.
+    //   Utile pour diagnostiquer rapidement les bugs prod des exposants.
+    if (route === 'admin/client-error-logs') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+      const items = await db.collection('client_error_logs')
+        .find({})
+        .sort({ received_at: -1 })
+        .limit(limit)
+        .toArray();
+      return json({ ok: true, count: items.length, items: items.map(i => ({ ...i, _id: undefined })) });
+    }
+
     // 🆕 PHASE F — GET /api/convention/config — règles Convention (caution, dates, obligations)
     //   Public — lu par les pages exposant pour affichage cohérent.
     if (route === 'convention/config') {
@@ -3133,10 +3147,38 @@ export async function POST(request, { params }) {
     if (cautionApptResp) return cautionApptResp;
 
     // ═══════════════════════════════════════════════════════════════════
-    // 🏦 Handler caution-receipts (virement + attestation remboursement)
+    // 📦 Handler caution-receipts (virement + attestation remboursement)
     // ═══════════════════════════════════════════════════════════════════
     const cautionReceiptsResp = await handleCautionReceiptsPost({ db, request, route, p, body, deps: { buildRefundAttestationHTML } });
     if (cautionReceiptsResp) return cautionReceiptsResp;
+
+    // 🆕 SESSION 48b — POST /api/client-error-log
+    //   Reçoit les erreurs JavaScript côté navigateur capturées par les error boundaries
+    //   (/app/app/global-error.js, /app/app/exposant/error.js, /app/app/aracom/error.js).
+    //   Stockées dans `client_error_logs` pour diagnostic ARACOM. Public (pas d'auth).
+    if (route === 'client-error-log') {
+      try {
+        const payload = body || {};
+        await db.collection('client_error_logs').insertOne({
+          id: uuid(),
+          scope: typeof payload.scope === 'string' ? payload.scope.slice(0, 50) : 'global',
+          message: typeof payload.message === 'string' ? payload.message.slice(0, 2000) : '',
+          stack: typeof payload.stack === 'string' ? payload.stack.slice(0, 8000) : '',
+          digest: typeof payload.digest === 'string' ? payload.digest.slice(0, 200) : null,
+          url: typeof payload.url === 'string' ? payload.url.slice(0, 1000) : '',
+          user_agent: typeof payload.user_agent === 'string' ? payload.user_agent.slice(0, 500) : '',
+          user_id: ctx.userId || null,
+          user_role: ctx.role || null,
+          received_at: new Date(),
+          client_at: typeof payload.at === 'string' ? payload.at : null,
+        });
+        // Best-effort, on log aussi en console serveur pour diag temps réel
+        console.error('[client-error-log]', payload.scope || 'global', '·', payload.message);
+      } catch (e) {
+        console.error('[client-error-log] insert failed:', e?.message);
+      }
+      return json({ ok: true });
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // ✅ SESSION 48 — Handler validation POST (validate/refuse/bulk/deadline)
