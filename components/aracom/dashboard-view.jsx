@@ -27,6 +27,23 @@ function DashboardView({ onGoto }) {
   const [analytics, setAnalytics] = useState(null);
   const [loyalty, setLoyalty] = useState(null);
   const [loading, setLoading] = useState(true);
+  // 🆕 SESSION 48j — Mode compact par défaut, persistance localStorage
+  //    Évite de surcharger l'écran principal. Toutes les statistiques avancées
+  //    restent accessibles via le toggle "Afficher les statistiques détaillées".
+  const [showDetails, setShowDetails] = useState(false);
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('aracom_dashboard_show_details');
+      if (v === '1') setShowDetails(true);
+    } catch {/* ignore */}
+  }, []);
+  const toggleDetails = () => {
+    setShowDetails(prev => {
+      const next = !prev;
+      try { window.localStorage.setItem('aracom_dashboard_show_details', next ? '1' : '0'); } catch {/* ignore */}
+      return next;
+    });
+  };
   const { open: openExposant } = useExposantPanel();
   const load = async () => {
     setLoading(true);
@@ -51,8 +68,11 @@ function DashboardView({ onGoto }) {
   const totalConfirmed = sites.reduce((s, v) => s + v.confirmed, 0);
   const globalFill = totalStands ? Math.round((totalAssigned / totalStands) * 100) : 0;
 
+  // 🆕 SESSION 48j — Filtre des smart_alerts en mode compact : seules les critiques
+  const visibleAlerts = (extended?.smart_alerts || []).filter(a => showDetails ? true : a.severity === 'critical');
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Hero countdown */}
       {extended && (
         <Card className="bg-gradient-to-r from-blue-600 to-emerald-600 text-white border-0">
@@ -77,10 +97,10 @@ function DashboardView({ onGoto }) {
         </Card>
       )}
 
-      {/* Smart alerts */}
-      {extended?.smart_alerts?.length > 0 && (
+      {/* Smart alerts (en mode compact : critiques uniquement) */}
+      {visibleAlerts.length > 0 && (
         <div className="space-y-2">
-          {extended.smart_alerts.map((a, i) => (
+          {visibleAlerts.map((a, i) => (
             <div key={i} className={`rounded-md border-l-4 px-4 py-3 flex items-center gap-3 ${
               a.severity === 'critical' ? 'border-rose-500 bg-rose-50' : 'border-amber-500 bg-amber-50'
             }`}>
@@ -103,6 +123,57 @@ function DashboardView({ onGoto }) {
         <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
       </div>
 
+      {/* 🆕 SESSION 48j — Avancement par site (toujours visible, condensé) */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+            <MapPin className="w-4 h-4 text-blue-600" /> Avancement par site
+            <Badge variant="secondary" className="text-[10px] ml-1">{globalFill}% global</Badge>
+          </h3>
+          <Button variant="ghost" size="sm" onClick={load} className="h-7 text-[11px]"><RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualiser</Button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+          {sites.map(s => (
+            <Card key={s.venue_id} className="hover:shadow-md transition">
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h4 className="font-semibold text-slate-900 text-xs truncate">{s.venue_name}</h4>
+                  <Badge variant="secondary" className={`text-[10px] ${s.remplissage >= 80 ? 'bg-emerald-600 text-white' : ''}`}>{s.remplissage}%</Badge>
+                </div>
+                <Progress value={(s.assigned / s.capacity_stands) * 100} className="h-1.5 mb-1.5" />
+                <div className="text-[10px] text-slate-600 space-y-0.5">
+                  <div className="flex justify-between"><span>Attribués</span><b className="text-slate-900">{s.assigned}/{s.capacity_stands}</b></div>
+                  <div className="flex justify-between"><span>Confirmés</span><b className="text-emerald-700">{s.confirmed}</b></div>
+                  {s.to_follow_up > 0 && <div className="flex justify-between"><span>À relancer</span><b className="text-orange-700">{s.to_follow_up}</b></div>}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* 🆕 SESSION 48j — Toggle pour afficher les statistiques détaillées */}
+      <div className="flex justify-center pt-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleDetails}
+          className="gap-2 text-xs border-dashed"
+          data-testid="dashboard-toggle-details"
+        >
+          {showDetails ? (
+            <><ChevronUp className="w-4 h-4" /> Masquer les statistiques détaillées</>
+          ) : (
+            <><ChevronDown className="w-4 h-4" /> Afficher les statistiques détaillées (graphiques, fidélité, mailing…)</>
+          )}
+        </Button>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────────
+          🔽 SECTION DÉTAILLÉE — visible uniquement si showDetails === true
+      ───────────────────────────────────────────────────────────────────── */}
+      {showDetails && (
+        <div className="space-y-6 pt-2 border-t border-dashed border-slate-200">
       {/* 🆕 SESSION 45 — Remplissage stand par jour + animations par site (overview + onglets) */}
       <SiteAnimationsOverview />
 
@@ -297,9 +368,10 @@ function DashboardView({ onGoto }) {
         </CardContent>
       </Card>
 
+      {/* 🆕 SESSION 48j — Avancement par site (version DÉTAILLÉE avec cartes plus grandes — visible uniquement en mode détaillé) */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-slate-900">Avancement par site</h3>
+          <h3 className="font-semibold text-slate-900">Avancement par site — détails</h3>
           <Button variant="ghost" size="sm" onClick={load}><RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualiser</Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -471,6 +543,8 @@ function DashboardView({ onGoto }) {
           <AracomTools onRefresh={load} />
         </CardContent>
       </Card>
+        </div>
+      )}
     </div>
   );
 }

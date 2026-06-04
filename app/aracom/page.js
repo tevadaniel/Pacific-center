@@ -282,10 +282,11 @@ export default function AracomPage() {
 
 // 📊 BRIEFING DYNAMIQUE — synthèse en 3 colonnes (Fait / Reste à faire / Vigilance)
 // Affiché en sous-titre du Cockpit ARACOM. Données calculées en temps réel côté backend.
+// 🆕 SESSION 48j — Replié par défaut pour ne pas surcharger l'écran.
 function AracomBriefing() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true); // 🆕 replié par défaut
 
   const load = async () => {
     setLoading(true);
