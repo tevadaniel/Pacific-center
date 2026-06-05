@@ -36,6 +36,7 @@ import StatusLegend from '@/components/status-legend';
 import BulkExportDialog from '@/components/bulk-export-dialog';
 import AdminOverridePanel from '@/components/aracom/admin-override-panel';
 import IntegrityAuditButton from '@/components/aracom/integrity-audit-button';
+import AdminToolsMenu from '@/components/aracom/admin-tools-menu';
 import ChoixForumSummary from '@/components/aracom/choix-forum-summary';
 import SendExposantMailDialog from '@/components/aracom/send-exposant-mail-dialog';
 import EditExposantChoicesDialog from '@/components/aracom/edit-exposant-choices-dialog';
@@ -235,17 +236,14 @@ export default function AracomPage() {
               🛡️ TEST MAIL
             </button>
           )}
-          <PortalSwitcher />
-          <PushToggle />
-          <AlertsBadge onGoto={setTab} />
-          <IntegrityAuditButton />
-          <button
-            onClick={() => setSimulationOpen(true)}
-            title="Simulation E2E — Test des fonctions réelles avec exposants fictifs"
-            className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold px-2.5 py-1.5 shadow-sm transition-colors"
-          >
-            🧪 Simulation
-          </button>
+          {/* 🆕 SESSION 48k — Menu déroulant unique regroupant Portails, Notifications, Alertes, Audit, Simulation */}
+          <AdminToolsMenu
+            portalSwitcher={<PortalSwitcher />}
+            pushToggle={<PushToggle />}
+            alertsBadge={<AlertsBadge onGoto={setTab} />}
+            integrityAuditButton={<IntegrityAuditButton />}
+            onSimulation={() => setSimulationOpen(true)}
+          />
           <Link href="/jour-j"><Button className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 gap-2"><Smartphone className="w-4 h-4" /> Mode Jour J</Button></Link>
         </div>
       }

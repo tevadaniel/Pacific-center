@@ -130,7 +130,14 @@ function DashboardView({ onGoto }) {
             <MapPin className="w-4 h-4 text-blue-600" /> Avancement par site
             <Badge variant="secondary" className="text-[10px] ml-1">{globalFill}% global</Badge>
           </h3>
-          <Button variant="ghost" size="sm" onClick={load} className="h-7 text-[11px]"><RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualiser</Button>
+          <button
+            onClick={load}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
+            title="Actualiser les chiffres"
+            aria-label="Actualiser"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
           {sites.map(s => (
