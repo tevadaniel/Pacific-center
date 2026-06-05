@@ -72,29 +72,36 @@ function DashboardView({ onGoto }) {
   const visibleAlerts = (extended?.smart_alerts || []).filter(a => showDetails ? true : a.severity === 'critical');
 
   return (
-    <div className="space-y-4">
-      {/* Hero countdown */}
+    <div className="space-y-3">
+      {/* 🆕 SESSION 48l — Hero compact horizontal (gain de hauteur ~70%) */}
       {extended && (
-        <Card className="bg-gradient-to-r from-blue-600 to-emerald-600 text-white border-0">
-          <CardContent className="p-5 flex flex-col md:flex-row items-center gap-4">
-            <div className="text-center md:text-left flex-1">
-              <div className="text-xs uppercase tracking-wider opacity-90">Forum de la Rentrée 2026</div>
-              <div className="text-2xl font-bold">14 & 15 août 2026 · 6 sites</div>
-            </div>
-            <div className="text-center">
-              <div className="text-5xl font-extrabold">{extended.days_to_event}</div>
-              <div className="text-xs uppercase tracking-wider opacity-90">jours restants</div>
-            </div>
-            <div className="text-center border-l border-white/20 pl-4">
-              <div className="text-3xl font-bold">{extended.avg_completion}%</div>
-              <div className="text-xs uppercase tracking-wider opacity-90">complétion moy.</div>
-            </div>
-            <div className="text-center border-l border-white/20 pl-4">
-              <div className="text-3xl font-bold">{extended.fully_complete_count}</div>
-              <div className="text-xs uppercase tracking-wider opacity-90">dossiers prêts</div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-md bg-gradient-to-r from-blue-600 via-blue-500 to-emerald-600 text-white px-4 py-2 flex items-center gap-4 flex-wrap shadow-sm">
+          <div className="flex items-center gap-2 text-xs font-bold tracking-wide">
+            <span className="text-base">📅</span>
+            <span className="opacity-90 uppercase">Forum 2026</span>
+            <span className="opacity-75 hidden sm:inline">· 14-15 août · 6 sites</span>
+          </div>
+          <span className="text-white/30 hidden sm:inline">|</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-extrabold leading-none">J−{extended.days_to_event}</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-80">jours</span>
+          </div>
+          <span className="text-white/30 hidden sm:inline">|</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-bold leading-none">{extended.avg_completion}%</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-80">complétion</span>
+          </div>
+          <span className="text-white/30 hidden sm:inline">|</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-bold leading-none">{extended.fully_complete_count}</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-80">dossiers prêts</span>
+          </div>
+          <span className="text-white/30 hidden sm:inline">|</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-bold leading-none">{globalFill}%</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-80">remplissage</span>
+          </div>
+        </div>
       )}
 
       {/* Smart alerts (en mode compact : critiques uniquement) */}
@@ -111,16 +118,19 @@ function DashboardView({ onGoto }) {
         </div>
       )}
 
-      {/* Validation requests pending */}
+      {/* Validation requests pending — auto-masqué si 0 */}
       <PendingValidationsCard onGoto={onGoto} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <KpiCard label="Exposants" value={kpis.total} hint={`${kpis.by_status?.confirme || 0} confirmés`} accent="blue" icon={Users} />
-        <KpiCard label="À relancer" value={kpis.by_status?.a_relancer || 0} accent="orange" icon={Clock} />
-        <KpiCard label="À confirmer" value={kpis.by_status?.a_confirmer || 0} accent="orange" icon={Activity} />
-        <KpiCard label="Prospects" value={kpis.by_status?.prospect || 0} accent="slate" icon={Sparkles} />
-        <KpiCard label="Cautions reçues" value={kpis.cautions_recues} hint={`${(kpis.xpf_encaisses || 0).toLocaleString('fr-FR')} XPF`} accent="emerald" icon={Wallet} />
-        <KpiCard label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
+      {/* 🆕 SESSION 48l — Bandeau KPIs FUSIONNÉ (6 stats en 1 seule carte horizontale) */}
+      <div className="rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="grid grid-cols-3 md:grid-cols-6 divide-x divide-slate-200">
+          <KpiInline label="Exposants" value={kpis.total} hint={`${kpis.by_status?.confirme || 0} confirmés`} accent="blue" icon={Users} />
+          <KpiInline label="À relancer" value={kpis.by_status?.a_relancer || 0} accent="orange" icon={Clock} />
+          <KpiInline label="À confirmer" value={kpis.by_status?.a_confirmer || 0} accent="orange" icon={Activity} />
+          <KpiInline label="Prospects" value={kpis.by_status?.prospect || 0} accent="slate" icon={Sparkles} />
+          <KpiInline label="Cautions" value={kpis.cautions_recues} hint={`${(kpis.xpf_encaisses || 0).toLocaleString('fr-FR')} XPF`} accent="emerald" icon={Wallet} />
+          <KpiInline label="Conventions" value={kpis.conv_signed} hint="signées" accent="emerald" icon={FileCheck2} />
+        </div>
       </div>
 
       {/* 🆕 SESSION 48j — Avancement par site (toujours visible, condensé) */}
@@ -618,8 +628,30 @@ function Stat({ label, value, c }) {
   return <div><div className={`text-xl font-bold ${c}`}>{value}</div><div className="text-[11px] text-slate-500 uppercase tracking-wider">{label}</div></div>;
 }
 
+// 🆕 SESSION 48l — KPI inline ultra-compact (utilisé dans le bandeau fusionné).
+function KpiInline({ label, value, hint, accent = 'slate', icon: Icon }) {
+  const accentMap = {
+    blue: 'text-blue-600',
+    orange: 'text-orange-600',
+    emerald: 'text-emerald-600',
+    slate: 'text-slate-700',
+    violet: 'text-violet-600',
+  };
+  return (
+    <div className="px-3 py-2 flex items-center gap-2.5 hover:bg-slate-50 transition">
+      {Icon && <Icon className={`w-4 h-4 shrink-0 ${accentMap[accent]} opacity-70`} />}
+      <div className="min-w-0">
+        <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold truncate">{label}</div>
+        <div className={`text-lg font-bold leading-tight ${accentMap[accent]}`}>{value}</div>
+        {hint && <div className="text-[9px] text-slate-400 truncate">{hint}</div>}
+      </div>
+    </div>
+  );
+}
+
 // =====================================================================
 // PendingValidationsCard — affichée dans le dashboard pour relayer les demandes en attente
+// 🆕 SESSION 48l — Version ultra-condensée (alerte 1 ligne au lieu d'une carte verbeuse)
 // =====================================================================
 function PendingValidationsCard({ onGoto }) {
   const [items, setItems] = useState(null);
@@ -635,31 +667,31 @@ function PendingValidationsCard({ onGoto }) {
   const enAttente = items.filter(r => r.status === 'en_attente');
   const rdvFixe = items.filter(r => r.status === 'rdv_fixe');
   return (
-    <Card className="border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-blue-50">
-      <CardContent className="p-4">
-        <div className="flex items-start gap-3 mb-3">
-          <div className="text-3xl">🔔</div>
-          <div className="flex-1">
-            <h3 className="font-bold text-violet-900 text-lg">Demandes de validation à traiter</h3>
-            <p className="text-sm text-violet-800">{enAttente.length} en attente · {rdvFixe.length} avec RDV fixé. Action requise pour verrouiller les inscriptions.</p>
-          </div>
-          <Button size="sm" onClick={() => onGoto?.('validations')} className="bg-violet-600 hover:bg-violet-700 gap-1.5"><Lock className="w-4 h-4" /> Ouvrir l&apos;onglet Validations</Button>
+    <button
+      onClick={() => onGoto?.('validations')}
+      className="w-full rounded-md border border-violet-300 bg-violet-50 hover:bg-violet-100 transition flex items-center gap-3 px-3 py-2 text-left group"
+      data-testid="pending-validations-alert"
+    >
+      <span className="text-xl shrink-0">🔔</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-violet-900 flex items-center gap-2 flex-wrap">
+          <span>{items.length} demande{items.length > 1 ? 's' : ''} de validation</span>
+          {enAttente.length > 0 && (
+            <span className="text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5">⏳ {enAttente.length}</span>
+          )}
+          {rdvFixe.length > 0 && (
+            <span className="text-[10px] font-bold bg-blue-500 text-white rounded-full px-1.5 py-0.5">📅 {rdvFixe.length}</span>
+          )}
         </div>
-        <div className="grid md:grid-cols-2 gap-2">
-          {items.slice(0, 4).map(r => (
-            <div key={r.id} className="bg-white rounded-md border border-violet-200 p-2 flex items-center gap-2">
-              <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" /><ExposantLink id={r.registration_id || r.id}>{r.organization?.name || '—'}</ExposantLink></div>
-                <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
-                {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
-              </div>
-            </div>
-          ))}
-          {items.length > 4 && <div className="text-xs text-slate-500 text-center md:col-span-2">+ {items.length - 4} autre(s) demande(s)…</div>}
+        <div className="text-[11px] text-violet-700 truncate">
+          {items.slice(0, 2).map(r => r.organization?.name).filter(Boolean).join(', ')}
+          {items.length > 2 ? ` · +${items.length - 2}` : ''}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-700 group-hover:text-violet-900 shrink-0">
+        Ouvrir <ChevronRight className="w-3.5 h-3.5" />
+      </span>
+    </button>
   );
 }
 

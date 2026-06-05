@@ -218,7 +218,7 @@ export default function AracomPage() {
     )}>
       <Shell
       title="Cockpit ARACOM"
-      subtitle={<AracomBriefing />}
+      subtitle={null}
       allowedRoles={['aracom_admin']}
       activeTab={activeTab}
       tabs={enrichedTabs}

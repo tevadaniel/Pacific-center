@@ -18,7 +18,8 @@ import { CONVENTION_CONFIG } from '@/lib/convention-config';
  * - Compact, design system aracom (orange + slate)
  */
 export default function WelcomeRecapBanner({ organization, registration, isLocked, activeVenues = [] }) {
-  const [open, setOpen] = useState(true);
+  // 🆕 SESSION 48l — Replié par défaut pour ne pas surcharger le portail exposant
+  const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   const orgName = organization?.name || '';
@@ -40,9 +41,10 @@ export default function WelcomeRecapBanner({ organization, registration, isLocke
       if (isLocked) {
         setOpen(false);
       } else if (stored !== null) {
+        // 🆕 SESSION 48l — Respecte le choix utilisateur ; par défaut fermé (déjà géré par useState)
         setOpen(stored === '1');
       }
-    } catch {}
+    } catch { /* ignore */ }
     setLoaded(true);
   }, [isLocked]);
 
