@@ -376,26 +376,29 @@ export default function ExposantsListView() {
 
   return (
     <div className="space-y-3">
-      {/* ═══════════════ MÉTRIQUES CLIQUABLES 2×2 ═══════════════ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {[
-          { key: 'contacte', label: 'À confirmer', n: metrics.contacte, cls: 'bg-amber-50 border-amber-300 text-amber-900', activeCls: 'ring-2 ring-amber-500' },
-          { key: 'confirme', label: 'Confirmés', n: metrics.confirme, cls: 'bg-emerald-50 border-emerald-300 text-emerald-900', activeCls: 'ring-2 ring-emerald-500' },
-          { key: '', label: 'Total', n: metrics.total, cls: 'bg-slate-50 border-slate-300 text-slate-900', activeCls: 'ring-2 ring-slate-500' },
-          { key: 'annule', label: 'Annulés', n: metrics.annule, cls: 'bg-red-50 border-red-300 text-red-900', activeCls: 'ring-2 ring-red-500' },
-        ].map((m) => {
-          const active = filterStatus === m.key;
-          return (
-            <button
-              key={m.label}
-              onClick={() => setFilterStatus(m.key)}
-              className={`rounded-xl border-2 px-3 py-2.5 text-left transition hover:scale-[1.02] ${m.cls} ${active ? m.activeCls : ''}`}
-            >
-              <div className="text-[10px] uppercase tracking-wider opacity-80">{m.label}</div>
-              <div className="text-2xl font-bold">{m.n}</div>
-            </button>
-          );
-        })}
+      {/* ═══════════════ 🆕 SESSION 48l — MÉTRIQUES FUSIONNÉES (1 seul bandeau au lieu de 4 cards) ═══════════════ */}
+      <div className="rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="grid grid-cols-4 divide-x divide-slate-200">
+          {[
+            { key: 'contacte', label: 'À confirmer', n: metrics.contacte, accent: 'text-amber-600', activeBg: 'bg-amber-50' },
+            { key: 'confirme', label: 'Confirmés', n: metrics.confirme, accent: 'text-emerald-600', activeBg: 'bg-emerald-50' },
+            { key: '', label: 'Total', n: metrics.total, accent: 'text-slate-900', activeBg: 'bg-slate-100' },
+            { key: 'annule', label: 'Annulés', n: metrics.annule, accent: 'text-rose-600', activeBg: 'bg-rose-50' },
+          ].map((m) => {
+            const active = filterStatus === m.key;
+            return (
+              <button
+                key={m.label}
+                onClick={() => setFilterStatus(m.key)}
+                className={`px-3 py-2 text-left transition hover:bg-slate-50 ${active ? m.activeBg : ''}`}
+                data-testid={`exposant-metric-${m.key || 'total'}`}
+              >
+                <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">{m.label}</div>
+                <div className={`text-lg font-bold leading-tight ${m.accent}`}>{m.n}</div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ═══════════════ RECHERCHE + FILTRES ═══════════════ */}

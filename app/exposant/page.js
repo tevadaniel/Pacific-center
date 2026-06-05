@@ -354,20 +354,21 @@ export default function ExposantPortal() {
           />
         )}
 
-        {/* 📄 Bandeau "Mes documents officiels" — exhaustif (auto-générés + reçu) */}
+        {/* 📄 Bandeau "Mes documents officiels" — repliable par défaut (SESSION 48l) */}
         {r?.id && (
-          <Card className="border-aracom-gold/40 bg-gradient-to-br from-aracom-beige-pale to-white">
-            <CardContent className="p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-md bg-aracom-black flex items-center justify-center">
-                  <FileText className="w-6 h-6 text-aracom-gold" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-serif text-lg text-aracom-black">Mes documents officiels</div>
-                  <div className="text-xs text-slate-600">PDFs générés automatiquement avec vos données. Téléchargez, signez et déposez ci-dessous l&apos;assurance et la convention signée.</div>
-                </div>
+          <details className="rounded-md border border-aracom-gold/40 bg-gradient-to-br from-aracom-beige-pale to-white group">
+            <summary className="cursor-pointer list-none p-3 flex items-center gap-3 hover:bg-aracom-beige-pale/50 rounded-md">
+              <div className="w-9 h-9 rounded-md bg-aracom-black flex items-center justify-center shrink-0">
+                <FileText className="w-4 h-4 text-aracom-gold" />
               </div>
-
+              <div className="flex-1 min-w-0">
+                <div className="font-serif text-sm text-aracom-black">📄 Mes documents officiels</div>
+                <div className="text-[11px] text-slate-600 truncate">Annexe · Guide · Convention · Reçu de caution — cliquer pour déployer</div>
+              </div>
+              <span className="text-xs text-slate-500 group-open:hidden">▼ Déployer</span>
+              <span className="text-xs text-slate-500 hidden group-open:inline">▲ Replier</span>
+            </summary>
+            <div className="p-4 pt-0 space-y-3">
               {/* Ligne 1 — PDFs auto-générés (toujours dispo) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <a
@@ -478,27 +479,31 @@ export default function ExposantPortal() {
                   className="ml-1 text-aracom-orange underline-offset-4 hover:underline font-medium"
                 >Documents</button>.
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </details>
         )}
-        <Card className="bg-gradient-to-br from-blue-50 to-emerald-50 border-blue-100">
-          <CardContent className="p-6 flex flex-col md:flex-row md:items-center gap-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-2"><Building2 className="w-5 h-5 text-blue-600" /><h2 className="text-2xl font-bold">{o?.name}</h2></div>
-              <p className="text-slate-600 mt-1">{o?.discipline}</p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                {v?.name && <Badge variant="secondary"><MapPin className="w-3 h-3 mr-1" /> {v.name}</Badge>}
-                {r.stand_code && <Badge variant="secondary" className="font-mono">Stand {r.stand_code}</Badge>}
-                {isPreReserved && <Badge className="bg-amber-100 text-amber-700 border-amber-200">⏳ Pré-réservé — en attente caution</Badge>}
-              </div>
+        {/* 🆕 SESSION 48l — Carte synthèse organisation FUSIONNÉE avec progress bar (au lieu de gros encadré) */}
+        <div className="rounded-md border border-blue-100 bg-gradient-to-r from-blue-50 to-emerald-50 px-4 py-2.5 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-slate-900 truncate">{o?.name}</h2>
+              <div className="text-[11px] text-slate-600 truncate">{o?.discipline}</div>
             </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-blue-700">{completion}%</div>
-              <div className="text-xs text-slate-500 uppercase tracking-wider">Dossier complet</div>
-              <Progress value={completion} className="h-2 w-32 mt-2" />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {v?.name && <Badge variant="secondary" className="text-[10px]"><MapPin className="w-3 h-3 mr-0.5" /> {v.name}</Badge>}
+            {r.stand_code && <Badge variant="secondary" className="text-[10px] font-mono">Stand {r.stand_code}</Badge>}
+            {isPreReserved && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px]">⏳ Pré-réservé</Badge>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="text-right">
+              <div className="text-xl font-bold text-blue-700 leading-none">{completion}%</div>
+              <div className="text-[9px] text-slate-500 uppercase tracking-wider">Complet</div>
             </div>
-          </CardContent>
-        </Card>
+            <Progress value={completion} className="h-1.5 w-20" />
+          </div>
+        </div>
 
         {/* STEPPER — Process en 6 étapes + deadlines */}
         <ExposantStepper
