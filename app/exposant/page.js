@@ -35,7 +35,7 @@ import { toast } from 'sonner';
 import {
   Building2, MapPin, Calendar, FileCheck2, Wallet, CheckCircle2, XCircle, Info, Mail, Phone, Clock,
   FileText, Trash2, Download, Star, Sparkles, BookOpen, KeyRound, Plus, LayoutGrid, ChevronLeft,
-  ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck, Loader2,
+  ListChecks, MessageCircle, Send, Smile, Lock, AlertCircle, ShieldCheck, Truck, Loader2, Hourglass,
 } from 'lucide-react';
 import {
   DEPOSIT_STATUS_LABEL, DEPOSIT_AMOUNT_XPF,
@@ -2056,12 +2056,27 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
               <div className="flex-1">
                 <div className="font-bold text-amber-900 text-base mb-1">{venue?.name} est complet — Inscrivez-vous en liste d&apos;attente</div>
                 <div className="text-sm text-amber-800 leading-snug">
-                  Tous les stands de ce site sont actuellement demandés ou validés par d&apos;autres exposants. Vous pouvez :
+                  Tous les stands de ce site sont actuellement demandés ou validés par d&apos;autres exposants.
                 </div>
-                <ul className="list-disc ml-5 mt-2 text-sm text-amber-900 space-y-1">
-                  <li><b>Choisir un autre site</b> dans le sélecteur ci-dessus (s&apos;il en reste de disponibles).</li>
-                  <li><b>Cliquer sur un stand ci-dessous</b> pour rejoindre sa liste d&apos;attente — vous serez automatiquement promu(e) si l&apos;exposant en attente est refusé.</li>
-                </ul>
+                {/* 🆕 SESSION 48s — Inscription sur liste d'attente du SITE (n'importe quel stand libéré) */}
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <Button
+                    onClick={async () => {
+                      if (!confirm(`Confirmer votre inscription en liste d'attente pour ${venue?.name} ?\n\nVous serez contacté(e) dès qu'un stand se libère sur ce site.`)) return;
+                      try {
+                        await api('/api/wizard/waitlist', { method: 'POST', body: JSON.stringify({ registration_id: registration.id, venue_id: selectedVenueId, note: `Inscription site-level — ${venue?.name} complet` }) });
+                        toast.success(`✅ Inscrit(e) en liste d'attente pour ${venue?.name}`);
+                        onRefresh?.();
+                      } catch (e) { toast.error(e.message); }
+                    }}
+                    disabled={busy}
+                    className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                    data-testid="site-waitlist-subscribe"
+                  >
+                    <Hourglass className="w-4 h-4" /> M&apos;inscrire en liste d&apos;attente pour {venue?.name}
+                  </Button>
+                  <span className="text-[11px] text-amber-700 italic">Vous serez attribué(e) sur n&apos;importe quel stand libéré.</span>
+                </div>
                 {deadlineLabel && (
                   <div className="mt-3 bg-white border border-amber-300 rounded p-2 text-xs text-slate-800">
                     📅 <b>ARACOM recontactera les exposants en liste d&apos;attente au plus tard le {deadlineLabel}</b> pour confirmer ou proposer une alternative.

@@ -59,6 +59,7 @@ import BilansView from '@/components/aracom/bilans-view';
 import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import ConfigurationView from '@/components/aracom/configuration-view';
+import WaitlistView from '@/components/aracom/waitlist-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 import SimulationModal from '@/components/aracom/simulation-modal';
 import ValidationQueueView from '@/components/aracom/validation-queue-view';
@@ -78,6 +79,7 @@ const TABS = [
   { key: 'cautions', label: 'Cautions & restitutions', icon: 'Wallet', href: '/aracom?tab=cautions' },
   { key: 'relances', label: 'Relances IA', icon: 'Bell', href: '/aracom?tab=relances' },
   { key: 'validations', label: 'Validations dossiers', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
+  { key: 'waitlist', label: 'Liste d\'attente', icon: 'Hourglass', href: '/aracom?tab=waitlist' },
   { key: 'prospection', label: 'Prospection', icon: 'Target', href: '/aracom?tab=prospection' },
   { key: 'orgs-sans-dossier', label: 'Comptes orphelins', icon: 'AlertTriangle', href: '/aracom?tab=orgs-sans-dossier', adminTool: true },
   { key: 'corbeille', label: 'Corbeille', icon: 'Trash2', href: '/aracom?tab=corbeille', adminTool: true },
@@ -106,7 +108,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'file-validation', 'file-cession', 'cautions', 'relances', 'validations', 'prospection'],
+    items: ['exposants', 'file-validation', 'file-cession', 'waitlist', 'cautions', 'relances', 'validations', 'prospection'],
   },
   {
     key: 'terrain',
@@ -274,6 +276,7 @@ export default function AracomPage() {
       {activeTab === 'corbeille' && <CorbeilleView />}
       {activeTab === 'orgs-sans-dossier' && <OrgsSansDossierView />}
       {activeTab === 'configuration' && <ConfigurationView />}
+      {activeTab === 'waitlist' && <WaitlistView />}
       <ChatbotFloating role="aracom_admin" />
       <SimulationModal open={simulationOpen} onClose={() => setSimulationOpen(false)} />
     </Shell>
@@ -1395,6 +1398,24 @@ function VenueAdminCard({ venue, active, pacific, exposantVisible, onToggleAvail
 
       {/* 🆕 SESSION 44 — Plage horaire d'animation par site/jour */}
       <AnimationWindowsConfig venue={venue} />
+
+      {/* 🆕 SESSION 48s — Liens rapides vers liste d'attente & pré-réservations */}
+      <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-emerald-100/50 mt-1.5 gap-2">
+        <a
+          href={`/aracom?tab=waitlist`}
+          className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900 hover:underline font-medium"
+          title="Voir les exposants en liste d'attente"
+        >
+          ⏳ Liste d&apos;attente
+        </a>
+        <a
+          href={`/aracom?tab=file-validation`}
+          className="inline-flex items-center gap-1 text-violet-700 hover:text-violet-900 hover:underline font-medium"
+          title="Voir les demandes en attente de validation"
+        >
+          🔔 Pré-réservations
+        </a>
+      </div>
     </div>
   );
 }

@@ -5983,6 +5983,71 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return json({ ok: true, unlocked: Boolean(unlocked) });
     }
 
+    // 🆕 SESSION 48s — POST /api/admin/waitlist/:id/promote  body: { stand_code: 'F-A12' }
+    //   Assigne manuellement un waitlister à un stand libre (ARACOM choisit la cible).
+    if (p[0] === 'admin' && p[1] === 'waitlist' && p[3] === 'promote') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const reqId = p[2];
+      const { stand_code: targetStandCode } = body || {};
+      if (!targetStandCode) return err('stand_code requis (cible)', 400);
+      const vreq = await db.collection('validation_requests').findOne({ id: reqId });
+      if (!vreq) return err('Demande introuvable', 404);
+      if (vreq.status !== 'waitlist') return err('La demande n\'est pas en liste d\'attente', 400);
+
+      // Vérifie que le stand cible est bien libre sur le même site
+      const venueStands = await db.collection('stand_assignments').find({
+        venue_id: vreq.venue_id,
+        stand_code: targetStandCode,
+        request_status: { $in: ['pending', 'validated', 'waitlist'] },
+      }).toArray();
+      const hasOwner = venueStands.some(a => a.request_status === 'validated' || a.request_status === 'pending');
+      if (hasOwner) return err(`Le stand ${targetStandCode} n'est pas libre`, 400);
+
+      // Met à jour la registration
+      await db.collection('registrations').updateOne(
+        { id: vreq.registration_id },
+        { $set: { stand_code: targetStandCode, status: 'a_confirmer', updated_at: new Date() } }
+      );
+      // Marque la demande comme promue → en attente de validation (pending) sur le stand cible
+      await db.collection('validation_requests').updateOne(
+        { id: reqId },
+        {
+          $set: {
+            status: 'en_attente',
+            stand_code: targetStandCode,
+            requested_stand_code: targetStandCode,
+            promoted_from_waitlist: true,
+            promoted_at: new Date(),
+            promoted_by: ctx.userId || 'admin',
+            updated_at: new Date(),
+          },
+        }
+      );
+      // Cleanup ancien stand_assignment waitlist
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: vreq.registration_id, request_status: 'waitlist' },
+        { $set: { request_status: 'pending', stand_code: targetStandCode, promoted_at: new Date() } }
+      );
+      await logActivity(db, ctx.userId, 'registration', vreq.registration_id, 'waitlist_promote', null, { from_status: 'waitlist', to_stand: targetStandCode, request_id: reqId });
+      return json({ ok: true, promoted: true, stand_code: targetStandCode });
+    }
+
+    if (p[0] === 'admin' && p[1] === 'waitlist' && p[3] === 'remove') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const reqId = p[2];
+      const vreq = await db.collection('validation_requests').findOne({ id: reqId });
+      if (!vreq) return err('Demande introuvable', 404);
+      await db.collection('validation_requests').updateOne(
+        { id: reqId },
+        { $set: { status: 'cancelled', cancelled_at: new Date(), cancelled_by: ctx.userId || 'admin' } }
+      );
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: vreq.registration_id, request_status: 'waitlist' },
+        { $set: { request_status: 'cancelled' } }
+      );
+      await logActivity(db, ctx.userId, 'registration', vreq.registration_id, 'waitlist_remove', null, { request_id: reqId });
+      return json({ ok: true });
+    }
     // 🆕 SESSION 48n — POST /api/settings/survey-enabled — toggle global du questionnaire
     //   Body : { enabled: bool } · Réservé aracom_admin
     if (route === 'settings/survey-enabled') {
