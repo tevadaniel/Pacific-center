@@ -1699,13 +1699,38 @@ export async function GET(request, { params }) {
         is_active: { $ne: false },
         is_available_2026: { $ne: false },
       }).toArray();
+      // 🆕 SESSION 48z — Fusion DEUX sources :
+      //   - validation_requests (workflow nouvelle génération)
+      //   - registrations (statuts a_confirmer/a_relancer/confirme/verrouille)
+      // Déduplication par registration_id (validation_request prime).
       const validations = await db.collection('validation_requests').find({}).toArray();
+      const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
+      const valByRegId = {};
+      for (const vr of validations) { if (vr.registration_id) valByRegId[vr.registration_id] = vr; }
+
       const out = {};
       for (const v of venues) {
-        const reqs = validations.filter(r => r.venue_id === v.id);
-        const validated = reqs.filter(r => r.status === 'validated' || r.status === 'confirme' || r.status === 'locked').length;
-        const preReserved = reqs.filter(r => r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe').length;
-        const waitlist = reqs.filter(r => r.status === 'waitlist').length;
+        // Items fusionnés pour cette venue : registration + validation_request (priorité)
+        const items = [];
+        // Registrations
+        for (const reg of regs.filter(r => r.venue_id === v.id)) {
+          if (reg.status === 'prospect' || reg.status === 'cancelled' || reg.status === 'annule') continue;
+          const valReq = valByRegId[reg.id];
+          items.push({ status: valReq ? valReq.status : reg.status });
+        }
+        // Validation_requests sans registration (ex: waitlist site-level)
+        for (const vr of validations.filter(r => r.venue_id === v.id)) {
+          const hasReg = regs.find(r => r.id === vr.registration_id);
+          if (!hasReg) items.push({ status: vr.status });
+        }
+        const validated = items.filter(i =>
+          i.status === 'validated' || i.status === 'confirme' || i.status === 'locked' || i.status === 'verrouille'
+        ).length;
+        const preReserved = items.filter(i =>
+          i.status === 'en_attente' || i.status === 'pending' || i.status === 'rdv_fixe' ||
+          i.status === 'a_confirmer' || i.status === 'a_relancer'
+        ).length;
+        const waitlist = items.filter(i => i.status === 'waitlist').length;
         const capacity = v.capacity_stands || 0;
         const totalReserved = validated + preReserved;
         const available = Math.max(0, capacity - totalReserved);
@@ -1745,13 +1770,17 @@ export async function GET(request, { params }) {
       const assignments = await db.collection('stand_assignments').find({}).toArray();
       const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
       const orgs = await db.collection('organizations').find({}).toArray();
-      // 🆕 SESSION 48y — Set des registration_id ayant une demande de validation active.
-      // On considère qu'un stand n'est "réellement" occupé que si l'inscription est dans
-      // un workflow actif (validation_requests) — pas les anciennes provisions seed.
+      // 🆕 SESSION 48y/48z — Set des registration_id ayant une demande de validation active OU
+      //                    une registration avec un statut actif (a_confirmer, a_relancer, confirme, etc.).
+      //                    Cela évite de filtrer trop les seed/imports légitimes.
       const activeValidations = await db.collection('validation_requests').find({
-        status: { $in: ['validated', 'confirme', 'locked', 'pending', 'en_attente', 'a_confirmer', 'a_relancer', 'rdv_fixe'] }
+        status: { $in: ['validated', 'confirme', 'locked', 'verrouille', 'pending', 'en_attente', 'a_confirmer', 'a_relancer', 'rdv_fixe'] }
       }).toArray();
-      const activeRegIds = new Set(activeValidations.map(v => v.registration_id));
+      const activeRegIds = new Set([
+        ...activeValidations.map(v => v.registration_id),
+        // Inclure aussi les registrations avec statut actif (hors prospect/annule)
+        ...regs.filter(r => !['prospect', 'cancelled', 'annule'].includes(r.status)).map(r => r.id),
+      ]);
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const regById = Object.fromEntries(regs.map(r => [r.id, r]));
       const result = stands.map(s => {
@@ -1759,9 +1788,8 @@ export async function GET(request, { params }) {
         const candidates = assignments.filter(a => a.venue_stand_id === s.id && a.status !== 'annule' && a.status !== 'cancelled');
         const assign = candidates.find(a => a.request_status === 'validated')
           || candidates.find(a => a.request_status === 'pending')
-          // 🆕 SESSION 48y — Les entries "legacy" (sans request_status) ne sont conservées que
-          //                 si elles correspondent à une registration ayant une validation active.
-          //                 Cela évite les faux "stand occupé" des données seed importées.
+          // 🆕 SESSION 48y/48z — Les entries "legacy" sans request_status ne sont conservées que
+          //                     si elles correspondent à une registration/validation_request active.
           || candidates.find(a => !a.request_status && activeRegIds.has(a.registration_id))
           || candidates.find(a => a.request_status === 'waitlist')
           || null;

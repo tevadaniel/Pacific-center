@@ -46,14 +46,58 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const load = async () => {
     setLoading(true);
     try {
-      const [vlist, all] = await Promise.all([
+      // 🆕 SESSION 48z — Fusion des SOURCES de données pour afficher TOUS les exposants :
+      //   - validation_requests : workflow nouvelle génération (validations, waitlist explicite)
+      //   - registrations : inscriptions complètes (statuts a_confirmer, a_relancer, confirme, etc.)
+      // On déduplique par registration_id (les validation_requests priment).
+      const [vlist, allValReqs, allRegs] = await Promise.all([
         api('/api/venues'),
         api('/api/validation-requests'),
+        api('/api/registrations'),
       ]);
       // 🆕 SESSION 48w — Filtre les sites désactivés (cohérence avec activation site/stands)
       const activeVenues = (vlist || []).filter(v => v.is_active !== false && v.is_available_2026 !== false);
       setVenues(activeVenues);
-      setRequests(all || []);
+
+      // Index validation_requests par registration_id
+      const valByRegId = {};
+      for (const vr of (allValReqs || [])) {
+        if (vr.registration_id) valByRegId[vr.registration_id] = vr;
+      }
+
+      // Fusion : pour chaque registration, on prend le validation_request s'il existe, sinon on mappe le statut
+      const merged = [];
+      for (const reg of (allRegs || [])) {
+        // Exclut explicitement les statuts non-actifs (prospect → pas encore engagé)
+        if (reg.status === 'prospect' || reg.status === 'cancelled' || reg.status === 'annule') continue;
+        const valReq = valByRegId[reg.id];
+        if (valReq) {
+          // Le validation_request a priorité, on ajoute les infos de contact venant de la reg
+          merged.push({ ...valReq, _source: 'validation_request', registration: reg });
+        } else {
+          // Mapping registration → format validation_request
+          merged.push({
+            id: `reg-${reg.id}`,
+            registration_id: reg.id,
+            organization_id: reg.organization_id,
+            venue_id: reg.venue_id,
+            stand_code: reg.stand_code,
+            status: reg.status, // a_confirmer / a_relancer / confirme / verrouille
+            created_at: reg.created_at || reg.updated_at,
+            organization: reg.organization,
+            venue: reg.venue,
+            locked_at: reg.locked_at || null,
+            _source: 'registration',
+            registration: reg,
+          });
+        }
+      }
+      // On ajoute aussi les validation_requests qui n'ont pas de registration correspondante (ex: waitlist sans reg)
+      for (const vr of (allValReqs || [])) {
+        const hasReg = (allRegs || []).find(r => r.id === vr.registration_id);
+        if (!hasReg) merged.push({ ...vr, _source: 'validation_request_only' });
+      }
+      setRequests(merged);
       // Charge les stands de tous les venues actifs
       const standsMap = {};
       await Promise.all(activeVenues.map(async (v) => {
@@ -78,11 +122,15 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
     for (const r of requests) {
       const v = r.venue_id;
       if (!out[v]) continue;
-      if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked') {
+      // 🆕 SESSION 48z — Statuts élargis pour couvrir les deux sources (validation_requests + registrations)
+      if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille') {
         out[v].validated.push(r);
       } else if (r.status === 'waitlist') {
         out[v].waitlist.push(r);
-      } else if (r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe') {
+      } else if (
+        r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe' ||
+        r.status === 'a_confirmer' || r.status === 'a_relancer'
+      ) {
         out[v].preReserved.push(r);
       }
     }

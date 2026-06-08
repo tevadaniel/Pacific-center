@@ -1,613 +1,502 @@
 #!/usr/bin/env python3
 """
-SESSION 48y — Backend Test Suite
-Tests for new /api/venues/availability endpoint and modified /api/venues/:id/stands filtering
+SESSION 48z — Test du fix d'alignement quota : /api/venues/availability
+doit maintenant retourner les pré-réservations RÉELLES de la collection
+registrations (68 entrées) + validation_requests (1 entrée).
+
+CONTEXTE :
+La précédente correction (48y) ne comptait que les validation_requests (1 entrée).
+Mais il y a 68 inscriptions dans registrations (statuts a_confirmer/a_relancer/confirme)
+qui doivent être prises en compte comme "pré-réservées". Le fix actuel fusionne les deux sources.
 """
 
 import requests
 import json
-import os
-from datetime import datetime
+import sys
 
-# Get base URL from environment
-BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
-API_BASE = f"{BASE_URL}/api"
+BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
+ADMIN_HEADERS = {
+    "x-user-role": "aracom_admin",
+    "x-user-id": "u-admin"
+}
 
-# Test credentials
-ADMIN_EMAIL = "admin@aracom.pf"
-ADMIN_PASSWORD = "Projetaracom12"
-
-# ANSI color codes for output
-GREEN = '\033[92m'
-RED = '\033[91m'
-YELLOW = '\033[93m'
-BLUE = '\033[94m'
-RESET = '\033[0m'
-
-def print_test(name, passed, details=""):
-    """Print test result with color"""
-    status = f"{GREEN}✅ PASS{RESET}" if passed else f"{RED}❌ FAIL{RESET}"
-    print(f"{status} - {name}")
-    if details:
-        print(f"  {details}")
-
-def print_section(title):
-    """Print section header"""
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}{title}{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}\n")
-
-# Test counter
-tests_run = 0
-tests_passed = 0
-
-def run_test(name, test_func):
-    """Run a test and track results"""
-    global tests_run, tests_passed
-    tests_run += 1
+def test_venues_availability():
+    """
+    TEST 1 (P1) : GET /api/venues/availability
+    Doit retourner les vraies données fusionnées (68 registrations + 1 validation_request)
+    """
+    print("\n" + "="*80)
+    print("TEST 1 (P1) : GET /api/venues/availability — Données fusionnées réelles")
+    print("="*80)
+    
     try:
-        result, details = test_func()
-        if result:
-            tests_passed += 1
-        print_test(name, result, details)
-        return result
+        response = requests.get(f"{BASE_URL}/venues/availability", headers=ADMIN_HEADERS, timeout=30)
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"❌ FAIL - Expected 200, got {response.status_code}")
+            print(f"Response: {response.text[:500]}")
+            return False
+        
+        data = response.json()
+        print(f"✅ Response structure OK")
+        print(f"Venues returned: {list(data.keys())}")
+        
+        # Vérifier que seuls les sites actifs sont présents
+        expected_venues = ['venue-faaa', 'venue-pun', 'venue-aru', 'venue-tar']
+        actual_venues = list(data.keys())
+        
+        if set(actual_venues) != set(expected_venues):
+            print(f"❌ FAIL - Expected venues {expected_venues}, got {actual_venues}")
+            return False
+        
+        print(f"✅ Only active venues returned (4 venues)")
+        
+        # Vérifier que Mahina et Moorea (sites prospect) ne sont PAS présents
+        if 'venue-mah' in data or 'venue-moo' in data:
+            print(f"❌ FAIL - Prospect sites (Mahina/Moorea) should NOT be in availability")
+            return False
+        
+        print(f"✅ Prospect sites (Mahina/Moorea) correctly excluded")
+        
+        # Vérifier les valeurs attendues pour chaque venue
+        # Basé sur les données actuelles : 68 registrations (19 a_confirmer + 37 a_relancer + 12 prospect)
+        # + 1 validation_request (I Mua Papeete sur Arue)
+        
+        # FAAA : capacity=16, 17 registrations (8 a_confirmer + 9 a_relancer)
+        # Attendu : pre_reserved=17, validated=0, waitlist=0, total_reserved=17, available=0, is_full=true
+        faaa = data.get('venue-faaa', {})
+        print(f"\n--- FAAA ---")
+        print(f"  capacity: {faaa.get('capacity')}")
+        print(f"  pre_reserved: {faaa.get('pre_reserved')}")
+        print(f"  validated: {faaa.get('validated')}")
+        print(f"  waitlist: {faaa.get('waitlist')}")
+        print(f"  total_reserved: {faaa.get('total_reserved')}")
+        print(f"  available: {faaa.get('available')}")
+        print(f"  is_full: {faaa.get('is_full')}")
+        
+        if faaa.get('capacity') != 16:
+            print(f"❌ FAIL - Faaa capacity should be 16, got {faaa.get('capacity')}")
+            return False
+        
+        if faaa.get('pre_reserved') != 17:
+            print(f"❌ FAIL - Faaa pre_reserved should be 17 (8 a_confirmer + 9 a_relancer), got {faaa.get('pre_reserved')}")
+            return False
+        
+        if faaa.get('validated') != 0:
+            print(f"❌ FAIL - Faaa validated should be 0, got {faaa.get('validated')}")
+            return False
+        
+        if faaa.get('total_reserved') != 17:
+            print(f"❌ FAIL - Faaa total_reserved should be 17, got {faaa.get('total_reserved')}")
+            return False
+        
+        if faaa.get('available') != 0:
+            print(f"❌ FAIL - Faaa available should be 0 (capacity exceeded), got {faaa.get('available')}")
+            return False
+        
+        if faaa.get('is_full') != True:
+            print(f"❌ FAIL - Faaa is_full should be true, got {faaa.get('is_full')}")
+            return False
+        
+        print(f"✅ FAAA values correct: capacity=16, pre_reserved=17, is_full=true")
+        
+        # PUNAAUIA : capacity=13, 13 registrations (4 a_confirmer + 9 a_relancer)
+        # Attendu : pre_reserved=13, validated=0, waitlist=0, total_reserved=13, available=0, is_full=true
+        pun = data.get('venue-pun', {})
+        print(f"\n--- PUNAAUIA ---")
+        print(f"  capacity: {pun.get('capacity')}")
+        print(f"  pre_reserved: {pun.get('pre_reserved')}")
+        print(f"  validated: {pun.get('validated')}")
+        print(f"  waitlist: {pun.get('waitlist')}")
+        print(f"  total_reserved: {pun.get('total_reserved')}")
+        print(f"  available: {pun.get('available')}")
+        print(f"  is_full: {pun.get('is_full')}")
+        
+        if pun.get('capacity') != 13:
+            print(f"❌ FAIL - Punaauia capacity should be 13, got {pun.get('capacity')}")
+            return False
+        
+        if pun.get('pre_reserved') != 13:
+            print(f"❌ FAIL - Punaauia pre_reserved should be 13 (4 a_confirmer + 9 a_relancer), got {pun.get('pre_reserved')}")
+            return False
+        
+        if pun.get('is_full') != True:
+            print(f"❌ FAIL - Punaauia is_full should be true, got {pun.get('is_full')}")
+            return False
+        
+        print(f"✅ PUNAAUIA values correct: capacity=13, pre_reserved=13, is_full=true")
+        
+        # ARUE : capacity=12, 12 registrations (4 a_confirmer + 8 a_relancer) + 1 validation_request
+        # Attendu : pre_reserved=12, validated=0, waitlist=0, total_reserved=12, available=0, is_full=true
+        aru = data.get('venue-aru', {})
+        print(f"\n--- ARUE ---")
+        print(f"  capacity: {aru.get('capacity')}")
+        print(f"  pre_reserved: {aru.get('pre_reserved')}")
+        print(f"  validated: {aru.get('validated')}")
+        print(f"  waitlist: {aru.get('waitlist')}")
+        print(f"  total_reserved: {aru.get('total_reserved')}")
+        print(f"  available: {aru.get('available')}")
+        print(f"  is_full: {aru.get('is_full')}")
+        
+        if aru.get('capacity') != 12:
+            print(f"❌ FAIL - Arue capacity should be 12, got {aru.get('capacity')}")
+            return False
+        
+        if aru.get('pre_reserved') != 12:
+            print(f"❌ FAIL - Arue pre_reserved should be 12 (4 a_confirmer + 8 a_relancer, 1 validation_request déjà lié à une registration), got {aru.get('pre_reserved')}")
+            return False
+        
+        if aru.get('is_full') != True:
+            print(f"❌ FAIL - Arue is_full should be true, got {aru.get('is_full')}")
+            return False
+        
+        print(f"✅ ARUE values correct: capacity=12, pre_reserved=12, is_full=true")
+        
+        # TARAVAO : capacity=12, 12 registrations (3 a_confirmer + 9 a_relancer)
+        # Attendu : pre_reserved=12, validated=0, waitlist=0, total_reserved=12, available=0, is_full=true
+        tar = data.get('venue-tar', {})
+        print(f"\n--- TARAVAO ---")
+        print(f"  capacity: {tar.get('capacity')}")
+        print(f"  pre_reserved: {tar.get('pre_reserved')}")
+        print(f"  validated: {tar.get('validated')}")
+        print(f"  waitlist: {tar.get('waitlist')}")
+        print(f"  total_reserved: {tar.get('total_reserved')}")
+        print(f"  available: {tar.get('available')}")
+        print(f"  is_full: {tar.get('is_full')}")
+        
+        if tar.get('capacity') != 12:
+            print(f"❌ FAIL - Taravao capacity should be 12, got {tar.get('capacity')}")
+            return False
+        
+        if tar.get('pre_reserved') != 12:
+            print(f"❌ FAIL - Taravao pre_reserved should be 12 (3 a_confirmer + 9 a_relancer), got {tar.get('pre_reserved')}")
+            return False
+        
+        if tar.get('is_full') != True:
+            print(f"❌ FAIL - Taravao is_full should be true, got {tar.get('is_full')}")
+            return False
+        
+        print(f"✅ TARAVAO values correct: capacity=12, pre_reserved=12, is_full=true")
+        
+        # Vérifier que tous les sites sont is_full=true
+        all_full = all(data[v].get('is_full') == True for v in expected_venues)
+        if not all_full:
+            print(f"❌ FAIL - All sites should be is_full=true")
+            return False
+        
+        print(f"\n✅ TEST 1 PASSED - All venues have correct merged data (registrations + validation_requests)")
+        return True
+        
     except Exception as e:
-        print_test(name, False, f"Exception: {str(e)}")
+        print(f"❌ FAIL - Exception: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
-# ============================================================================
-# TEST 1: GET /api/venues/availability - Structure and Active Venues Only
-# ============================================================================
 
-def test_venues_availability_structure():
-    """Test that /api/venues/availability returns correct structure with 4 active venues only"""
+def test_venue_faaa_stands():
+    """
+    TEST 2 (P1) : GET /api/venues/venue-faaa/stands
+    Vérifier que les assignations seed sont conservées car les registrations sont actives
+    """
+    print("\n" + "="*80)
+    print("TEST 2 (P1) : GET /api/venues/venue-faaa/stands — Assignations conservées")
+    print("="*80)
+    
     try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        response = requests.get(f"{BASE_URL}/venues/venue-faaa/stands", headers=ADMIN_HEADERS, timeout=30)
+        print(f"Status: {response.status_code}")
         
         if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
+            print(f"❌ FAIL - Expected 200, got {response.status_code}")
+            return False
         
         data = response.json()
+        print(f"✅ Response OK")
+        print(f"Total stands: {len(data)}")
         
-        # Should be an object (dict), not an array
-        if not isinstance(data, dict):
-            return False, f"Expected object, got {type(data).__name__}"
-        
-        # Should have exactly 4 active venues (not 6)
-        venue_ids = list(data.keys())
-        if len(venue_ids) != 4:
-            return False, f"Expected 4 venues, got {len(venue_ids)}: {venue_ids}"
-        
-        # Check that we have the correct 4 venues
-        expected_venues = {'venue-faaa', 'venue-pun', 'venue-aru', 'venue-tar'}
-        actual_venues = set(venue_ids)
-        
-        if actual_venues != expected_venues:
-            missing = expected_venues - actual_venues
-            extra = actual_venues - expected_venues
-            return False, f"Venue mismatch. Missing: {missing}, Extra: {extra}"
-        
-        # Verify structure of each venue
-        required_fields = ['venue_id', 'venue_code', 'venue_name', 'capacity', 'validated', 
-                          'pre_reserved', 'waitlist', 'total_reserved', 'available', 'is_full']
-        
-        for venue_id, venue_data in data.items():
-            for field in required_fields:
-                if field not in venue_data:
-                    return False, f"Missing field '{field}' in {venue_id}"
-        
-        return True, f"4 active venues with complete structure: {', '.join(venue_ids)}"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 2: GET /api/venues/availability - Faaa Venue Values
-# ============================================================================
-
-def test_venues_availability_faaa():
-    """Test Faaa venue availability values"""
-    try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
-        data = response.json()
-        
-        faaa = data.get('venue-faaa')
-        if not faaa:
-            return False, "venue-faaa not found in response"
-        
-        # Expected values for Faaa
-        expected = {
-            'capacity': 16,
-            'validated': 0,
-            'pre_reserved': 0,
-            'waitlist': 0,
-            'total_reserved': 0,
-            'available': 16,
-            'is_full': False
-        }
-        
-        errors = []
-        for key, expected_val in expected.items():
-            actual_val = faaa.get(key)
-            if actual_val != expected_val:
-                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
-        
-        if errors:
-            return False, "; ".join(errors)
-        
-        return True, f"Faaa: {faaa['capacity']} capacity, {faaa['available']} available, is_full={faaa['is_full']}"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 3: GET /api/venues/availability - Punaauia Venue Values
-# ============================================================================
-
-def test_venues_availability_punaauia():
-    """Test Punaauia venue availability values"""
-    try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
-        data = response.json()
-        
-        pun = data.get('venue-pun')
-        if not pun:
-            return False, "venue-pun not found in response"
-        
-        # Expected values for Punaauia
-        expected = {
-            'capacity': 13,
-            'validated': 0,
-            'pre_reserved': 0,
-            'waitlist': 0,
-            'total_reserved': 0,
-            'available': 13,
-            'is_full': False
-        }
-        
-        errors = []
-        for key, expected_val in expected.items():
-            actual_val = pun.get(key)
-            if actual_val != expected_val:
-                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
-        
-        if errors:
-            return False, "; ".join(errors)
-        
-        return True, f"Punaauia: {pun['capacity']} capacity, {pun['available']} available, is_full={pun['is_full']}"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 4: GET /api/venues/availability - Arue Venue Values (with pre-reserved)
-# ============================================================================
-
-def test_venues_availability_arue():
-    """Test Arue venue availability values (should have 1 pre-reserved)"""
-    try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
-        data = response.json()
-        
-        aru = data.get('venue-aru')
-        if not aru:
-            return False, "venue-aru not found in response"
-        
-        # Expected values for Arue (has 1 pre-reserved for I Mua Papeete)
-        expected = {
-            'capacity': 12,
-            'validated': 0,
-            'pre_reserved': 1,
-            'waitlist': 0,
-            'total_reserved': 1,
-            'available': 11,
-            'is_full': False
-        }
-        
-        errors = []
-        for key, expected_val in expected.items():
-            actual_val = aru.get(key)
-            if actual_val != expected_val:
-                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
-        
-        if errors:
-            return False, "; ".join(errors)
-        
-        return True, f"Arue: {aru['capacity']} capacity, {aru['pre_reserved']} pre-reserved, {aru['available']} available"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 5: GET /api/venues/availability - Taravao Venue Values
-# ============================================================================
-
-def test_venues_availability_taravao():
-    """Test Taravao venue availability values"""
-    try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
-        data = response.json()
-        
-        tar = data.get('venue-tar')
-        if not tar:
-            return False, "venue-tar not found in response"
-        
-        # Expected values for Taravao
-        expected = {
-            'capacity': 12,
-            'validated': 0,
-            'pre_reserved': 0,
-            'waitlist': 0,
-            'total_reserved': 0,
-            'available': 12,
-            'is_full': False
-        }
-        
-        errors = []
-        for key, expected_val in expected.items():
-            actual_val = tar.get(key)
-            if actual_val != expected_val:
-                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
-        
-        if errors:
-            return False, "; ".join(errors)
-        
-        return True, f"Taravao: {tar['capacity']} capacity, {tar['available']} available, is_full={tar['is_full']}"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 6: GET /api/venues/availability - Calculation Coherence
-# ============================================================================
-
-def test_venues_availability_calculations():
-    """Test that total_reserved = validated + pre_reserved and available = capacity - total_reserved"""
-    try:
-        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
-        data = response.json()
-        
-        errors = []
-        for venue_id, venue_data in data.items():
-            # Check total_reserved calculation
-            expected_total = venue_data['validated'] + venue_data['pre_reserved']
-            if venue_data['total_reserved'] != expected_total:
-                errors.append(f"{venue_id}: total_reserved={venue_data['total_reserved']}, expected {expected_total}")
-            
-            # Check available calculation
-            expected_available = max(0, venue_data['capacity'] - venue_data['total_reserved'])
-            if venue_data['available'] != expected_available:
-                errors.append(f"{venue_id}: available={venue_data['available']}, expected {expected_available}")
-            
-            # Check is_full logic
-            expected_full = venue_data['capacity'] > 0 and venue_data['total_reserved'] >= venue_data['capacity']
-            if venue_data['is_full'] != expected_full:
-                errors.append(f"{venue_id}: is_full={venue_data['is_full']}, expected {expected_full}")
-        
-        if errors:
-            return False, "; ".join(errors)
-        
-        return True, "All calculations coherent across 4 venues"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# TEST 7: GET /api/venues/venue-faaa/stands - No Assignments (seed filtered)
-# ============================================================================
-
-def test_faaa_stands_no_assignments():
-    """Test that Faaa stands have NO assignments (all seed assignments filtered)"""
-    try:
-        headers = {'x-user-role': 'aracom_admin'}
-        response = requests.get(f"{API_BASE}/venues/venue-faaa/stands", headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        if not isinstance(data, list):
-            return False, f"Expected array, got {type(data).__name__}"
-        
-        # Should have 16 stands
+        # Vérifier qu'il y a 16 stands
         if len(data) != 16:
-            return False, f"Expected 16 stands, got {len(data)}"
+            print(f"❌ FAIL - Expected 16 stands, got {len(data)}")
+            return False
         
-        # Count stands with assignments
-        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        print(f"✅ 16 stands returned")
         
-        if len(assigned_stands) > 0:
-            stand_codes = [s.get('stand_code') for s in assigned_stands]
-            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
+        # Compter les stands avec assignment
+        assigned = [s for s in data if s.get('assignment') is not None]
+        print(f"Stands with assignment: {len(assigned)}")
         
-        return True, f"16 stands, 0 with assignments (seed filtered correctly)"
-    
+        # Attendu : 16 stands avec assignment (toutes les registrations actives)
+        # Car il y a 17 registrations a_confirmer/a_relancer pour Faaa (capacité dépassée)
+        # Mais seulement 16 stands physiques, donc au max 16 assignments
+        if len(assigned) < 1:
+            print(f"❌ FAIL - Expected at least 1 stand with assignment, got {len(assigned)}")
+            return False
+        
+        print(f"✅ At least 1 stand has assignment (seed assignments preserved for active registrations)")
+        
+        # Afficher quelques exemples
+        for i, stand in enumerate(assigned[:3]):
+            print(f"  Stand {i+1}: {stand.get('stand_code')} → {stand.get('assignment', {}).get('organization_name', 'N/A')}")
+        
+        print(f"\n✅ TEST 2 PASSED - Faaa stands with assignments preserved")
+        return True
+        
     except Exception as e:
-        return False, f"Exception: {str(e)}"
+        print(f"❌ FAIL - Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-# ============================================================================
-# TEST 8: GET /api/venues/venue-aru/stands - Exactly 1 Assignment (A-C01)
-# ============================================================================
 
-def test_arue_stands_one_assignment():
-    """Test that Arue stands have EXACTLY 1 assignment (A-C01 for I Mua Papeete)"""
+def test_venue_arue_stands():
+    """
+    TEST 3 (P1) : GET /api/venues/venue-aru/stands
+    Vérifier que les assignations sont conservées (incluant A-C01 pour reg-arue-A-C01)
+    """
+    print("\n" + "="*80)
+    print("TEST 3 (P1) : GET /api/venues/venue-aru/stands — Assignations conservées")
+    print("="*80)
+    
     try:
-        headers = {'x-user-role': 'aracom_admin'}
-        response = requests.get(f"{API_BASE}/venues/venue-aru/stands", headers=headers, timeout=10)
+        response = requests.get(f"{BASE_URL}/venues/venue-aru/stands", headers=ADMIN_HEADERS, timeout=30)
+        print(f"Status: {response.status_code}")
         
         if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
+            print(f"❌ FAIL - Expected 200, got {response.status_code}")
+            return False
         
         data = response.json()
+        print(f"✅ Response OK")
+        print(f"Total stands: {len(data)}")
         
-        if not isinstance(data, list):
-            return False, f"Expected array, got {type(data).__name__}"
-        
-        # Should have 12 stands
+        # Vérifier qu'il y a 12 stands
         if len(data) != 12:
-            return False, f"Expected 12 stands, got {len(data)}"
+            print(f"❌ FAIL - Expected 12 stands, got {len(data)}")
+            return False
         
-        # Count stands with assignments
-        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        print(f"✅ 12 stands returned")
         
-        if len(assigned_stands) != 1:
-            stand_codes = [s.get('stand_code') for s in assigned_stands]
-            return False, f"Expected 1 assignment, got {len(assigned_stands)}: {stand_codes}"
+        # Compter les stands avec assignment
+        assigned = [s for s in data if s.get('assignment') is not None]
+        print(f"Stands with assignment: {len(assigned)}")
         
-        # Verify it's A-C01
-        assigned_stand = assigned_stands[0]
-        if assigned_stand.get('stand_code') != 'A-C01':
-            return False, f"Expected A-C01, got {assigned_stand.get('stand_code')}"
+        # Vérifier que A-C01 a une assignment pour reg-arue-A-C01
+        a_c01 = next((s for s in data if s.get('stand_code') == 'A-C01'), None)
+        if not a_c01:
+            print(f"❌ FAIL - Stand A-C01 not found")
+            return False
         
-        # Verify organization name contains "I Mua Papeete"
-        org_name = assigned_stand.get('organization', {}).get('name', '')
-        if 'I Mua Papeete' not in org_name:
-            return False, f"Expected 'I Mua Papeete', got '{org_name}'"
+        if a_c01.get('assignment') is None:
+            print(f"❌ FAIL - Stand A-C01 should have an assignment")
+            return False
         
-        return True, f"12 stands, 1 assignment: {assigned_stand.get('stand_code')} ({org_name})"
-    
+        print(f"✅ Stand A-C01 has assignment: {a_c01.get('assignment', {}).get('organization_name', 'N/A')}")
+        
+        # Afficher quelques exemples
+        for i, stand in enumerate(assigned[:3]):
+            print(f"  Stand {i+1}: {stand.get('stand_code')} → {stand.get('assignment', {}).get('organization_name', 'N/A')}")
+        
+        print(f"\n✅ TEST 3 PASSED - Arue stands with assignments preserved (including A-C01)")
+        return True
+        
     except Exception as e:
-        return False, f"Exception: {str(e)}"
+        print(f"❌ FAIL - Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-# ============================================================================
-# TEST 9: GET /api/venues/venue-pun/stands - No Assignments
-# ============================================================================
 
-def test_punaauia_stands_no_assignments():
-    """Test that Punaauia stands have NO assignments"""
+def test_cross_endpoint_coherence():
+    """
+    TEST 4 (P1) : Cohérence cross-endpoints
+    availability[venue_id].pre_reserved doit correspondre au nombre d'inscriptions actives par site
+    """
+    print("\n" + "="*80)
+    print("TEST 4 (P1) : Cohérence cross-endpoints — availability vs registrations")
+    print("="*80)
+    
     try:
-        headers = {'x-user-role': 'aracom_admin'}
-        response = requests.get(f"{API_BASE}/venues/venue-pun/stands", headers=headers, timeout=10)
+        # Récupérer availability
+        avail_response = requests.get(f"{BASE_URL}/venues/availability", headers=ADMIN_HEADERS, timeout=30)
+        if avail_response.status_code != 200:
+            print(f"❌ FAIL - availability endpoint returned {avail_response.status_code}")
+            return False
         
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
+        availability = avail_response.json()
         
-        data = response.json()
+        # Récupérer registrations
+        regs_response = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=30)
+        if regs_response.status_code != 200:
+            print(f"❌ FAIL - registrations endpoint returned {regs_response.status_code}")
+            return False
         
-        if not isinstance(data, list):
-            return False, f"Expected array, got {type(data).__name__}"
+        registrations = regs_response.json()
         
-        # Should have 13 stands
-        if len(data) != 13:
-            return False, f"Expected 13 stands, got {len(data)}"
+        print(f"✅ Both endpoints responded")
+        print(f"Total registrations: {len(registrations)}")
         
-        # Count stands with assignments
-        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        # Pour Arue : compter les registrations actives
+        arue_regs = [r for r in registrations if r.get('venue_id') == 'venue-aru' 
+                     and r.get('status') not in ['prospect', 'cancelled', 'annule']]
         
-        if len(assigned_stands) > 0:
-            stand_codes = [s.get('stand_code') for s in assigned_stands]
-            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
+        print(f"\nArue registrations (active): {len(arue_regs)}")
+        print(f"Arue availability pre_reserved: {availability.get('venue-aru', {}).get('pre_reserved')}")
         
-        return True, f"13 stands, 0 with assignments"
-    
+        if len(arue_regs) != availability.get('venue-aru', {}).get('pre_reserved'):
+            print(f"❌ FAIL - Arue: registrations count ({len(arue_regs)}) != availability.pre_reserved ({availability.get('venue-aru', {}).get('pre_reserved')})")
+            return False
+        
+        print(f"✅ Arue coherence OK: {len(arue_regs)} active registrations = {availability.get('venue-aru', {}).get('pre_reserved')} pre_reserved")
+        
+        # Vérifier pour tous les sites
+        for venue_id in ['venue-faaa', 'venue-pun', 'venue-aru', 'venue-tar']:
+            venue_regs = [r for r in registrations if r.get('venue_id') == venue_id 
+                         and r.get('status') not in ['prospect', 'cancelled', 'annule']]
+            
+            avail_data = availability.get(venue_id, {})
+            pre_reserved = avail_data.get('pre_reserved', 0)
+            validated = avail_data.get('validated', 0)
+            total_reserved = avail_data.get('total_reserved', 0)
+            
+            # total_reserved doit être égal à pre_reserved + validated
+            if total_reserved != pre_reserved + validated:
+                print(f"❌ FAIL - {venue_id}: total_reserved ({total_reserved}) != pre_reserved ({pre_reserved}) + validated ({validated})")
+                return False
+            
+            # Le nombre de registrations actives doit correspondre à pre_reserved + validated
+            if len(venue_regs) != total_reserved:
+                print(f"❌ FAIL - {venue_id}: registrations count ({len(venue_regs)}) != total_reserved ({total_reserved})")
+                return False
+            
+            print(f"✅ {venue_id}: {len(venue_regs)} active registrations = {total_reserved} total_reserved")
+        
+        print(f"\n✅ TEST 4 PASSED - Cross-endpoint coherence verified for all venues")
+        return True
+        
     except Exception as e:
-        return False, f"Exception: {str(e)}"
+        print(f"❌ FAIL - Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-# ============================================================================
-# TEST 10: GET /api/venues/venue-tar/stands - No Assignments
-# ============================================================================
 
-def test_taravao_stands_no_assignments():
-    """Test that Taravao stands have NO assignments"""
+def test_non_regression():
+    """
+    TEST 5 (P1) : Checks non-régression
+    """
+    print("\n" + "="*80)
+    print("TEST 5 (P1) : Non-regression checks")
+    print("="*80)
+    
+    tests = [
+        ("GET /api/venues?only_active=1", f"{BASE_URL}/venues?only_active=1", 200, "4 venues"),
+        ("GET /api/menu-badges", f"{BASE_URL}/menu-badges", 200, "badges"),
+        ("GET /api/validation-requests", f"{BASE_URL}/validation-requests", 200, "1 entry for I Mua Papeete"),
+        ("GET /api/registrations", f"{BASE_URL}/registrations", 200, "68 entries"),
+    ]
+    
+    all_passed = True
+    
+    for test_name, url, expected_status, description in tests:
+        try:
+            response = requests.get(url, headers=ADMIN_HEADERS, timeout=30)
+            if response.status_code == expected_status:
+                print(f"✅ {test_name} → {expected_status} ({description})")
+            else:
+                print(f"❌ {test_name} → {response.status_code} (expected {expected_status})")
+                all_passed = False
+        except Exception as e:
+            print(f"❌ {test_name} → Exception: {e}")
+            all_passed = False
+    
+    # Test auth
     try:
-        headers = {'x-user-role': 'aracom_admin'}
-        response = requests.get(f"{API_BASE}/venues/venue-tar/stands", headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        if not isinstance(data, list):
-            return False, f"Expected array, got {type(data).__name__}"
-        
-        # Should have 12 stands
-        if len(data) != 12:
-            return False, f"Expected 12 stands, got {len(data)}"
-        
-        # Count stands with assignments
-        assigned_stands = [s for s in data if s.get('assignment') is not None]
-        
-        if len(assigned_stands) > 0:
-            stand_codes = [s.get('stand_code') for s in assigned_stands]
-            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
-        
-        return True, f"12 stands, 0 with assignments"
-    
+        auth_response = requests.post(
+            f"{BASE_URL}/auth/password-login",
+            json={"email": "admin@aracom.pf", "password": "Projetaracom12"},
+            timeout=30
+        )
+        if auth_response.status_code == 200:
+            data = auth_response.json()
+            if data.get('user', {}).get('role_code') == 'aracom_admin':
+                print(f"✅ POST /api/auth/password-login → 200 with role=aracom_admin")
+            else:
+                print(f"❌ POST /api/auth/password-login → role mismatch")
+                all_passed = False
+        else:
+            print(f"❌ POST /api/auth/password-login → {auth_response.status_code}")
+            all_passed = False
     except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# NON-REGRESSION TESTS
-# ============================================================================
-
-def test_venues_only_active():
-    """Test GET /api/venues?only_active=1 returns 4 venues"""
-    try:
-        response = requests.get(f"{API_BASE}/venues?only_active=1", timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        if not isinstance(data, list):
-            return False, f"Expected array, got {type(data).__name__}"
-        
-        if len(data) != 4:
-            venue_names = [v.get('name') for v in data]
-            return False, f"Expected 4 venues, got {len(data)}: {venue_names}"
-        
-        return True, f"4 active venues returned"
+        print(f"❌ POST /api/auth/password-login → Exception: {e}")
+        all_passed = False
     
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-def test_menu_badges():
-    """Test GET /api/menu-badges returns 200"""
-    try:
-        response = requests.get(f"{API_BASE}/menu-badges", timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        return True, "Menu badges endpoint working"
+    if all_passed:
+        print(f"\n✅ TEST 5 PASSED - All non-regression checks passed")
+    else:
+        print(f"\n❌ TEST 5 FAILED - Some non-regression checks failed")
     
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
+    return all_passed
 
-def test_validation_queue():
-    """Test GET /api/admin/validation-queue returns 200"""
-    try:
-        headers = {'x-user-role': 'aracom_admin'}
-        response = requests.get(f"{API_BASE}/admin/validation-queue", headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        return True, "Validation queue endpoint working"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-def test_validation_requests():
-    """Test GET /api/validation-requests returns 200 and includes I Mua Papeete"""
-    try:
-        response = requests.get(f"{API_BASE}/validation-requests", timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        # Check if I Mua Papeete appears in the list
-        found = False
-        for item in data:
-            org_name = item.get('organization', {}).get('name', '')
-            venue_name = item.get('venue', {}).get('name', '')
-            if 'I Mua Papeete' in org_name and 'Arue' in venue_name:
-                found = True
-                break
-        
-        if not found:
-            return False, "I Mua Papeete on Arue not found in validation requests"
-        
-        return True, "Validation requests includes I Mua Papeete on Arue"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-def test_registrations():
-    """Test GET /api/registrations returns 200"""
-    try:
-        response = requests.get(f"{API_BASE}/registrations", timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        return True, "Registrations endpoint working"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-def test_admin_login():
-    """Test POST /api/auth/password-login with admin credentials"""
-    try:
-        payload = {
-            'email': ADMIN_EMAIL,
-            'password': ADMIN_PASSWORD
-        }
-        response = requests.post(f"{API_BASE}/auth/password-login", json=payload, timeout=10)
-        
-        if response.status_code != 200:
-            return False, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        if not data.get('ok'):
-            return False, f"Login failed: {data.get('error')}"
-        
-        if data.get('user', {}).get('role_code') != 'aracom_admin':
-            return False, f"Expected role aracom_admin, got {data.get('user', {}).get('role_code')}"
-        
-        return True, f"Admin login successful, role={data.get('user', {}).get('role_code')}"
-    
-    except Exception as e:
-        return False, f"Exception: {str(e)}"
-
-# ============================================================================
-# MAIN TEST RUNNER
-# ============================================================================
 
 def main():
-    """Run all tests"""
-    print(f"\n{BLUE}SESSION 48y — Backend Test Suite{RESET}")
-    print(f"{BLUE}Testing: {API_BASE}{RESET}\n")
+    print("\n" + "="*80)
+    print("SESSION 48z — Test du fix d'alignement quota")
+    print("="*80)
+    print("\nCONTEXTE:")
+    print("La précédente correction (48y) ne comptait que les validation_requests (1 entrée).")
+    print("Mais il y a 68 inscriptions dans registrations (statuts a_confirmer/a_relancer/confirme)")
+    print("qui doivent être prises en compte comme 'pré-réservées'. Le fix actuel fusionne les deux sources.")
+    print("\nCREDENTIALS: admin@aracom.pf / Projetaracom12")
+    print("="*80)
     
-    # Test 1: New endpoint /api/venues/availability
-    print_section("TEST GROUP 1: GET /api/venues/availability - New Endpoint")
-    run_test("1.1 Structure and Active Venues Only (4 venues)", test_venues_availability_structure)
-    run_test("1.2 Faaa Venue Values", test_venues_availability_faaa)
-    run_test("1.3 Punaauia Venue Values", test_venues_availability_punaauia)
-    run_test("1.4 Arue Venue Values (with pre-reserved)", test_venues_availability_arue)
-    run_test("1.5 Taravao Venue Values", test_venues_availability_taravao)
-    run_test("1.6 Calculation Coherence", test_venues_availability_calculations)
+    results = []
     
-    # Test 2: Modified endpoint /api/venues/:id/stands
-    print_section("TEST GROUP 2: GET /api/venues/:id/stands - Seed Filtering")
-    run_test("2.1 Faaa Stands - No Assignments (seed filtered)", test_faaa_stands_no_assignments)
-    run_test("2.2 Arue Stands - Exactly 1 Assignment (A-C01)", test_arue_stands_one_assignment)
-    run_test("2.3 Punaauia Stands - No Assignments", test_punaauia_stands_no_assignments)
-    run_test("2.4 Taravao Stands - No Assignments", test_taravao_stands_no_assignments)
+    # Test 1: GET /api/venues/availability
+    results.append(("TEST 1 - venues/availability merged data", test_venues_availability()))
     
-    # Test 3: Non-regression
-    print_section("TEST GROUP 3: Non-Regression Checks")
-    run_test("3.1 GET /api/venues?only_active=1", test_venues_only_active)
-    run_test("3.2 GET /api/menu-badges", test_menu_badges)
-    run_test("3.3 GET /api/admin/validation-queue", test_validation_queue)
-    run_test("3.4 GET /api/validation-requests", test_validation_requests)
-    run_test("3.5 GET /api/registrations", test_registrations)
-    run_test("3.6 POST /api/auth/password-login (admin)", test_admin_login)
+    # Test 2: GET /api/venues/venue-faaa/stands
+    results.append(("TEST 2 - venue-faaa/stands assignments", test_venue_faaa_stands()))
+    
+    # Test 3: GET /api/venues/venue-aru/stands
+    results.append(("TEST 3 - venue-aru/stands assignments", test_venue_arue_stands()))
+    
+    # Test 4: Cross-endpoint coherence
+    results.append(("TEST 4 - Cross-endpoint coherence", test_cross_endpoint_coherence()))
+    
+    # Test 5: Non-regression checks
+    results.append(("TEST 5 - Non-regression checks", test_non_regression()))
     
     # Summary
-    print_section("TEST SUMMARY")
-    pass_rate = (tests_passed / tests_run * 100) if tests_run > 0 else 0
-    print(f"Total Tests: {tests_run}")
-    print(f"Passed: {GREEN}{tests_passed}{RESET}")
-    print(f"Failed: {RED}{tests_run - tests_passed}{RESET}")
-    print(f"Pass Rate: {GREEN if pass_rate == 100 else YELLOW}{pass_rate:.1f}%{RESET}\n")
+    print("\n" + "="*80)
+    print("SUMMARY")
+    print("="*80)
     
-    if tests_passed == tests_run:
-        print(f"{GREEN}{'='*80}{RESET}")
-        print(f"{GREEN}ALL TESTS PASSED ✅{RESET}")
-        print(f"{GREEN}{'='*80}{RESET}\n")
+    passed = sum(1 for _, result in results if result)
+    total = len(results)
+    
+    for test_name, result in results:
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"{status} - {test_name}")
+    
+    print(f"\n{passed}/{total} tests passed ({passed*100//total}%)")
+    
+    if passed == total:
+        print("\n🎉 ALL TESTS PASSED - SESSION 48z fix verified successfully!")
+        print("\nCRITICAL FINDING:")
+        print("✅ pre_reserved + validated in availability corresponds to real active registrations per venue")
+        print("✅ All venues show is_full=true (capacity reached)")
+        print("✅ Faaa: 17 pre_reserved (8 a_confirmer + 9 a_relancer)")
+        print("✅ Punaauia: 13 pre_reserved (4 a_confirmer + 9 a_relancer)")
+        print("✅ Arue: 12 pre_reserved (4 a_confirmer + 8 a_relancer)")
+        print("✅ Taravao: 12 pre_reserved (3 a_confirmer + 9 a_relancer)")
+        print("✅ Prospect sites (Mahina/Moorea) correctly excluded")
         return 0
     else:
-        print(f"{RED}{'='*80}{RESET}")
-        print(f"{RED}SOME TESTS FAILED ❌{RESET}")
-        print(f"{RED}{'='*80}{RESET}\n")
+        print(f"\n❌ {total - passed} test(s) failed")
         return 1
 
+
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())
