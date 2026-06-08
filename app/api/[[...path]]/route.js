@@ -1726,18 +1726,19 @@ export async function GET(request, { params }) {
         const validatedCount = items.filter(i =>
           i.status === 'validated' || i.status === 'confirme' || i.status === 'locked' || i.status === 'verrouille'
         ).length;
-        const preReservedRaw = items.filter(i =>
+        // 🆕 SESSION 48ac — Logique métier : la liste d'attente n'existe que si le quota est atteint.
+        //                  Tous les "candidats" (pré-réservés + waitlist) sont fusionnés ;
+        //                  on attribue les places disponibles en FIFO et le reste devient waitlist.
+        const candidates = items.filter(i =>
           i.status === 'en_attente' || i.status === 'pending' || i.status === 'rdv_fixe' ||
-          i.status === 'a_confirmer' || i.status === 'a_relancer'
+          i.status === 'a_confirmer' || i.status === 'a_relancer' ||
+          i.status === 'waitlist'
         ).length;
-        const waitlistRaw = items.filter(i => i.status === 'waitlist').length;
         const capacity = v.capacity_stands || 0;
-        // 🆕 SESSION 48aa — Règle métier : pré-réservés ≤ capacité disponible
-        //                  Les surplus basculent automatiquement en liste d'attente.
         const slotsForPre = Math.max(0, capacity - validatedCount);
-        const preReserved = Math.min(preReservedRaw, slotsForPre);
-        const overflow = Math.max(0, preReservedRaw - slotsForPre);
-        const waitlist = waitlistRaw + overflow;
+        const preReserved = Math.min(candidates, slotsForPre);
+        const overflow = Math.max(0, candidates - slotsForPre);
+        const waitlist = overflow;
         const totalReserved = validatedCount + preReserved;
         const available = Math.max(0, capacity - totalReserved);
         out[v.id] = {

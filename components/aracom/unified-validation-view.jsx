@@ -117,7 +117,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const grouped = useMemo(() => {
     const out = {};
     for (const v of venues) {
-      out[v.id] = { venue: v, validated: [], preReserved: [], waitlist: [], freeStands: [], overflowCount: 0 };
+      out[v.id] = { venue: v, validated: [], _candidates: [], waitlist: [], freeStands: [], overflowCount: 0 };
     }
     for (const r of requests) {
       const v = r.venue_id;
@@ -125,37 +125,38 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       // 🆕 SESSION 48z — Statuts élargis pour couvrir les deux sources (validation_requests + registrations)
       if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille') {
         out[v].validated.push(r);
-      } else if (r.status === 'waitlist') {
-        out[v].waitlist.push(r);
       } else if (
+        // 🆕 SESSION 48ac — On regroupe pré-réservés ET waitlist dans _candidates,
+        //                  puis on les ventile selon la capacité disponible (FIFO)
         r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe' ||
-        r.status === 'a_confirmer' || r.status === 'a_relancer'
+        r.status === 'a_confirmer' || r.status === 'a_relancer' ||
+        r.status === 'waitlist'
       ) {
-        out[v].preReserved.push(r);
+        out[v]._candidates.push(r);
       }
     }
-    // 🆕 SESSION 48aa — Règle métier : pré-réservés ≤ capacité disponible
-    //   Si un site a déjà N validés et M pré-réservés > (capacity - N), les surplus
-    //   basculent automatiquement en liste d'attente (tri FIFO par created_at).
+    // 🆕 SESSION 48ac — Ventilation FIFO (premier arrivé, premier servi) :
+    //   - Les N premiers candidats (où N = capacity - validated.length) deviennent "pré-réservés"
+    //   - Le reste reste en "liste d'attente"
+    //   ➜ Une liste d'attente n'a de sens QUE si le quota max est atteint.
+    //   ➜ Si des places sont disponibles, les entrées waitlist sont AUTO-PROMUES en pré-réservé.
     for (const k of Object.keys(out)) {
       const g = out[k];
       const capacity = g.venue.capacity_stands || 0;
       const slotsForPre = Math.max(0, capacity - g.validated.length);
-      // Tri FIFO : les plus anciens d'abord (premiers arrivés, premiers servis)
-      g.preReserved.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-      if (g.preReserved.length > slotsForPre) {
-        const overflow = g.preReserved.slice(slotsForPre);
-        g.preReserved = g.preReserved.slice(0, slotsForPre);
-        // Les overflows deviennent automatiquement de la liste d'attente (statut visuel)
-        for (const o of overflow) {
-          g.waitlist.push({ ...o, _auto_waitlist: true });
-        }
-        g.overflowCount = overflow.length;
-      }
-      // Sort waitlist by created_at (par ordre d'arrivée)
-      g.waitlist.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-      g.waitlist = g.waitlist.map((r, i) => ({ ...r, fifo_position: i + 1 }));
-      // Free stands
+      // Tri FIFO : les plus anciens d'abord (date de soumission croissante)
+      g._candidates.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      g.preReserved = g._candidates.slice(0, slotsForPre);
+      const overflow = g._candidates.slice(slotsForPre);
+      // Conserve les marquages auto-waitlist et numéro FIFO
+      g.waitlist = overflow.map((r, i) => ({
+        ...r,
+        _auto_waitlist: r.status !== 'waitlist', // marqué si à l'origine c'était une pré-réservation
+        fifo_position: i + 1,
+      }));
+      g.overflowCount = overflow.length;
+      delete g._candidates;
+      // Free stands physiques
       const stands = standsByVenue[k] || [];
       g.freeStands = stands.filter(s => {
         const a = s.assignment;
