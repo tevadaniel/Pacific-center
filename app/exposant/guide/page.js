@@ -118,7 +118,6 @@ const SECTIONS = [
       "🏢 **ARACOM Conseil** — Organisation du Forum de la Rentrée 2026",
       "📧 agence@aracom-conseil.fr",
       "📱 40 47 88 50",
-      "👤 Coraline DUPIEUX — Responsable événement",
       "",
       "💼 Pour toute question, suggestion ou problème sur site, contactez-nous directement.",
     ],
