@@ -323,7 +323,7 @@ export default function ValidationQueueView() {
           <div className="flex items-start gap-3">
             <ListChecks className="w-5 h-5 shrink-0 mt-0.5 text-indigo-700" />
             <div className="flex-1 text-sm text-indigo-900">
-              <b>File de validation FIFO :</b> les demandes apparaissent par ordre de soumission (plus anciennes en haut). Validez ou refusez avant la date butoir. Le refus d&apos;une demande <i>en attente</i> promeut automatiquement le 1er de la liste d&apos;attente.
+              <b>File de validation — par ordre d&apos;arrivée :</b> les demandes apparaissent dans l&apos;ordre de soumission (plus anciennes en haut). Validez ou refusez avant la date butoir. Le refus d&apos;une demande <i>en attente</i> promeut automatiquement le 1er de la liste d&apos;attente.
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-indigo-200">
@@ -412,7 +412,7 @@ export default function ValidationQueueView() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <CardTitle className="text-base flex items-center gap-2">
               <ListChecks className="w-5 h-5 text-indigo-600" />
-              File FIFO — {filtered.length} demande{filtered.length > 1 ? 's' : ''}
+              File par ordre d&apos;arrivée — {filtered.length} demande{filtered.length > 1 ? 's' : ''}
             </CardTitle>
             <div className="flex items-center gap-2">
               <div className="hidden md:flex items-center gap-1 text-[11px] text-slate-600">

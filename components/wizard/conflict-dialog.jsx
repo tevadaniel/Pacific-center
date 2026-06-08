@@ -99,7 +99,7 @@ export default function ConflictDialog({
         {!isWaitlistFull && (
           <div className="bg-slate-50 border-l-4 border-slate-300 rounded-r p-3 text-xs text-slate-600 leading-relaxed">
             💡 ARACOM vous recontactera pour confirmer ou vous proposer une alternative.
-            Si l&apos;exposant en attente est <b>refusé par ARACOM</b>, vous serez automatiquement <b>promu</b> à la position suivante (ordre FIFO).
+            Si l&apos;exposant en attente est <b>refusé par ARACOM</b>, vous serez automatiquement <b>promu</b> à la position suivante (premier arrivé, premier servi).
           </div>
         )}
 
