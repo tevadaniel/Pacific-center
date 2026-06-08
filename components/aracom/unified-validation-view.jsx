@@ -207,7 +207,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const doRefusePending = async (req) => {
     if (!window.confirm(`Refuser la demande de ${req.organization?.name || 'cet exposant'} sur le stand ${req.stand_code} ?`)) return;
     try {
-      await api(`/api/validation-requests/${req.id}/decline`, {
+      // 🆕 SESSION 48ab — Refus direct par registration_id (uniforme entre validation_requests et registrations)
+      const regId = req.registration_id || req.id;
+      await api(`/api/admin/registrations/${regId}/refuse`, {
         method: 'POST',
         body: JSON.stringify({ reason: 'Refusé par ARACOM' }),
       });
@@ -217,8 +219,17 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   };
 
   const doValidate = async (req) => {
-    // Réutilise le flow existant (redirection vers la vue dédiée)
-    window.location.href = `/aracom?tab=file-validation&focus=${req.id}`;
+    // 🆕 SESSION 48ab — Validation directe via /api/admin/registrations/:id/validate
+    const regId = req.registration_id || req.id;
+    if (!window.confirm(`Valider l'inscription de ${req.organization?.name || 'cet exposant'} sur le stand ${req.stand_code} ?\n\n(L'exposant passera en statut "Validé". Pensez à avoir reçu la caution et la convention signée avant de valider.)`)) return;
+    try {
+      await api(`/api/admin/registrations/${regId}/validate`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      toast.success(`✅ ${req.organization?.name || 'Exposant'} validé — stand ${req.stand_code}`);
+      await load();
+    } catch (e) { toast.error(`❌ ${e.message}`); }
   };
 
   const openSwitch = (waitlister, preReserved) => setSwitchOp({ waitlister, preReserved });

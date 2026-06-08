@@ -3779,6 +3779,98 @@ export async function POST(request, { params }) {
       return json({ ok: true, recipient: org.main_email, sent_at: new Date().toISOString() });
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 48ab — Validation directe d'une INSCRIPTION (registration)
+    // POST /api/admin/registrations/:id/validate
+    //   → registration.status = 'confirme' + locked_at + locked_by
+    //   → met aussi à jour validation_request si elle existe
+    //   → log activité
+    //   Réservé ARACOM.
+    // ═══════════════════════════════════════════════════════════════════
+    if (route.startsWith('admin/registrations/') && route.endsWith('/validate')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const now = new Date();
+      await db.collection('registrations').updateOne(
+        { id: regId },
+        { $set: {
+            status: 'confirme',
+            locked_at: now,
+            locked_by: ctx.userId || 'u-admin',
+            updated_at: now,
+          }
+        }
+      );
+      // Met à jour la validation_request associée si elle existe
+      await db.collection('validation_requests').updateMany(
+        { registration_id: regId, status: { $in: ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer'] } },
+        { $set: { status: 'validated', validated_at: now, validated_by: ctx.userId || 'u-admin', updated_at: now } }
+      );
+      // Met à jour aussi le stand_assignment associé
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: regId },
+        { $set: { request_status: 'validated', validated_at: now, validated_by: ctx.userId || 'u-admin', updated_at: now } }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'REGISTRATION_VALIDATE',
+        description: `Inscription validée : ${reg.stand_code || regId}`,
+        metadata: { registration_id: regId, stand_code: reg.stand_code, venue_id: reg.venue_id },
+        created_at: now,
+      });
+      return json({ ok: true, registration_id: regId, status: 'confirme', locked_at: now });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 48ab — Refus direct d'une inscription
+    // POST /api/admin/registrations/:id/refuse
+    //   → registration.status = 'refuse' + refused_at + refused_by
+    //   Réservé ARACOM.
+    // ═══════════════════════════════════════════════════════════════════
+    if (route.startsWith('admin/registrations/') && route.endsWith('/refuse')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const regId = route.split('/')[2];
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return err('Inscription introuvable', 404);
+      const reason = body?.reason || 'Refusé par ARACOM';
+      const now = new Date();
+      await db.collection('registrations').updateOne(
+        { id: regId },
+        { $set: {
+            status: 'refuse',
+            refused_at: now,
+            refused_by: ctx.userId || 'u-admin',
+            refused_reason: reason,
+            updated_at: now,
+          }
+        }
+      );
+      // Met à jour la validation_request associée si elle existe
+      await db.collection('validation_requests').updateMany(
+        { registration_id: regId, status: { $in: ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer'] } },
+        { $set: { status: 'refused', refused_at: now, refused_reason: reason, updated_at: now } }
+      );
+      // Libère le stand
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: regId },
+        { $set: { status: 'annule', updated_at: now } }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'REGISTRATION_REFUSE',
+        description: `Inscription refusée : ${reg.stand_code || regId} (motif : ${reason})`,
+        metadata: { registration_id: regId, reason },
+        created_at: now,
+      });
+      return json({ ok: true, registration_id: regId, status: 'refuse' });
+    }
+
+
+
     // ─── POST /api/registrations/:id/regenerate-token — Régénère le token magique
     if (route.match(/^registrations\/[^/]+\/regenerate-token$/)) {
       const regId = p[1];
