@@ -29,6 +29,10 @@ export default function StandViewToggle({
   defaultMode = 'map',
   storageKey = 'fr26_stand_view_mode',
   serverSyncRole = null,
+  // 🆕 SESSION 48m — Masque les noms des autres exposants (confidentialité côté Exposant)
+  //   - anonymizeOthers=true : tooltips/labels ne montrent que "Pris" sans nom
+  //   - Le stand de l'utilisateur (highlightStandCode) reste affiché normalement
+  anonymizeOthers = false,
 }) {
   // 🆕 SESSION 48i — Si le venue a désactivé la vue plan, on force le mode "grid"
   //   et on masque le toggle. ARACOM admin garde toujours les 2 vues (editable=true).
@@ -63,10 +67,10 @@ export default function StandViewToggle({
         if (data?.mode === 'map' || data?.mode === 'grid') {
           setMode(data.mode);
           if (typeof window !== 'undefined') {
-            try { localStorage.setItem(storageKey, data.mode); } catch {}
+            try { localStorage.setItem(storageKey, data.mode); } catch { /* ignore */ }
           }
         }
-      } catch {}
+      } catch { /* ignore */ }
       setServerSynced(true);
     })();
     return () => { cancelled = true; };
@@ -138,6 +142,7 @@ export default function StandViewToggle({
             onStandClick={onStandClick}
             onStandsReload={onStandsReload}
             editable={editable}
+            anonymizeOthers={anonymizeOthers}
           />
           <div className="text-xs italic text-slate-500 text-center pt-1 select-none">
             Sous réserve de modification le jour J
@@ -149,6 +154,7 @@ export default function StandViewToggle({
           venue={venue}
           highlightStandCode={highlightStandCode}
           onStandClick={onStandClick}
+          anonymizeOthers={anonymizeOthers}
         />
       )}
     </div>
@@ -156,7 +162,7 @@ export default function StandViewToggle({
 }
 
 // 🆕 Vue grille — cases numérotées avec état (libre/pris/waitlist/highlighted)
-function StandsGrid({ stands = [], venue, highlightStandCode, onStandClick }) {
+function StandsGrid({ stands = [], venue, highlightStandCode, onStandClick, anonymizeOthers = false }) {
   if (!Array.isArray(stands) || stands.length === 0) {
     return (
       <div className="text-center text-slate-500 italic py-6 text-sm">
@@ -186,7 +192,8 @@ function StandsGrid({ stands = [], venue, highlightStandCode, onStandClick }) {
           const code = stand.stand_code || stand.code || stand.label || '—';
           const isHighlighted = highlightStandCode && (code === highlightStandCode);
           const asn = stand.assignment;
-          const orgName = stand.organization?.name;
+          // 🆕 SESSION 48m — Masque le nom des autres exposants si demandé (confidentialité côté Exposant)
+          const orgName = (anonymizeOthers && !isHighlighted) ? null : stand.organization?.name;
           const isTaken = !!asn?.registration_id && (asn.request_status === 'validated' || stand.registration_status === 'confirme' || !asn.request_status);
           const isPending = asn?.request_status === 'pending';
           const isWaitlist = asn?.request_status === 'waitlist' || stand.has_waitlist;

@@ -2226,7 +2226,7 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
             <p className="text-xs text-slate-500 mt-1">Vue d&apos;ensemble : votre stand est mis en évidence en bleu.</p>
           </CardHeader>
           <CardContent>
-            <StandViewToggle stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} onStandClick={!isLocked ? (st) => reserve(st) : null} serverSyncRole="reader" />
+            <StandViewToggle stands={stands} venue={venue} highlightStandCode={isOnSelectedVenue ? myStandCode : null} onStandClick={!isLocked ? (st) => reserve(st) : null} serverSyncRole="reader" anonymizeOthers={true} />
           </CardContent>
         </Card>
       )}

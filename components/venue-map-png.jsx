@@ -36,7 +36,7 @@ const STATUS_COLORS = {
   libre: '#00AEEF',
 };
 
-export default function VenueMapPng({ venue, stands = [], onStandClick, onStandsReload, highlightStandCode, editable = false }) {
+export default function VenueMapPng({ venue, stands = [], onStandClick, onStandsReload, highlightStandCode, editable = false, anonymizeOthers = false }) {
   const [search, setSearch] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [positions, setPositions] = useState({}); // stand_code -> {x,y}
@@ -283,7 +283,7 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
       <div className="flex flex-col md:flex-row md:items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <Input placeholder="Rechercher un stand ou un exposant…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-9" />
+          <Input placeholder={anonymizeOthers ? 'Rechercher un stand (numéro)…' : 'Rechercher un stand ou un exposant…'} value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-9" />
         </div>
         {editable && (
           <div className="flex gap-2">
@@ -442,8 +442,8 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
           const highlighted = highlightStandCode && s.stand_code === highlightStandCode;
           const matchesSearch = !q ||
             (s.stand_code || '').toLowerCase().includes(q) ||
-            (s.organization?.name || '').toLowerCase().includes(q) ||
-            (s.organization?.discipline || '').toLowerCase().includes(q);
+            (!anonymizeOthers && (s.organization?.name || '').toLowerCase().includes(q)) ||
+            (!anonymizeOthers && (s.organization?.discipline || '').toLowerCase().includes(q));
           const isSelected = editMode && selectedCodes.has(s.stand_code);
           return (
             <div
@@ -492,6 +492,14 @@ export default function VenueMapPng({ venue, stands = [], onStandClick, onStands
                   return s.organization ? `${s.stand_code} — ${s.organization.name} (${s.organization.discipline}) — Cliquez pour (dé)sélectionner, glisser pour déplacer` : `${s.stand_code} — Libre — Cliquez pour (dé)sélectionner, glisser pour déplacer`;
                 }
                 if (!s.organization) return `${s.stand_code} — 🟢 Libre · Cliquez pour le demander`;
+                // 🆕 SESSION 48m — Anonymisation pour exposants : masque les noms des autres
+                if (anonymizeOthers && !highlighted) {
+                  const rs = s.assignment?.request_status;
+                  if (rs === 'validated') return `${s.stand_code} — 🔒 Pris · Verrouillé`;
+                  if (rs === 'pending') return `${s.stand_code} — ⏳ En attente · Cliquez pour rejoindre la liste d'attente`;
+                  if (rs === 'waitlist') return `${s.stand_code} — 📋 Liste d'attente · Cliquez pour rejoindre la liste`;
+                  return `${s.stand_code} — ✕ Pris`;
+                }
                 // 🆕 SESSION 47.13 — Affiche le request_status pour transparence sur waitlist
                 const rs = s.assignment?.request_status;
                 const wpos = s.assignment?.waitlist_position;
