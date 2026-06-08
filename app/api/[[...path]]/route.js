@@ -2283,7 +2283,7 @@ export async function GET(request, { params }) {
     // Renvoie tous les counters en une seule requête. Cache 30s côté client.
     if (route === 'menu-badges') {
       try {
-        const [regs, anomalies, validationReqs, deposits, orgs, satisfactionReqs, pendingStands, pendingAnims, pendingCessions] = await Promise.all([
+        const [regs, anomalies, validationReqs, deposits, orgs, satisfactionReqs, pendingStands, pendingAnims, pendingCessions, waitlistCount] = await Promise.all([
           db.collection('registrations').find({ edition_id: EDITION_ID }, { projection: { status: 1, organization_id: 1 } }).toArray(),
           db.collection('registration_anomalies').countDocuments({ resolved_status: { $ne: 'resolu' } }),
           db.collection('validation_requests').countDocuments({ status: { $in: ['pending', 'awaiting', null] } }),
@@ -2293,6 +2293,8 @@ export async function GET(request, { params }) {
           db.collection('stand_assignments').countDocuments({ request_status: 'pending' }).catch(() => 0),
           db.collection('animation_slots').countDocuments({ request_status: 'pending' }).catch(() => 0),
           db.collection('stand_assignments').countDocuments({ cession_status: 'pending_approval' }).catch(() => 0),
+          // 🆕 SESSION 48s — Compteur liste d'attente
+          db.collection('validation_requests').countDocuments({ status: 'waitlist' }).catch(() => 0),
         ]);
         const aRelancer = regs.filter(r => r.status === 'a_relancer').length;
         const aConfirmer = regs.filter(r => r.status === 'a_confirmer').length;
@@ -2304,6 +2306,7 @@ export async function GET(request, { params }) {
           validations: validationReqs,
           pending_validations: (pendingStands || 0) + (pendingAnims || 0),
           pending_cessions: pendingCessions || 0,
+          waitlist: waitlistCount || 0,
           relances: aRelancer,
           a_confirmer: aConfirmer,
           cautions: cautionMissing,
@@ -2313,7 +2316,7 @@ export async function GET(request, { params }) {
         });
       } catch (e) {
         console.error('[menu-badges] error', e?.message);
-        return json({ validations: 0, pending_validations: 0, pending_cessions: 0, relances: 0, a_confirmer: 0, cautions: 0, orphans: 0, anomalies: 0, satisfaction: 0 });
+        return json({ validations: 0, pending_validations: 0, pending_cessions: 0, waitlist: 0, relances: 0, a_confirmer: 0, cautions: 0, orphans: 0, anomalies: 0, satisfaction: 0 });
       }
     }
 
