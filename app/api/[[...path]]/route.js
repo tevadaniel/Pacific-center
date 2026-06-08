@@ -139,7 +139,7 @@ async function tryForceChequeOnly() {
 
 // 🆕 Helper : génère le HTML d'une attestation de remboursement avec 2 exemplaires sur 2 pages A4
 function buildRefundAttestationHTML({ org, venue, reg, dep, num, today }) {
-  const modeLabel = dep?.deposit_mode === 'especes' ? 'Espèces' : (dep?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
+  const modeLabel = 'Chèque';
   // Construction d'UN exemplaire (réutilisé 2× avec un copy_label différent)
   const singleCopy = (copyLabel, copyNumber) => `
 <div class="page">
@@ -2821,7 +2821,7 @@ export async function GET(request, { params }) {
         { key: 'stand', label: 'Choisir votre site et pré-réserver un stand', done: !!(reg?.venue_id && reg?.stand_code), action_label: 'Choisir mon stand', target_tab: 'parcours', target_step: 1, deadline_key: 'stand', why: 'Réserve votre emplacement avant que les autres exposants ne prennent les meilleurs.' },
         { key: 'animation', label: "Planifier vos créneaux d'animation", done: animSlots.length > 0, action_label: 'Planifier une animation', target_tab: 'parcours', target_step: 2, deadline_key: 'animation', why: "1 créneau d'1 heure maximum par jour. Vendredi 11h-17h ou samedi 9h-17h." },
         { key: 'documents', label: 'Déposer vos documents officiels', done: hasInsurance && validatedDocs >= 2, action_label: 'Téléverser mes documents', target_tab: 'parcours', target_step: 3, deadline_key: 'documents', why: "L'attestation d'assurance responsabilité civile est obligatoire pour exposer." },
-        { key: 'caution', label: 'Verser votre caution (20 000 XPF)', done: cautionReceived, action_label: 'Voir les modalités de caution', target_tab: 'parcours', target_step: 3, deadline_key: 'caution', why: "Caution restituée intégralement après l'événement. Versement par chèque ou espèces auprès d'ARACOM." },
+        { key: 'caution', label: 'Verser votre caution (20 000 XPF)', done: cautionReceived, action_label: 'Voir les modalités de caution', target_tab: 'parcours', target_step: 3, deadline_key: 'caution', why: "Caution restituée intégralement après l'événement. Versement par chèque uniquement (à l'ordre d'ARACOM)." },
         { key: 'convention', label: 'Signer la convention de participation', done: conventionSigned, action_label: 'Voir la convention', target_tab: 'parcours', target_step: 3, deadline_key: 'convention', why: 'Document contractuel envoyé par ARACOM après validation de votre dossier.' },
       ];
 
@@ -3642,7 +3642,7 @@ export async function POST(request, { params }) {
             <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px;border-radius:6px;font-size:12px;color:#78350f;margin:16px 0;">
               <b>⚠️ Prochaines étapes :</b><br>
               1. Signer la convention (téléchargeable depuis votre espace)<br>
-              2. Régler la <b>caution de 20 000 XPF</b> (chèque, virement ou espèces)<br>
+              2. Régler la <b>caution de 20 000 XPF</b> par chèque (à l'ordre d'ARACOM)<br>
               3. Préparer vos animations et votre matériel
             </div>
             <p style="font-size:12px;color:#6b7280;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:12px;">
@@ -4861,8 +4861,9 @@ export async function POST(request, { params }) {
       if (missing.length) return err(`Étapes incomplètes : ${missing.join(', ')}`, 400);
 
       // 🆕 SESSION 47 — Capture des paramètres post-soumission : mode de règlement caution + RDV libre
-      const allowedPayments = ['cheque', 'espece', 'virement'];
-      const cautionPayment = allowedPayments.includes(caution_payment_method) ? caution_payment_method : null;
+      // 🆕 SESSION 48w — Caution = chèque uniquement (mode espèces/virement supprimé)
+      const allowedPayments = ['cheque'];
+      const cautionPayment = allowedPayments.includes(caution_payment_method) ? caution_payment_method : 'cheque';
       let cautionDepositAt = null;
       if (caution_deposit_date) {
         const isoDate = String(caution_deposit_date).slice(0, 10);
@@ -4943,7 +4944,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
 
 ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 18px;border-radius:6px;margin:18px 0">
   <h3 style="margin:0 0 10px 0;color:#5b21b6">💰 Caution & dépôt de documents</h3>
-  ${cautionPayment ? `<div><b>Mode de règlement :</b> ${cautionPayment === 'cheque' ? 'Chèque' : cautionPayment === 'espece' ? 'Espèces' : 'Virement bancaire'}</div>` : ''}
+  ${cautionPayment ? `<div><b>Mode de règlement :</b> Chèque (à l'ordre d'ARACOM)</div>` : ''}
   ${cautionDepositAt ? `<div><b>Date et heure du dépôt :</b> ${new Date(cautionDepositAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} à ${new Date(cautionDepositAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
   ${bring_documents_to_rdv ? `<div style="margin-top:6px;padding:8px;background:#fef3c7;border-radius:4px;font-size:13px"><b>📋 À apporter le jour J :</b> les documents manquants (convention signée, attestation d'assurance, etc.)</div>` : ''}
   <div style="margin-top:8px;font-size:13px;color:#5b21b6"><b>Caution :</b> 20 000 XPF par site</div>
@@ -7097,7 +7098,7 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
             const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
             const dep2 = await db.collection('deposit_transactions').findOne({ registration_id: id });
             const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
-            const paymentLabel = dep2?.deposit_mode === 'especes' ? 'Espèces' : (dep2?.deposit_mode === 'virement' ? 'Virement bancaire' : 'Chèque');
+            const paymentLabel = 'Chèque';
             const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937;padding:0 16px}h1{color:#1d4ed8;margin:0 0 4px}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#1d4ed8;color:#fff;border:0;cursor:pointer;font-weight:600}@media print{.print-btn{display:none}}</style></head><body><button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button><div style="display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #1d4ed8;padding-bottom:10px"><div><h1>REÇU DE CAUTION</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div style="background:#1d4ed8;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;letter-spacing:.05em">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émis le ${new Date().toLocaleDateString('fr-FR')}</div></div></div><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date d'émission</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode de paiement</span><b>${paymentLabel}</b></div></div><div style="text-align:center;padding:18px 0;background:#eff6ff;border-radius:8px"><div class="label">Montant reçu en garantie</div><div class="amount">20 000 XPF</div></div></body></html>`;
             await db.collection('registration_documents').insertOne({
               id: uuid(), registration_id: id, document_type: 'recu_caution',
@@ -8772,7 +8773,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
         venue_id: reg.venue_id,
         stand_code: reg.stand_code,
         status: 'en_attente', // en_attente -> rdv_fixe -> verrouille | annulee
-        preferred_payment, // 'cheque' | 'especes' | 'virement'
+        preferred_payment: 'cheque', // 🆕 SESSION 48w — Caution = chèque uniquement (forcé en DB)
         rdv_proposal,
         notes,
         rdv_date: null,
@@ -8813,7 +8814,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
   ${rdv_proposal ? `<div><b>Vos disponibilités :</b> ${rdv_proposal}</div>` : ''}
 </div>
 <p>L'équipe ARACOM va vous recontacter sous peu pour <b>fixer un rendez-vous</b> de remise de la caution. Une fois la caution réceptionnée, votre stand et vos créneaux d'animation seront <b>verrouillés définitivement</b>.</p>
-<p>📌 <b>Modes acceptés :</b> chèque, espèces ou virement bancaire.</p>
+<p>📌 <b>Mode accepté :</b> chèque uniquement (à l'ordre d'ARACOM).</p>
 <p>À très vite,<br/>L'équipe ARACOM</p>`,
             }, db).catch(e => console.error('[mail exposant request-validation]', e?.message));
           }
@@ -8878,7 +8879,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
 </div>
 <p>📌 <b>Merci de prévoir :</b></p>
 <ul>
-  <li>Votre <b>caution de 20 000 XPF</b> en <b>chèque</b> (à l'ordre d'ARACOM) ou <b>espèces</b> uniquement</li>
+  <li>Votre <b>caution de 20 000 XPF</b> par <b>chèque</b> à l'ordre d'ARACOM (seul mode accepté)</li>
   <li>Votre <b>attestation d'assurance</b> et la <b>convention signée</b> si pas encore déposées</li>
   <li>Une pièce d'identité du responsable légal de l'association</li>
 </ul>
@@ -8984,7 +8985,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
         const ctx = await buildExposantContext(vreq.registration_id);
         if (ctx?.org?.main_email) {
           const receiptUrl = receiptDocId ? `${baseUrl}/api/documents/${receiptDocId}/download` : '';
-          const paymentLabel = payment_mode === 'especes' ? 'Espèces' : 'Chèque';
+          const paymentLabel = 'Chèque';
           sendMailAuto({
             to: ctx.org.main_email,
             subject: `🔒 Inscription verrouillée — ${ctx.org.name}`,
@@ -9267,7 +9268,7 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       const dep = await db.collection('deposit_transactions').findOne({ registration_id: regId });
       const venue = await db.collection('venues').findOne({ id: reg.venue_id });
       const receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937}h1{color:#1d4ed8}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}</style></head><body><h1>REÇU DE CAUTION</h1><p><b>Forum de la Rentrée 2026</b> · 14 & 15 août 2026<br>Organisé par <b>ARACOM</b></p><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode</span><span>${dep?.deposit_mode || 'Chèque / Virement / Espèces'}</span></div></div><div style="text-align:center;padding:18px 0"><div class="label">Montant</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Reçu en garantie de présence sur le Forum</div></div><p style="font-size:12px;color:#64748b">Cette caution sera restituée intégralement sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées.</p><p style="margin-top:40px"><i>L'équipe ARACOM</i></p></body></html>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937}h1{color:#1d4ed8}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}</style></head><body><h1>REÇU DE CAUTION</h1><p><b>Forum de la Rentrée 2026</b> · 14 & 15 août 2026<br>Organisé par <b>ARACOM</b></p><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode</span><span>Chèque</span></div></div><div style="text-align:center;padding:18px 0"><div class="label">Montant</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Reçu en garantie de présence sur le Forum</div></div><p style="font-size:12px;color:#64748b">Cette caution sera restituée intégralement sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées.</p><p style="margin-top:40px"><i>L'équipe ARACOM</i></p></body></html>`;
       // Save in registration_documents collection (matches the GET /api/documents endpoint)
       const docId = uuid();
       const fileName = `Recu_caution_${(org?.name || 'exposant').replace(/\s+/g,'_')}_${receiptNumber}.html`;
@@ -9792,7 +9793,7 @@ ${deadlineLines}
 2. Choisir un site Pacific Centers et pré-réserver un stand libre sur le plan
 3. Planifier 1 créneau d'animation par jour maximum (vendredi 11h-17h, samedi 9h-17h)
 4. Déposer les documents officiels (assurance responsabilité civile, RIB, etc.)
-5. Verser la caution de 20 000 XPF auprès d'ARACOM (chèque ou espèces)
+5. Verser la caution de 20 000 XPF auprès d'ARACOM par chèque (à l'ordre d'ARACOM)
 6. Signer la convention de participation envoyée par ARACOM
 
 🔒 Verrouillage du stand : votre stand devient définitivement réservé UNIQUEMENT après validation d'ARACOM (caution reçue + convention signée + documents validés). Avant cela, vous pouvez libérer votre pré-réservation à tout moment.

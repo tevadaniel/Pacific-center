@@ -635,7 +635,7 @@ export default function FicheExposantV2({ id, onClose }) {
       {/* ═══════════════════ SECTION 7 : CAUTION ═══════════════════ */}
       <CollapsibleSection icon={Wallet} title="Caution">
         <EditableField label="Montant (XPF)" type="number" value={dep?.amount_xpf || reg.caution_amount_xpf} onSave={(v) => saveReg({ caution_amount_xpf: Number(v) })} />
-        <EditableField label="Mode encaissement" type="select" options={['Espèces', 'Chèque', 'Virement', 'Carte bancaire']} value={reg.caution_mode || dep?.payment_method} onSave={(v) => saveReg({ caution_mode: v })} />
+        <EditableField label="Mode encaissement" type="select" options={['Chèque']} value={reg.caution_mode || dep?.payment_method || 'Chèque'} onSave={(v) => saveReg({ caution_mode: v })} />
         <EditableField label="Date encaissement" type="date" value={reg.caution_received_date} onSave={(v) => saveReg({ caution_received_date: v })} />
         <EditableField label="RDV caution" type="datetime-local" value={reg.caution_appointment_at} onSave={(v) => saveReg({ caution_appointment_at: v })} />
         <EditableField

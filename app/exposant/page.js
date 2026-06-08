@@ -678,7 +678,7 @@ export default function ExposantPortal() {
                     </a>
                   ) : (
                     <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
-                      <strong>Modes acceptés :</strong> chèque, virement ou espèces. <br />
+                      <strong>Mode accepté :</strong> chèque uniquement (à l&apos;ordre d&apos;ARACOM). <br />
                       Le reçu de caution sera <b>fourni automatiquement par ARACOM</b> dans cet espace dès réception du paiement.
                     </div>
                   )}
@@ -1293,7 +1293,7 @@ function Step3Card({ registration, docs, validationRequest, isLocked, unlocked, 
                 <ul className="text-xs text-violet-700 mt-2 ml-4 list-disc space-y-0.5">
                   <li>Convention signée (téléchargeable plus haut)</li>
                   <li>Justificatif d&apos;assurance responsabilité civile</li>
-                  <li>Caution de <b>20 000 XPF</b> (chèque, virement ou espèces)</li>
+                  <li>Caution de <b>20 000 XPF</b> en chèque (à l&apos;ordre d&apos;ARACOM)</li>
                 </ul>
                 <p className="text-xs text-violet-700 mt-2">Une fois le rendez-vous honoré, votre stand sera <b>définitivement verrouillé</b> et vous recevrez un email de confirmation avec le guide de l&apos;exposant.</p>
                 <Button onClick={submitValidation} disabled={submitting} className="mt-3 bg-violet-600 hover:bg-violet-700 gap-2">
@@ -1314,7 +1314,7 @@ const STEPS = [
   { key: 'site_stand', n: 2, label: 'Choisir mon site & stand', desc: 'Pré-réservation', tab: 'sites', dl_key: 'stand' },
   { key: 'animations', n: 3, label: 'Sélectionner mes animations', desc: '1 créneau par jour', tab: 'animations', dl_key: 'animation' },
   { key: 'documents', n: 4, label: 'Déposer mes documents', desc: 'Assurance + convention', tab: 'documents', dl_key: 'documents' },
-  { key: 'validation_requested', n: 5, label: 'Demander la validation', desc: 'Caution chèque ou espèces', tab: 'profil', dl_key: 'caution' },
+  { key: 'validation_requested', n: 5, label: 'Demander la validation', desc: 'Caution par chèque (20 000 XPF)', tab: 'profil', dl_key: 'caution' },
   { key: 'locked', n: 6, label: 'Inscription verrouillée', desc: 'Confirmé par ARACOM', tab: 'profil', dl_key: 'convention' },
 ];
 
@@ -1421,7 +1421,7 @@ function ConfirmPresenceInlineCard({ registrationId, canRequest, onDone }) {
           </div>
           <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
             {canRequest
-              ? <>Tout est prêt ! En soumettant, votre <b>candidature sera verrouillée</b> et ARACOM vous contactera pour fixer un RDV de remise de caution (chèque, espèces ou virement, 20 000 XPF).</>
+              ? <>Tout est prêt ! En soumettant, votre <b>candidature sera verrouillée</b> et ARACOM vous contactera pour fixer un RDV de remise de caution par chèque (20 000 XPF, à l&apos;ordre d&apos;ARACOM).</>
               : <>Pour activer la soumission : choisissez un <b>site + stand</b> (onglet Sites &amp; plan) et au moins <b>un créneau d&apos;animation</b> (onglet Animations).</>
             }
           </p>
@@ -1544,7 +1544,7 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
                 />
               </div>
               <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-                <b>📌 Modes acceptés :</b> chèque, espèces ou virement bancaire (20 000 XPF).
+                <b>📌 Mode accepté :</b> chèque uniquement, à l&apos;ordre d&apos;ARACOM (20 000 XPF).
               </div>
             </CardContent>
             <div className="flex gap-2 justify-end p-4 border-t">
@@ -3010,7 +3010,7 @@ function GuideBlock() {
           <ol className="list-decimal pl-5 text-slate-700">
             <li>Complétez votre <strong>profil</strong> (description, contact, jours de présence).</li>
             <li>Choisissez <strong>un site et pré-réservez un stand</strong> dans l&apos;onglet <em>Sites & plan</em>.</li>
-            <li>Versez votre <strong>caution de 20 000 XPF</strong> à ARACOM (chèque, virement ou espèces).</li>
+            <li>Versez votre <strong>caution de 20 000 XPF</strong> à ARACOM par chèque (à l&apos;ordre d&apos;ARACOM).</li>
             <li>ARACOM <strong>confirme votre inscription</strong> et vous remet le reçu de caution.</li>
           </ol>
         </section>
@@ -3543,7 +3543,7 @@ function CautionAppointmentBlock({ registration, organization, deposit }) {
               </p>
               <div className="mt-3 text-xs bg-white/70 rounded-md p-3 border border-white/80">
                 <p className="font-semibold mb-1">📍 Lieu : <span className="font-bold">{placeStr}</span></p>
-                <p className="text-slate-600 mt-1">Munissez-vous d&apos;une pièce d&apos;identité. La caution de <b>20 000 XPF</b> vous sera restituée sous la forme acceptée à l&apos;origine (espèces, chèque ou virement) et vous signerez sur place l&apos;<b>attestation de remboursement</b> en 2 exemplaires.</p>
+                <p className="text-slate-600 mt-1">Munissez-vous d&apos;une pièce d&apos;identité. La caution de <b>20 000 XPF</b> vous sera restituée par retour du chèque, et vous signerez sur place l&apos;<b>attestation de remboursement</b> en 2 exemplaires.</p>
               </div>
               <p className={`text-xs mt-2 ${isConfirmed ? 'text-emerald-700' : 'text-amber-700'}`}>
                 Statut : <b>

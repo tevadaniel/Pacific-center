@@ -26,7 +26,7 @@ const RELANCE_STATUS_CONFIG = [
     emoji: '💰',
     color: 'red',
     subject: '[Forum 2026] Rappel — Caution de 20 000 XPF à régler',
-    body: `<p>Bonjour,</p><p>Nous n'avons pas encore reçu votre <b>caution de 20 000 XPF</b> pour votre participation au Forum de la Rentrée 2026.</p><p>📌 <b>Modes acceptés :</b> chèque, espèces ou virement bancaire.</p><p>Sans ce versement, votre stand ne pourra pas être verrouillé. Merci de prendre rendez-vous au plus vite.</p><p>L'équipe ARACOM</p>`,
+    body: `<p>Bonjour,</p><p>Nous n'avons pas encore reçu votre <b>caution de 20 000 XPF</b> pour votre participation au Forum de la Rentrée 2026.</p><p>📌 <b>Mode accepté :</b> chèque uniquement, à l'ordre d'ARACOM.</p><p>Sans ce versement, votre stand ne pourra pas être verrouillé. Merci de prendre rendez-vous au plus vite.</p><p>L'équipe ARACOM</p>`,
     filter: (r) => r.deposit_status !== 'recue' && r.status !== 'annule' && r.status !== 'prospect',
     actions: ['mail', 'export_dossier'],
   },

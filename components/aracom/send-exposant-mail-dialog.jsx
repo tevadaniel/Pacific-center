@@ -52,7 +52,7 @@ const TEMPLATES = {
   <li><b>Heure :</b> [à compléter]</li>
   <li><b>Lieu :</b> [à compléter]</li>
 </ul>
-<p>Merci d'apporter un chèque ou de prévoir un règlement en espèces. La caution vous sera restituée après l'événement après vérification du stand.</p>
+<p>Merci d'apporter votre chèque de 20 000 XPF à l'ordre d'ARACOM. La caution vous sera restituée après l'événement après vérification du stand.</p>
 <p>[[MON_ESPACE]]</p>
 <p>Cordialement,<br/>L'équipe ARACOM</p>`,
   },

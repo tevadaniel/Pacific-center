@@ -903,8 +903,6 @@ function FicheExposant({ id, onClose }) {
                           <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="cheque">Chèque</SelectItem>
-                            <SelectItem value="virement">Virement</SelectItem>
-                            <SelectItem value="especes">Espèces</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2056,7 +2054,7 @@ function PendingValidationsCard({ onGoto }) {
               <Badge className={r.status === 'en_attente' ? 'bg-amber-500 text-white shrink-0' : 'bg-blue-500 text-white shrink-0'}>{r.status === 'en_attente' ? '⏳' : '📅'}</Badge>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold truncate flex items-center gap-1.5"><AiInsightTrigger registration={{ id: r.registration_id || r.id }} size="xs" /><ExposantLink id={r.registration_id || r.id}>{r.organization?.name || '—'}</ExposantLink></div>
-                <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · {r.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque'}</div>
+                <div className="text-xs text-slate-500 truncate">{r.venue?.name} · Stand <span className="font-mono">{r.stand_code}</span> · 💳 Chèque</div>
                 {r.status === 'rdv_fixe' && r.rdv_date && <div className="text-[10px] text-blue-700 font-semibold">{new Date(r.rdv_date).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
               </div>
             </div>

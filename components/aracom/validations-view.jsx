@@ -73,7 +73,7 @@ export default function ValidationsView() {
         <CardContent className="p-4 text-sm text-violet-900 flex items-start gap-3">
           <Sparkles className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
-            <b>Workflow de verrouillage :</b> l&apos;exposant clique sur <i>« Confirmer ma présence »</i> ⟶ vous fixez un RDV (chèque ou espèces) ⟶ vous encaissez ⟶ vous verrouillez la demande ⟶ l&apos;application confirme l&apos;inscription, marque la caution comme reçue, génère automatiquement le reçu et l&apos;envoie à l&apos;exposant par email.
+            <b>Workflow de verrouillage :</b> l&apos;exposant clique sur <i>« Confirmer ma présence »</i> ⟶ vous fixez un RDV pour la remise du <b>chèque</b> (20 000 XPF à l&apos;ordre d&apos;ARACOM) ⟶ vous encaissez ⟶ vous verrouillez la demande ⟶ l&apos;application confirme l&apos;inscription, marque la caution comme reçue, génère automatiquement le reçu et l&apos;envoie à l&apos;exposant par email.
           </div>
         </CardContent>
       </Card>
@@ -104,7 +104,7 @@ export default function ValidationsView() {
 }
 
 function ValidationRequestCard({ req, onSetRdv, onLock, onCancel }) {
-  const paymentLabel = req.preferred_payment === 'especes' ? '💵 Espèces' : '💳 Chèque';
+  const paymentLabel = '💳 Chèque';
   const accent = req.status === 'en_attente' ? 'border-amber-300 bg-amber-50/40'
     : req.status === 'rdv_fixe' ? 'border-blue-300 bg-blue-50/40'
     : req.status === 'verrouille' ? 'border-emerald-300 bg-emerald-50/40'
@@ -137,7 +137,7 @@ function ValidationRequestCard({ req, onSetRdv, onLock, onCancel }) {
               </div>
             )}
             {req.status === 'verrouille' && req.locked_at && (
-              <div className="mt-2 text-xs text-emerald-700">🔒 Verrouillée le {new Date(req.locked_at).toLocaleString('fr-FR')} · {(req.amount_xpf || 20000).toLocaleString('fr-FR')} XPF en {req.payment_mode === 'especes' ? 'espèces' : 'chèque'}</div>
+              <div className="mt-2 text-xs text-emerald-700">🔒 Verrouillée le {new Date(req.locked_at).toLocaleString('fr-FR')} · {(req.amount_xpf || 20000).toLocaleString('fr-FR')} XPF en chèque</div>
             )}
             {req.status === 'annulee' && req.cancellation_reason && (
               <div className="mt-2 text-xs text-rose-700">❌ Annulée — {req.cancellation_reason}</div>
@@ -182,7 +182,7 @@ function SetRdvModal({ req, onClose, onSaved }) {
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
   };
-  const paymentLabel = req.preferred_payment === 'especes' ? 'Espèces' : 'Chèque';
+  const paymentLabel = 'Chèque';
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !busy && onClose()}>
       <Card className="max-w-lg w-full" onClick={(e) => e.stopPropagation()}>

@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
  *
  * S'ouvre quand l'exposant clique sur le bouton final "Soumettre ma demande".
  * Permet de compléter :
- *  - Mode de règlement de la caution (Chèque / Espèces / Virement)
+ *  - Mode de règlement de la caution (Chèque uniquement)
  *  - Date + heure libres pour déposer la caution + documents
  *  - Statut des documents (déjà uploadés ou à apporter le jour J)
  *
@@ -27,7 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
  *  - state : objet wizard state complet (registration, organization, documents, etc.)
  */
 export default function SubmitFinalizeModal({ open, onClose, onConfirm, state, registrationId, saving }) {
-  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cheque');
   const [depositDate, setDepositDate] = useState('');
   const [depositTime, setDepositTime] = useState('14:00');
   const [bringToRdv, setBringToRdv] = useState(true);
@@ -127,30 +127,15 @@ export default function SubmitFinalizeModal({ open, onClose, onConfirm, state, r
           <section className="border-2 border-violet-200 bg-violet-50/40 rounded-lg p-4 space-y-3">
             <div className="flex items-center gap-2">
               <Banknote className="w-5 h-5 text-violet-600" />
-              <h3 className="font-bold text-slate-900">Mode de règlement de la caution <span className="text-rose-600">*</span></h3>
+              <h3 className="font-bold text-slate-900">Caution par chèque</h3>
             </div>
-            <p className="text-xs text-slate-600">Caution de <b>20 000 XPF</b> par site, restituée après l'événement.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {[
-                { v: 'cheque', icon: '📃', label: 'Chèque', desc: 'À l\'ordre d\'ARACOM' },
-                { v: 'espece', icon: '💵', label: 'Espèces', desc: 'Sur place uniquement' },
-                { v: 'virement', icon: '🏦', label: 'Virement', desc: 'IBAN communiqué par mail' },
-              ].map(opt => (
-                <button
-                  key={opt.v}
-                  type="button"
-                  onClick={() => setPaymentMethod(opt.v)}
-                  className={`text-left p-3 rounded-md border-2 transition ${
-                    paymentMethod === opt.v
-                      ? 'border-violet-500 bg-white shadow-sm ring-2 ring-violet-200'
-                      : 'border-slate-200 bg-white/60 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="text-xl mb-1">{opt.icon}</div>
-                  <div className="font-semibold text-sm">{opt.label}</div>
-                  <div className="text-[11px] text-slate-500">{opt.desc}</div>
-                </button>
-              ))}
+            <p className="text-xs text-slate-600">Caution de <b>20 000 XPF</b> par site, par <b>chèque uniquement</b> à l&apos;ordre d&apos;ARACOM. Restituée après l&apos;événement.</p>
+            <div className="rounded-md border-2 border-violet-300 bg-white px-3 py-2.5 flex items-center gap-3">
+              <span className="text-2xl">📃</span>
+              <div>
+                <div className="font-semibold text-sm">Chèque — à l&apos;ordre d&apos;ARACOM</div>
+                <div className="text-[11px] text-slate-500">Seul mode de règlement accepté pour la caution.</div>
+              </div>
             </div>
           </section>
 
@@ -274,7 +259,7 @@ export default function SubmitFinalizeModal({ open, onClose, onConfirm, state, r
           {paymentMethod && depositDate && (
             <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-200 rounded-lg p-3 text-xs text-emerald-900">
               <div className="font-bold mb-1 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Récapitulatif</div>
-              <div>💰 Caution 20 000 XPF en <b>{paymentMethod === 'cheque' ? 'chèque' : paymentMethod === 'espece' ? 'espèces' : 'virement'}</b></div>
+              <div>💰 Caution 20 000 XPF en <b>chèque</b> (à l&apos;ordre d&apos;ARACOM)</div>
               <div>📅 Dépôt le <b>{new Date(`${depositDate}T${depositTime}`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</b> à <b>{depositTime}</b></div>
               <div>📋 Documents : <b>{allDocsOk ? 'tous OK' : `${missingDocs.length} à apporter${bringToRdv ? ' le jour J' : ''}`}</b></div>
             </div>
