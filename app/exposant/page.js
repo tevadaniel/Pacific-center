@@ -1052,17 +1052,19 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                 {availableVenues.map(v => {
                   const occ = venueOccupancy[v.id];
                   const isFull = occ?.isFull;
+                  const available = occ ? (occ.total - occ.used) : v.capacity_stands;
                   return (
-                    <SelectItem key={v.id} value={v.id} disabled={isFull}>
-                      📍 {v.name} {occ ? `(${occ.total - occ.used}/${occ.total} stands libres)` : `(${v.capacity_stands} stands)`}
-                      {isFull && ' 🚫 COMPLET'}
+                    <SelectItem key={v.id} value={v.id}>
+                      📍 {v.name} {isFull
+                        ? '🚫 Site complet — inscription en liste d\'attente'
+                        : `(${available}/${occ?.total || v.capacity_stands} places restantes)`}
                     </SelectItem>
                   );
                 })}
               </SelectContent>
             </Select>
             <p className="text-xs text-slate-600">
-              💡 Une nouvelle inscription va être créée pour ce site. Vous devrez ensuite y réserver un stand et y planifier vos animations.
+              💡 Une nouvelle inscription va être créée pour ce site. {availableVenues.some(v => venueOccupancy[v.id]?.isFull) && 'Si le site est complet, vous serez placé en liste d\'attente (par ordre d\'arrivée).'}
               <br />💰 Une caution séparée de 20 000 XPF sera demandée pour ce site.
             </p>
             <div className="flex gap-2 justify-end">

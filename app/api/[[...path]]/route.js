@@ -2325,30 +2325,57 @@ export async function GET(request, { params }) {
     // Renvoie tous les counters en une seule requête. Cache 30s côté client.
     if (route === 'menu-badges') {
       try {
-        const [regs, anomalies, validationReqs, deposits, orgs, satisfactionReqs, pendingStands, pendingAnims, pendingCessions, waitlistCount] = await Promise.all([
-          db.collection('registrations').find({ edition_id: EDITION_ID }, { projection: { status: 1, organization_id: 1 } }).toArray(),
+        const [regs, anomalies, deposits, orgs, satisfactionReqs, venues, allValReqs] = await Promise.all([
+          db.collection('registrations').find({ edition_id: EDITION_ID }, { projection: { id: 1, status: 1, organization_id: 1, venue_id: 1 } }).toArray(),
           db.collection('registration_anomalies').countDocuments({ resolved_status: { $ne: 'resolu' } }),
-          db.collection('validation_requests').countDocuments({ status: { $in: ['pending', 'awaiting', null] } }),
           db.collection('deposit_transactions').find({ edition_id: EDITION_ID, type: 'caution_received' }, { projection: { organization_id: 1 } }).toArray(),
           db.collection('organizations').find({}, { projection: { id: 1 } }).toArray(),
           db.collection('satisfaction_surveys').countDocuments({ status: { $in: ['pending', 'sent'] } }).catch(() => 0),
-          db.collection('stand_assignments').countDocuments({ request_status: 'pending' }).catch(() => 0),
-          db.collection('animation_slots').countDocuments({ request_status: 'pending' }).catch(() => 0),
-          db.collection('stand_assignments').countDocuments({ cession_status: 'pending_approval' }).catch(() => 0),
-          // 🆕 SESSION 48s — Compteur liste d'attente
-          db.collection('validation_requests').countDocuments({ status: 'waitlist' }).catch(() => 0),
+          db.collection('venues').find({}, { projection: { id: 1, capacity_stands: 1, is_active: 1, is_available_2026: 1 } }).toArray(),
+          db.collection('validation_requests').find({}, { projection: { status: 1, venue_id: 1, registration_id: 1 } }).toArray(),
         ]);
+        // 🆕 SESSION 48ad — Compteurs alignés sur la logique unifiée (validations & attente)
+        //   Pour chaque venue actif, on fusionne registrations + validation_requests
+        //   puis on ventile FIFO. Le badge "validations" = nombre TOTAL d'inscriptions
+        //   à traiter (pré-réservés + waitlist).
+        const valByRegId = {};
+        for (const vr of allValReqs) { if (vr.registration_id) valByRegId[vr.registration_id] = vr; }
+        const activeVenues = venues.filter(v => v.is_active !== false && v.is_available_2026 !== false);
+        let totalPending = 0; // pré-réservés en attente de validation
+        let totalWaitlist = 0; // overflow → liste d'attente
+        for (const v of activeVenues) {
+          // Items à considérer pour cette venue
+          const items = [];
+          for (const reg of regs.filter(r => r.venue_id === v.id)) {
+            if (['prospect', 'cancelled', 'annule', 'refuse'].includes(reg.status)) continue;
+            const vr = valByRegId[reg.id];
+            items.push({ status: vr ? vr.status : reg.status });
+          }
+          for (const vr of allValReqs.filter(r => r.venue_id === v.id)) {
+            if (!regs.find(r => r.id === vr.registration_id)) items.push({ status: vr.status });
+          }
+          const validatedCount = items.filter(i =>
+            ['validated', 'confirme', 'locked', 'verrouille'].includes(i.status)
+          ).length;
+          const candidates = items.filter(i =>
+            ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer', 'waitlist'].includes(i.status)
+          ).length;
+          const capacity = v.capacity_stands || 0;
+          const slotsForPre = Math.max(0, capacity - validatedCount);
+          totalPending += Math.min(candidates, slotsForPre);
+          totalWaitlist += Math.max(0, candidates - slotsForPre);
+        }
         const aRelancer = regs.filter(r => r.status === 'a_relancer').length;
         const aConfirmer = regs.filter(r => r.status === 'a_confirmer').length;
         const cautionOrgIds = new Set(deposits.map(d => d.organization_id));
-        const cautionMissing = regs.filter(r => r.status !== 'prospect' && !cautionOrgIds.has(r.organization_id)).length;
+        const cautionMissing = regs.filter(r => r.status !== 'prospect' && r.status !== 'refuse' && !cautionOrgIds.has(r.organization_id)).length;
         const regOrgIds = new Set(regs.map(r => r.organization_id));
         const orphanOrgs = orgs.filter(o => !regOrgIds.has(o.id)).length;
         return json({
-          validations: validationReqs,
-          pending_validations: (pendingStands || 0) + (pendingAnims || 0),
-          pending_cessions: pendingCessions || 0,
-          waitlist: waitlistCount || 0,
+          validations: totalPending, // ⚠ Aligné sur unified view : pré-réservés (à valider)
+          pending_validations: totalPending,
+          pending_cessions: 0, // 🆕 SESSION 48w — cession feature dead
+          waitlist: totalWaitlist,
           relances: aRelancer,
           a_confirmer: aConfirmer,
           cautions: cautionMissing,

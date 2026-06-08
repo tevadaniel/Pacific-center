@@ -64,7 +64,7 @@ import WaitlistView from '@/components/aracom/waitlist-view'; // eslint-disable-
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 import SimulationModal from '@/components/aracom/simulation-modal';
 import ValidationQueueView from '@/components/aracom/validation-queue-view'; // eslint-disable-line no-unused-vars -- kept for fallback
-import CessionQueueView from '@/components/aracom/cession-queue-view';
+// 🆕 SESSION 48w — CessionQueueView removed (feature deprecated)
 import QuickActionBar from '@/components/aracom/quick-action-bar';
 
 // 🎨 SESSION 29 — Menus intelligents : 6 groupes accordéon cohérents, Exposants en tête
