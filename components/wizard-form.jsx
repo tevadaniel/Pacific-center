@@ -1507,11 +1507,11 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
   };
 
   const submitRdv = async () => {
-    if (!rdvForm.preferred_payment) { toast.error('Choisissez chèque ou espèces'); return; }
+    // 🆕 SESSION 48n — Caution = Chèque uniquement (plus de choix)
     if (!rdvForm.rdv_proposal) { toast.error('Indiquez vos disponibilités'); return; }
     setSubmittingRdv(true);
     try {
-      await api(`/registrations/${registrationId}/request-validation`, { method: 'POST', body: JSON.stringify(rdvForm) });
+      await api(`/registrations/${registrationId}/request-validation`, { method: 'POST', body: JSON.stringify({ ...rdvForm, preferred_payment: 'cheque' }) });
       toast.success('Demande de RDV caution envoyée ✓');
       await reload();
       await api('/wizard/mark-step-4', { method: 'POST', body: JSON.stringify({ registration_id: registrationId }) });
@@ -1675,15 +1675,10 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
                   placeholder="Ex : mardi 17/05 entre 14h et 17h ou mercredi matin"
                 />
               </Field>
-              <Field label="Mode de caution (optionnel)">
-                <Select value={modifyForm.new_preferred_payment} onValueChange={v => setModifyForm(f => ({ ...f, new_preferred_payment: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Laisser inchangé" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cheque">Chèque</SelectItem>
-                    <SelectItem value="especes">Espèces</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+              {/* 🆕 SESSION 48n — Caution = Chèque uniquement : champ informatif */}
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                💳 Mode de caution : <b className="text-slate-900">Chèque</b> (à l&apos;ordre d&apos;ARACOM) — désormais seul moyen accepté.
+              </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setEditingRdv(false)}>Annuler</Button>
                 <Button onClick={submitModifyRdv} disabled={submittingRdv} className="bg-amber-600 hover:bg-amber-700">
@@ -1699,15 +1694,10 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
             </div>
           ) : (
             <div className="space-y-3 p-4 border-2 border-amber-200 rounded-lg bg-amber-50/30">
-              <Field label="Mode de caution préféré *" testid="rdv-payment">
-                <Select value={rdvForm.preferred_payment} onValueChange={v => setRdvForm(r => ({ ...r, preferred_payment: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cheque">Chèque (à l&apos;ordre d&apos;ARACOM)</SelectItem>
-                    <SelectItem value="especes">Espèces</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+              {/* 🆕 SESSION 48n — Caution = Chèque uniquement : champ informatif */}
+              <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                💳 Mode de caution : <b>Chèque</b> à l&apos;ordre d&apos;ARACOM (seul mode accepté pour la caution de 20 000 XPF).
+              </div>
               <Field label="Vos disponibilités pour le RDV *" testid="rdv-proposal">
                 <Textarea rows={2} value={rdvForm.rdv_proposal} onChange={e => setRdvForm(r => ({ ...r, rdv_proposal: e.target.value }))} placeholder="Ex : lundi 16/05 entre 14h et 17h, ou mardi matin…" />
               </Field>

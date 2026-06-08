@@ -58,6 +58,7 @@ import MailingView from '@/components/aracom/mailing-view';
 import BilansView from '@/components/aracom/bilans-view';
 import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
+import ConfigurationView from '@/components/aracom/configuration-view';
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 import SimulationModal from '@/components/aracom/simulation-modal';
 import ValidationQueueView from '@/components/aracom/validation-queue-view';
@@ -93,6 +94,7 @@ const TABS = [
   { key: 'deadlines', label: 'Échéances', icon: 'Clock', href: '/aracom?tab=deadlines' },
   { key: 'satisfaction', label: 'Satisfaction & feedback', icon: 'Star', href: '/aracom?tab=satisfaction' },
   // — Système (outils admin) —
+  { key: 'configuration', label: 'Configuration', icon: 'Settings', href: '/aracom?tab=configuration', adminTool: true },
   { key: 'import', label: 'Import Excel', icon: 'Upload', href: '/aracom?tab=import', adminTool: true },
   { key: 'backup', label: 'Sauvegarde DB', icon: 'Database', href: '/aracom?tab=backup', adminTool: true },
 ];
@@ -129,7 +131,7 @@ const TAB_GROUPS = [
     label: 'Système',
     icon: 'Settings',
     // 🆕 SESSION 45 — Centralise TOUS les outils admin (comptes orphelins, corbeille, import, backup)
-    items: ['import', 'backup', 'orgs-sans-dossier', 'corbeille'],
+    items: ['configuration', 'import', 'backup', 'orgs-sans-dossier', 'corbeille'],
   },
 ];
 
@@ -271,6 +273,7 @@ export default function AracomPage() {
       {activeTab === 'import' && <ImportExcelView />}
       {activeTab === 'corbeille' && <CorbeilleView />}
       {activeTab === 'orgs-sans-dossier' && <OrgsSansDossierView />}
+      {activeTab === 'configuration' && <ConfigurationView />}
       <ChatbotFloating role="aracom_admin" />
       <SimulationModal open={simulationOpen} onClose={() => setSimulationOpen(false)} />
     </Shell>

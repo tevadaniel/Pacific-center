@@ -22,6 +22,7 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import StandViewToggle from '@/components/stand-view-toggle';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
+import ContactFooter from '@/components/exposant/contact-footer';
 import ExposantStatusBanner from '@/components/exposant/exposant-status-banner';
 import WelcomeRecapBanner from '@/components/exposant/welcome-recap-banner';
 import { ChatbotFloating } from '@/components/chatbot-widget';
@@ -763,6 +764,8 @@ export default function ExposantPortal() {
         </>
       )}
       </ExposantPasswordGate>
+      {/* 🆕 SESSION 48p — Bannière de contact ARACOM en footer (sticky) */}
+      <ContactFooter />
     </Shell>
   );
 }
@@ -1431,36 +1434,11 @@ function ConfirmPresenceInlineCard({ registrationId, canRequest, onDone }) {
 
         {canRequest && (
           <>
-            {/* Sélecteur de mode de caution — inline */}
-            <div>
-              <Label className="text-sm font-semibold">Mode de caution préféré (20 000 XPF)</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
-                {[
-                  { v: 'cheque', label: '💳 Chèque', desc: "À l'ordre d'ARACOM" },
-                  { v: 'especes', label: '💵 Espèces', desc: 'Remise en main propre' },
-                  { v: 'virement', label: '🏦 Virement', desc: 'Bancaire (RIB ci-dessous)' },
-                ].map(o => (
-                  <button key={o.v} type="button" onClick={() => setForm({ ...form, preferred_payment: o.v })}
-                    className={`border-2 rounded-md p-3 text-left transition ${form.preferred_payment === o.v ? 'border-violet-500 bg-white shadow-sm' : 'border-slate-200 bg-white/60 hover:border-slate-300'}`}>
-                    <div className="font-semibold text-sm">{o.label}</div>
-                    <div className="text-xs text-slate-500">{o.desc}</div>
-                  </button>
-                ))}
-              </div>
+            {/* 🆕 SESSION 48n — Mode caution = Chèque uniquement (plus de choix) */}
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
+              <span className="text-lg shrink-0">💳</span>
+              <span><b>Mode de caution :</b> Chèque (à l&apos;ordre d&apos;ARACOM) — 20 000 XPF, seul mode accepté.</span>
             </div>
-
-            {form.preferred_payment === 'virement' && rib && (
-              <div className="rounded-md bg-blue-50 border-2 border-blue-200 p-3 text-xs space-y-1">
-                <div className="font-bold text-blue-900 flex items-center gap-2">🏦 Coordonnées bancaires ARACOM</div>
-                <div className="grid grid-cols-2 gap-2 mt-2 font-mono text-[11px]">
-                  <div><span className="text-slate-500">Titulaire :</span> <b className="text-blue-900">{rib.titulaire || '—'}</b></div>
-                  <div><span className="text-slate-500">Banque :</span> <b className="text-blue-900">{rib.banque || '—'}</b></div>
-                  <div className="col-span-2"><span className="text-slate-500">IBAN :</span> <b className="text-blue-900 select-all">{rib.iban || '—'}</b></div>
-                  <div><span className="text-slate-500">BIC :</span> <b className="text-blue-900 select-all">{rib.bic || '—'}</b></div>
-                </div>
-                <div className="mt-2 pt-2 border-t border-blue-200"><span className="text-slate-500">Référence à indiquer :</span> <b className="text-blue-900">{rib.reference || '—'}</b></div>
-              </div>
-            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1543,40 +1521,11 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
               <p className="text-sm text-slate-600">Votre site, votre stand et vos créneaux d&apos;animation seront <b>verrouillés définitivement</b> par ARACOM dès que la caution sera réceptionnée.</p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label className="text-sm font-semibold">Mode de caution préféré (20 000 XPF)</Label>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  {[
-                    { v: 'cheque', label: '💳 Chèque', desc: "À l'ordre d'ARACOM" },
-                    { v: 'especes', label: '💵 Espèces', desc: 'Remise en main propre' },
-                    { v: 'virement', label: '🏦 Virement', desc: 'Bancaire (RIB ci-dessous)' },
-                  ].map(o => (
-                    <button key={o.v} type="button" onClick={() => setForm({ ...form, preferred_payment: o.v })}
-                      className={`border-2 rounded-md p-3 text-left transition ${form.preferred_payment === o.v ? 'border-violet-500 bg-violet-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                      <div className="font-semibold text-sm">{o.label}</div>
-                      <div className="text-xs text-slate-500">{o.desc}</div>
-                    </button>
-                  ))}
-                </div>
+              {/* 🆕 SESSION 48n — Mode caution = Chèque uniquement (plus de choix) */}
+              <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
+                <span className="text-lg shrink-0">💳</span>
+                <span><b>Mode de caution :</b> Chèque à l&apos;ordre d&apos;ARACOM — 20 000 XPF (seul mode accepté).</span>
               </div>
-              {form.preferred_payment === 'virement' && rib && (
-                <div className="rounded-md bg-blue-50 border-2 border-blue-200 p-3 text-xs space-y-1">
-                  <div className="font-bold text-blue-900 flex items-center gap-2">🏦 Coordonnées bancaires ARACOM</div>
-                  <div className="grid grid-cols-2 gap-2 mt-2 font-mono text-[11px]">
-                    <div><span className="text-slate-500">Titulaire :</span> <b className="text-blue-900">{rib.titulaire || '—'}</b></div>
-                    <div><span className="text-slate-500">Banque :</span> <b className="text-blue-900">{rib.banque || '—'}</b></div>
-                    <div className="col-span-2"><span className="text-slate-500">IBAN :</span> <b className="text-blue-900 select-all">{rib.iban || '—'}</b></div>
-                    <div><span className="text-slate-500">BIC :</span> <b className="text-blue-900 select-all">{rib.bic || '—'}</b></div>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-blue-200"><span className="text-slate-500">Référence à indiquer :</span> <b className="text-blue-900">{rib.reference || '—'}</b></div>
-                  <div className="text-[10px] text-slate-500 italic">Le RIB officiel ARACOM vous sera envoyé en pièce jointe lors de la confirmation de votre demande.</div>
-                </div>
-              )}
-              {form.preferred_payment === 'virement' && !rib && (
-                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-                  ℹ️ Le RIB ARACOM vous sera communiqué par email après l&apos;envoi de votre demande.
-                </div>
-              )}
               <div>
                 <Label className="text-sm font-semibold">Vos disponibilités pour le RDV (facultatif)</Label>
                 <Input
@@ -1749,8 +1698,8 @@ function ValidationStatusCard({ registrationId, validationRequestId, onRefresh }
     );
   }
   const status = vreq.status;
-  const paymentLabel = vreq.preferred_payment === 'especes' ? 'Espèces' : (vreq.preferred_payment === 'virement' ? 'Virement bancaire' : 'Chèque');
-  const isVirement = vreq.preferred_payment === 'virement';
+  const paymentLabel = 'Chèque'; // 🆕 SESSION 48n — Caution = Chèque uniquement
+  const isVirement = false; // (legacy flag, virement supprimé)
 
   // 🆕 Cas spécial : VIREMENT — pas de RDV physique, juste une déclaration
   if (isVirement && status === 'en_attente') {
@@ -3407,6 +3356,8 @@ function BilanSatisfactionView({ registration, organization, deposit }) {
   const r = registration;
   const o = organization;
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  // 🆕 SESSION 48n — Gate sur le toggle global "survey_enabled" (Système → Configuration)
+  const [surveyEnabled, setSurveyEnabled] = useState(null);
 
   useEffect(() => {
     if (!o?.id) return;
@@ -3414,6 +3365,34 @@ function BilanSatisfactionView({ registration, organization, deposit }) {
       if (d.response) setHasSubmitted(true);
     }).catch(() => {});
   }, [o?.id]);
+
+  useEffect(() => {
+    api('/api/settings/survey-enabled')
+      .then(d => setSurveyEnabled(Boolean(d?.enabled)))
+      .catch(() => setSurveyEnabled(false));
+  }, []);
+
+  // 🆕 Si le questionnaire est désactivé par ARACOM → message d'attente (et masquage du formulaire)
+  if (surveyEnabled === false) {
+    return (
+      <div className="space-y-5">
+        <Card className="border-slate-200 bg-slate-50">
+          <CardContent className="p-6 text-center space-y-2">
+            <div className="text-3xl">⏳</div>
+            <h3 className="font-bold text-slate-900">Questionnaire de satisfaction non encore disponible</h3>
+            <p className="text-sm text-slate-600 max-w-md mx-auto">
+              ARACOM activera le questionnaire de satisfaction après l&apos;événement.
+              Vous recevrez une notification dès qu&apos;il sera ouvert. Merci de votre patience.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+  // En chargement
+  if (surveyEnabled === null) {
+    return <div className="py-10 text-center text-slate-500 text-sm">Chargement…</div>;
+  }
 
   return (
     <div className="space-y-5">

@@ -217,7 +217,8 @@ function SetRdvModal({ req, onClose, onSaved }) {
 }
 
 function LockValidationModal({ req, onClose, onLocked }) {
-  const [form, setForm] = useState({ payment_mode: req.preferred_payment || 'cheque', amount_xpf: 20000 });
+  // 🆕 SESSION 48n — Caution = Chèque uniquement (plus de choix de mode)
+  const [form, setForm] = useState({ payment_mode: 'cheque', amount_xpf: 20000 });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
   const submit = async () => {
@@ -237,19 +238,9 @@ function LockValidationModal({ req, onClose, onLocked }) {
         </CardHeader>
         {!done ? (
           <CardContent className="space-y-3">
-            <div>
-              <Label className="text-sm font-semibold">Mode de paiement reçu</Label>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {[
-                  { v: 'cheque', label: '💳 Chèque' },
-                  { v: 'especes', label: '💵 Espèces' },
-                ].map(o => (
-                  <button key={o.v} type="button" onClick={() => setForm({ ...form, payment_mode: o.v })}
-                    className={`border-2 rounded-md p-3 text-center transition ${form.payment_mode === o.v ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                    <div className="font-semibold">{o.label}</div>
-                  </button>
-                ))}
-              </div>
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
+              <span className="text-xl">💳</span>
+              <span><b>Mode de paiement :</b> Chèque (à l&apos;ordre d&apos;ARACOM) — seul mode accepté.</span>
             </div>
             <div>
               <Label>Montant (XPF)</Label>

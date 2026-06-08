@@ -265,11 +265,13 @@ export default function DocumentsTab({ registration, organization, deposit, docu
   };
 
   // ─── Status helpers ───
+  // 🆕 SESSION 48n — La convention n'est PLUS auto-générée ; elle est uploadée par ARACOM (signée)
+  //    ou par l'exposant. Le flag is_convention_signed est auto-set quand un doc type 'convention' est uploadé.
   const conventionStatus = reg.is_convention_signed || reg.convention_status === 'signee'
-    ? { label: '✓ Signée', tone: 'emerald' }
+    ? { label: '✓ Signée & uploadée', tone: 'emerald' }
     : conventionDoc
-    ? { label: 'Générée — non signée', tone: 'amber' }
-    : { label: 'Non générée', tone: 'slate' };
+    ? { label: 'Uploadée — en relecture', tone: 'amber' }
+    : { label: 'À uploader', tone: 'rose' };
 
   const cautionReceived = dep?.amount_xpf || reg.caution_received_date;
   const recuStatus = recuDoc ? { label: '✓ Généré', tone: 'emerald' } : cautionReceived ? { label: 'À générer', tone: 'amber' } : { label: 'En attente caution', tone: 'slate' };
@@ -286,20 +288,7 @@ export default function DocumentsTab({ registration, organization, deposit, docu
           <span className="text-[10px] text-slate-500 italic">— PDF générés depuis les données du dossier</span>
         </div>
         <div className="space-y-2">
-          <AutoGenCard
-            icon={FileText}
-            iconBg="bg-blue-600"
-            title="Convention de participation"
-            subtitle="Document contractuel à signer par l'exposant"
-            statusLabel={conventionStatus.label}
-            statusTone={conventionStatus.tone}
-            generating={generating.convention}
-            hasFile={!!conventionDoc}
-            onGenerate={() => generate('convention')}
-            onDownload={() => download(conventionDoc)}
-            onSend={() => sendByMail('convention', conventionDoc)}
-            onMarkSigned={!reg.is_convention_signed ? markConventionSigned : null}
-          />
+          {/* 🆕 SESSION 48n — Convention déplacée vers "Documents à fournir" (upload manuel) */}
           <AutoGenCard
             icon={Receipt}
             iconBg="bg-amber-600"
@@ -360,10 +349,22 @@ export default function DocumentsTab({ registration, organization, deposit, docu
       <div>
         <div className="flex items-center gap-2 mb-2">
           <Upload className="w-4 h-4 text-emerald-600" />
-          <h3 className="font-semibold text-sm text-slate-900">Documents à fournir par l'exposant</h3>
-          <span className="text-[10px] text-slate-500 italic">— Upload depuis cockpit OU portail exposant</span>
+          <h3 className="font-semibold text-sm text-slate-900">Documents à fournir (upload manuel)</h3>
+          <span className="text-[10px] text-slate-500 italic">— Upload depuis cockpit ARACOM OU portail exposant</span>
         </div>
         <div className="space-y-2">
+          {/* 🆕 SESSION 48n — Convention signée : upload manuel (ARACOM la fait signer puis upload, OU l'exposant la signe et la renvoie via son portail) */}
+          <UploadCard
+            icon={FileText}
+            iconBg="bg-blue-600"
+            title="Convention signée"
+            subtitle="Document contractuel signé — peut être uploadé par ARACOM ou par l'exposant"
+            required
+            doc={conventionDoc}
+            regId={reg.id}
+            docType="convention"
+            onReload={onReload}
+          />
           <UploadCard
             icon={Shield}
             iconBg="bg-emerald-600"
