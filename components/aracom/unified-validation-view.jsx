@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { ShieldCheck, Hourglass, ArrowUpCircle, ArrowLeftRight, Check, X, MapPin, RefreshCw, Trash2, Clock, Lock } from 'lucide-react';
+import { ShieldCheck, Hourglass, ArrowUpCircle, ArrowLeftRight, Check, X, MapPin, RefreshCw, Trash2, Clock, Lock, Mail } from 'lucide-react';
 import { useExposantPanel } from './exposant-panel-context';
 
 export default function UnifiedValidationView({ readonly = false, onExposantClick = null }) {
@@ -117,7 +117,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const grouped = useMemo(() => {
     const out = {};
     for (const v of venues) {
-      out[v.id] = { venue: v, validated: [], preReserved: [], waitlist: [], freeStands: [] };
+      out[v.id] = { venue: v, validated: [], preReserved: [], waitlist: [], freeStands: [], overflowCount: 0 };
     }
     for (const r of requests) {
       const v = r.venue_id;
@@ -134,13 +134,30 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         out[v].preReserved.push(r);
       }
     }
-    // Sort waitlist by created_at (par ordre d'arrivée)
+    // 🆕 SESSION 48aa — Règle métier : pré-réservés ≤ capacité disponible
+    //   Si un site a déjà N validés et M pré-réservés > (capacity - N), les surplus
+    //   basculent automatiquement en liste d'attente (tri FIFO par created_at).
     for (const k of Object.keys(out)) {
-      out[k].waitlist.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      out[k].waitlist = out[k].waitlist.map((r, i) => ({ ...r, fifo_position: i + 1 }));
+      const g = out[k];
+      const capacity = g.venue.capacity_stands || 0;
+      const slotsForPre = Math.max(0, capacity - g.validated.length);
+      // Tri FIFO : les plus anciens d'abord (premiers arrivés, premiers servis)
+      g.preReserved.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      if (g.preReserved.length > slotsForPre) {
+        const overflow = g.preReserved.slice(slotsForPre);
+        g.preReserved = g.preReserved.slice(0, slotsForPre);
+        // Les overflows deviennent automatiquement de la liste d'attente (statut visuel)
+        for (const o of overflow) {
+          g.waitlist.push({ ...o, _auto_waitlist: true });
+        }
+        g.overflowCount = overflow.length;
+      }
+      // Sort waitlist by created_at (par ordre d'arrivée)
+      g.waitlist.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      g.waitlist = g.waitlist.map((r, i) => ({ ...r, fifo_position: i + 1 }));
       // Free stands
       const stands = standsByVenue[k] || [];
-      out[k].freeStands = stands.filter(s => {
+      g.freeStands = stands.filter(s => {
         const a = s.assignment;
         const isFree = !a || (a.request_status !== 'pending' && a.request_status !== 'validated');
         return isFree && !s.organization;
@@ -307,10 +324,28 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                     g.validated.map(r => (
                       <Row key={r.id} icon="🔒" tone="emerald">
                         <ExposantName r={r} onClick={effectiveExposantClick} />
-                        <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                           <span className="font-mono">{r.stand_code || '—'}</span>
                           {r.locked_at && <span>· verrouillé le {new Date(r.locked_at).toLocaleDateString('fr-FR')} à {new Date(r.locked_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>}
                         </div>
+                        {/* 🆕 SESSION 48aa — Bouton "Envoyer confirmation + reçu" */}
+                        {!readonly && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-1 h-6 text-[10px] bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 gap-1 px-2"
+                            onClick={async () => {
+                              if (!confirm(`Envoyer la confirmation d'inscription + reçu de caution à ${r.organization?.name || r.organization?.main_email || 'cet exposant'} ?`)) return;
+                              try {
+                                const regId = r.registration_id || r.id;
+                                await api(`/api/admin/registrations/${regId}/send-confirmation`, { method: 'POST', body: JSON.stringify({}) });
+                                toast.success('✉️ Confirmation d\'inscription + reçu envoyés');
+                              } catch (e) { toast.error(`❌ ${e.message}`); }
+                            }}
+                          >
+                            <Mail className="w-3 h-3" /> Envoyer confirmation + reçu
+                          </Button>
+                        )}
                       </Row>
                     ))
                   )}

@@ -1723,25 +1723,32 @@ export async function GET(request, { params }) {
           const hasReg = regs.find(r => r.id === vr.registration_id);
           if (!hasReg) items.push({ status: vr.status });
         }
-        const validated = items.filter(i =>
+        const validatedCount = items.filter(i =>
           i.status === 'validated' || i.status === 'confirme' || i.status === 'locked' || i.status === 'verrouille'
         ).length;
-        const preReserved = items.filter(i =>
+        const preReservedRaw = items.filter(i =>
           i.status === 'en_attente' || i.status === 'pending' || i.status === 'rdv_fixe' ||
           i.status === 'a_confirmer' || i.status === 'a_relancer'
         ).length;
-        const waitlist = items.filter(i => i.status === 'waitlist').length;
+        const waitlistRaw = items.filter(i => i.status === 'waitlist').length;
         const capacity = v.capacity_stands || 0;
-        const totalReserved = validated + preReserved;
+        // 🆕 SESSION 48aa — Règle métier : pré-réservés ≤ capacité disponible
+        //                  Les surplus basculent automatiquement en liste d'attente.
+        const slotsForPre = Math.max(0, capacity - validatedCount);
+        const preReserved = Math.min(preReservedRaw, slotsForPre);
+        const overflow = Math.max(0, preReservedRaw - slotsForPre);
+        const waitlist = waitlistRaw + overflow;
+        const totalReserved = validatedCount + preReserved;
         const available = Math.max(0, capacity - totalReserved);
         out[v.id] = {
           venue_id: v.id,
           venue_code: v.code,
           venue_name: v.name,
           capacity,
-          validated,
+          validated: validatedCount,
           pre_reserved: preReserved,
           waitlist,
+          waitlist_auto: overflow, // ↑ overflow de pré-réservés
           total_reserved: totalReserved,
           available,
           is_full: capacity > 0 && totalReserved >= capacity,
