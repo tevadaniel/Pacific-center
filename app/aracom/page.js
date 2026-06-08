@@ -59,10 +59,11 @@ import BilansView from '@/components/aracom/bilans-view';
 import RelancesView from '@/components/aracom/relances-view';
 import DashboardView from '@/components/aracom/dashboard-view';
 import ConfigurationView from '@/components/aracom/configuration-view';
-import WaitlistView from '@/components/aracom/waitlist-view';
+import UnifiedValidationView from '@/components/aracom/unified-validation-view';
+import WaitlistView from '@/components/aracom/waitlist-view'; // eslint-disable-line no-unused-vars -- kept for fallback
 import SatisfactionAdminView, { ConfirmedExposantsPanel } from '@/components/aracom/satisfaction-admin-view';
 import SimulationModal from '@/components/aracom/simulation-modal';
-import ValidationQueueView from '@/components/aracom/validation-queue-view';
+import ValidationQueueView from '@/components/aracom/validation-queue-view'; // eslint-disable-line no-unused-vars -- kept for fallback
 import CessionQueueView from '@/components/aracom/cession-queue-view';
 import QuickActionBar from '@/components/aracom/quick-action-bar';
 
@@ -74,11 +75,10 @@ const TABS = [
   { key: 'dashboard', label: 'Tableau de bord', icon: 'LayoutDashboard', href: '/aracom' },
   // — Exposants (cœur métier) —
   { key: 'exposants', label: 'Liste & fiches', icon: 'Users', href: '/aracom?tab=exposants' },
-  { key: 'file-validation', label: 'File de validation', icon: 'ShieldCheck', href: '/aracom?tab=file-validation' },
+  { key: 'file-validation', label: 'Validations & Attente', icon: 'ShieldCheck', href: '/aracom?tab=file-validation' },
   { key: 'cautions', label: 'Cautions & restitutions', icon: 'Wallet', href: '/aracom?tab=cautions' },
   { key: 'relances', label: 'Relances IA', icon: 'Bell', href: '/aracom?tab=relances' },
   { key: 'validations', label: 'Validations dossiers', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
-  { key: 'waitlist', label: 'Liste d\'attente', icon: 'Hourglass', href: '/aracom?tab=waitlist' },
   { key: 'prospection', label: 'Prospection', icon: 'Target', href: '/aracom?tab=prospection' },
   { key: 'orgs-sans-dossier', label: 'Comptes orphelins', icon: 'AlertTriangle', href: '/aracom?tab=orgs-sans-dossier', adminTool: true },
   { key: 'corbeille', label: 'Corbeille', icon: 'Trash2', href: '/aracom?tab=corbeille', adminTool: true },
@@ -107,7 +107,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'file-validation', 'waitlist', 'cautions', 'relances', 'validations', 'prospection'],
+    items: ['exposants', 'file-validation', 'cautions', 'relances', 'validations', 'prospection'],
   },
   {
     key: 'terrain',
@@ -258,7 +258,9 @@ export default function AracomPage() {
       {activeTab === 'exposants' && <ExposantsListView />}
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'validations' && <ValidationsView />}
-      {activeTab === 'file-validation' && <ValidationQueueView />}
+      {activeTab === 'file-validation' && <UnifiedValidationView />}
+      {/* Alias rétro-compat : waitlist ouvre désormais la même vue unifiée */}
+      {activeTab === 'waitlist' && <UnifiedValidationView />}
       {activeTab === 'access' && <AccessTokensView />}
       {activeTab === 'cautions' && <CautionsView />}
       {activeTab === 'mailing' && <MailingView />}
@@ -272,7 +274,7 @@ export default function AracomPage() {
       {activeTab === 'corbeille' && <CorbeilleView />}
       {activeTab === 'orgs-sans-dossier' && <OrgsSansDossierView />}
       {activeTab === 'configuration' && <ConfigurationView />}
-      {activeTab === 'waitlist' && <WaitlistView />}
+      {/* 🆕 SESSION 48v — WaitlistView remplacée par UnifiedValidationView ; alias plus haut */}
       <ChatbotFloating role="aracom_admin" />
       <SimulationModal open={simulationOpen} onClose={() => setSimulationOpen(false)} />
     </Shell>
