@@ -24,8 +24,14 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ShieldCheck, Hourglass, ArrowUpCircle, ArrowLeftRight, Check, X, MapPin, RefreshCw, Trash2, Clock, Lock } from 'lucide-react';
+import { useExposantPanel } from './exposant-panel-context';
 
 export default function UnifiedValidationView({ readonly = false, onExposantClick = null }) {
+  // 🆕 SESSION 48x — En mode ARACOM (non-readonly), on connecte automatiquement le clic sur
+  // le nom de l'exposant pour ouvrir la fiche détaillée via le contexte ExposantPanelProvider.
+  const { open: openExposantPanel } = useExposantPanel();
+  const effectiveExposantClick = onExposantClick
+    || (readonly ? null : (r) => openExposantPanel(r.registration_id || r.id));
   const [venues, setVenues] = useState([]);
   const [requests, setRequests] = useState([]);
   const [standsByVenue, setStandsByVenue] = useState({});
@@ -216,11 +222,22 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   <MapPin className="w-4 h-4 text-blue-600" />
                   <CardTitle className="text-base">{g.venue.name}</CardTitle>
                   <Badge variant="secondary" className="text-[10px]">{g.venue.capacity_stands || 0} stands</Badge>
-                  {g.freeStands.length > 0 ? (
-                    <Badge className="bg-emerald-500 text-white text-[10px]">{g.freeStands.length} libre{g.freeStands.length > 1 ? 's' : ''}</Badge>
-                  ) : (
-                    <Badge className="bg-rose-500 text-white text-[10px]">Site complet</Badge>
-                  )}
+                  {(() => {
+                    // 🆕 SESSION 48x — Site complet si (validés + pré-réservés) ≥ capacité
+                    //                  même si certains stands sont encore "libres" physiquement.
+                    const capacity = g.venue.capacity_stands || 0;
+                    const totalReserved = g.validated.length + g.preReserved.length;
+                    const remainingQuota = Math.max(0, capacity - totalReserved);
+                    const isComplete = capacity > 0 && totalReserved >= capacity;
+                    if (isComplete) {
+                      return <Badge className="bg-rose-500 text-white text-[10px]" title={`${totalReserved} / ${capacity} stands réservés (validés + pré-réservés)`}>Site complet</Badge>;
+                    }
+                    return (
+                      <Badge className="bg-emerald-500 text-white text-[10px]" title={`${remainingQuota} place(s) restante(s) sur ${capacity}`}>
+                        {remainingQuota} place{remainingQuota > 1 ? 's' : ''} restante{remainingQuota > 1 ? 's' : ''}
+                      </Badge>
+                    );
+                  })()}
                 </div>
                 <div className="text-[11px] text-slate-500">
                   <b className="text-emerald-700">{g.validated.length}</b>v · <b className="text-violet-700">{g.preReserved.length}</b>p · <b className="text-amber-700">{g.waitlist.length}</b>a
@@ -241,10 +258,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   ) : (
                     g.validated.map(r => (
                       <Row key={r.id} icon="🔒" tone="emerald">
-                        <ExposantName r={r} onClick={onExposantClick} />
+                        <ExposantName r={r} onClick={effectiveExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1">
                           <span className="font-mono">{r.stand_code || '—'}</span>
-                          {r.locked_at && <span>· verrouillé le {new Date(r.locked_at).toLocaleDateString('fr-FR')}</span>}
+                          {r.locked_at && <span>· verrouillé le {new Date(r.locked_at).toLocaleDateString('fr-FR')} à {new Date(r.locked_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>}
                         </div>
                       </Row>
                     ))
@@ -263,10 +280,14 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   ) : (
                     g.preReserved.map(r => (
                       <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
-                        <ExposantName r={r} onClick={onExposantClick} />
+                        <ExposantName r={r} onClick={effectiveExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                           <span className="font-mono">{r.stand_code}</span>
-                          {r.created_at && <span>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>}
+                          {r.created_at && (
+                            <span title={new Date(r.created_at).toLocaleString('fr-FR')}>
+                              · soumis le {new Date(r.created_at).toLocaleDateString('fr-FR')} à {new Date(r.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
                         </div>
                         {!readonly && (
                           <div className="flex items-center gap-1 mt-1">
@@ -302,10 +323,14 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                       const canPromote = g.freeStands.length > 0;
                       return (
                         <Row key={r.id} icon={`#${r.fifo_position}`} tone="amber">
-                          <ExposantName r={r} onClick={onExposantClick} />
+                          <ExposantName r={r} onClick={effectiveExposantClick} />
                           <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                             {r.requested_stand_code && <span>↦ <code className="font-mono">{r.requested_stand_code}</code></span>}
-                            {r.created_at && <span>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>}
+                            {r.created_at && (
+                              <span title={new Date(r.created_at).toLocaleString('fr-FR')}>
+                                · inscrit le {new Date(r.created_at).toLocaleDateString('fr-FR')} à {new Date(r.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
                           </div>
                           {!readonly && (
                             <div className="flex items-center gap-1 mt-1">
