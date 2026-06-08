@@ -1681,6 +1681,50 @@ export async function GET(request, { params }) {
     const prospectsGetResp = await handleProspectsGet({ db, request, url, route });
     if (prospectsGetResp) return prospectsGetResp;
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 48y — Disponibilité réelle des sites
+    // GET /api/venues/availability
+    //
+    // Renvoie pour chaque venue actif le quota basé sur validation_requests :
+    //   { venue_id: { capacity, validated, pre_reserved, total_reserved, available, is_full } }
+    //
+    // ⚠️ Cette logique remplace l'ancien calcul basé sur stand_assignments
+    //    (qui comptait les données seed "provisoires" comme occupées et causait
+    //    des faux "COMPLET" dans le sélecteur de site exposant).
+    // ⚠️ DOIT être déclaré AVANT le matcher générique `venues/:id` ci-dessous.
+    // ═══════════════════════════════════════════════════════════════════
+    if (route === 'venues/availability') {
+      // 🔒 Aligné sur /api/venues?only_active=1 → is_active true ET is_available_2026 true
+      const venues = await db.collection('venues').find({
+        is_active: { $ne: false },
+        is_available_2026: { $ne: false },
+      }).toArray();
+      const validations = await db.collection('validation_requests').find({}).toArray();
+      const out = {};
+      for (const v of venues) {
+        const reqs = validations.filter(r => r.venue_id === v.id);
+        const validated = reqs.filter(r => r.status === 'validated' || r.status === 'confirme' || r.status === 'locked').length;
+        const preReserved = reqs.filter(r => r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe').length;
+        const waitlist = reqs.filter(r => r.status === 'waitlist').length;
+        const capacity = v.capacity_stands || 0;
+        const totalReserved = validated + preReserved;
+        const available = Math.max(0, capacity - totalReserved);
+        out[v.id] = {
+          venue_id: v.id,
+          venue_code: v.code,
+          venue_name: v.name,
+          capacity,
+          validated,
+          pre_reserved: preReserved,
+          waitlist,
+          total_reserved: totalReserved,
+          available,
+          is_full: capacity > 0 && totalReserved >= capacity,
+        };
+      }
+      return json(out);
+    }
+
     if (route.startsWith('venues/') && !route.includes('/stands')) {
       const id = p[1];
       const v = await db.collection('venues').findOne({ id });
@@ -1689,6 +1733,11 @@ export async function GET(request, { params }) {
       return json(v);
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 SESSION 48y — (ancien emplacement venues/availability — déplacé plus haut)
+    // ═══════════════════════════════════════════════════════════════════
+    if (route === '_legacy_venues_availability_placeholder_') { return json({}); }
+
     if (route.startsWith('venues/') && route.endsWith('/stands')) {
       const venueId = p[1];
       // 🔒 Tri stable par stand_code pour garantir le même ordre entre appels (évite tout "remélange" côté UI)
@@ -1696,6 +1745,13 @@ export async function GET(request, { params }) {
       const assignments = await db.collection('stand_assignments').find({}).toArray();
       const regs = await db.collection('registrations').find({ edition_id: EDITION_ID }).toArray();
       const orgs = await db.collection('organizations').find({}).toArray();
+      // 🆕 SESSION 48y — Set des registration_id ayant une demande de validation active.
+      // On considère qu'un stand n'est "réellement" occupé que si l'inscription est dans
+      // un workflow actif (validation_requests) — pas les anciennes provisions seed.
+      const activeValidations = await db.collection('validation_requests').find({
+        status: { $in: ['validated', 'confirme', 'locked', 'pending', 'en_attente', 'a_confirmer', 'a_relancer', 'rdv_fixe'] }
+      }).toArray();
+      const activeRegIds = new Set(activeValidations.map(v => v.registration_id));
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const regById = Object.fromEntries(regs.map(r => [r.id, r]));
       const result = stands.map(s => {
@@ -1703,7 +1759,10 @@ export async function GET(request, { params }) {
         const candidates = assignments.filter(a => a.venue_stand_id === s.id && a.status !== 'annule' && a.status !== 'cancelled');
         const assign = candidates.find(a => a.request_status === 'validated')
           || candidates.find(a => a.request_status === 'pending')
-          || candidates.find(a => !a.request_status) // legacy entries sans request_status (rétro-compat)
+          // 🆕 SESSION 48y — Les entries "legacy" (sans request_status) ne sont conservées que
+          //                 si elles correspondent à une registration ayant une validation active.
+          //                 Cela évite les faux "stand occupé" des données seed importées.
+          || candidates.find(a => !a.request_status && activeRegIds.has(a.registration_id))
           || candidates.find(a => a.request_status === 'waitlist')
           || null;
         let reg = null, org = null;

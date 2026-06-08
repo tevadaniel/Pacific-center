@@ -807,18 +807,33 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
   useEffect(() => {
     api('/api/venues?only_active=1').then(async (vs) => {
       setVenues(vs || []);
-      // 🆕 SESSION 28k — Charge l'occupation de chaque site pour afficher "Complet" si plein
-      const stats = {};
-      await Promise.all((vs || []).map(async (v) => {
-        try {
-          const stands = await api(`/api/venues/${v.id}/stands`);
-          const total = (stands || []).length;
-          // Un stand est occupé s'il a une assignment (réservation/pré-réservation active)
-          const used = (stands || []).filter(s => !!s.assignment).length;
-          stats[v.id] = { used, total, isFull: total > 0 && used >= total };
-        } catch { stats[v.id] = { used: 0, total: 0, isFull: false }; }
-      }));
-      setVenueOccupancy(stats);
+      // 🆕 SESSION 48y — Charge la disponibilité réelle des sites (basée sur validation_requests)
+      // au lieu de stand_assignments (qui incluait des données seed "provisoires" causant des faux "COMPLET").
+      try {
+        const avail = await api('/api/venues/availability');
+        const stats = {};
+        for (const v of (vs || [])) {
+          const a = avail?.[v.id];
+          if (a) {
+            stats[v.id] = {
+              used: a.total_reserved,
+              total: a.capacity,
+              isFull: a.is_full,
+              validated: a.validated,
+              pre_reserved: a.pre_reserved,
+              waitlist: a.waitlist,
+            };
+          } else {
+            stats[v.id] = { used: 0, total: v.capacity_stands || 0, isFull: false };
+          }
+        }
+        setVenueOccupancy(stats);
+      } catch {
+        // Fallback : si l'endpoint n'est pas dispo, on considère tous les sites comme libres
+        const stats = {};
+        for (const v of (vs || [])) stats[v.id] = { used: 0, total: v.capacity_stands || 0, isFull: false };
+        setVenueOccupancy(stats);
+      }
     }).catch(() => {});
     api('/api/admin/exposant-limits').then(d => setMaxSites(d?.max_sites_per_exposant || 3)).catch(() => {});
   }, []);

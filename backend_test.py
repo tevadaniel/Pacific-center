@@ -1,557 +1,613 @@
 #!/usr/bin/env python3
 """
-SESSION 48w — Test de non-régression du refactoring des endpoints PROSPECTS
-Tous les endpoints prospects ont été extraits dans /app/lib/api/handlers/prospects.js
-Ce script vérifie qu'AUCUNE régression n'a été introduite.
+SESSION 48y — Backend Test Suite
+Tests for new /api/venues/availability endpoint and modified /api/venues/:id/stands filtering
 """
 
 import requests
 import json
-import sys
+import os
 from datetime import datetime
 
-# Configuration
-BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com"
+# Get base URL from environment
+BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
+API_BASE = f"{BASE_URL}/api"
+
+# Test credentials
 ADMIN_EMAIL = "admin@aracom.pf"
 ADMIN_PASSWORD = "Projetaracom12"
-PACIFIC_EMAIL = "pacific@centers.pf"
-PACIFIC_PASSWORD = "demo"
 
-# Couleurs pour le terminal
+# ANSI color codes for output
 GREEN = '\033[92m'
 RED = '\033[91m'
 YELLOW = '\033[93m'
 BLUE = '\033[94m'
 RESET = '\033[0m'
 
-def log_test(test_name, status, details=""):
-    """Log un résultat de test avec couleur"""
-    color = GREEN if status == "PASS" else RED if status == "FAIL" else YELLOW
-    symbol = "✅" if status == "PASS" else "❌" if status == "FAIL" else "⚠️"
-    print(f"{color}{symbol} {test_name}{RESET}")
+def print_test(name, passed, details=""):
+    """Print test result with color"""
+    status = f"{GREEN}✅ PASS{RESET}" if passed else f"{RED}❌ FAIL{RESET}"
+    print(f"{status} - {name}")
     if details:
-        print(f"   {details}")
+        print(f"  {details}")
 
-def get_admin_headers():
-    """Retourne les headers admin pour les requêtes"""
-    # Login admin pour obtenir user_id
-    resp = requests.post(
-        f"{BASE_URL}/api/auth/password-login",
-        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-        timeout=30
-    )
-    if resp.status_code == 200:
-        data = resp.json()
-        user_id = data.get("user", {}).get("id", "u-admin")
-        return {
-            "x-user-role": "aracom_admin",
-            "x-user-id": user_id,
-            "Content-Type": "application/json"
-        }
-    return {
-        "x-user-role": "aracom_admin",
-        "x-user-id": "u-admin",
-        "Content-Type": "application/json"
-    }
+def print_section(title):
+    """Print section header"""
+    print(f"\n{BLUE}{'='*80}{RESET}")
+    print(f"{BLUE}{title}{RESET}")
+    print(f"{BLUE}{'='*80}{RESET}\n")
 
-def get_pacific_headers():
-    """Retourne les headers Pacific Centers pour les requêtes"""
-    resp = requests.post(
-        f"{BASE_URL}/api/auth/password-login",
-        json={"email": PACIFIC_EMAIL, "password": PACIFIC_PASSWORD},
-        timeout=30
-    )
-    if resp.status_code == 200:
-        data = resp.json()
-        user_id = data.get("user", {}).get("id", "u-pacific")
-        return {
-            "x-user-role": "pacific_centers_readonly",
-            "x-user-id": user_id,
-            "Content-Type": "application/json"
-        }
-    return {
-        "x-user-role": "pacific_centers_readonly",
-        "x-user-id": "u-pacific",
-        "Content-Type": "application/json"
-    }
+# Test counter
+tests_run = 0
+tests_passed = 0
 
-def test_get_prospects_list():
-    """TEST 1: GET /api/prospects (liste enrichie)"""
+def run_test(name, test_func):
+    """Run a test and track results"""
+    global tests_run, tests_passed
+    tests_run += 1
     try:
-        headers = get_admin_headers()
-        resp = requests.get(f"{BASE_URL}/api/prospects", headers=headers, timeout=30)
+        result, details = test_func()
+        if result:
+            tests_passed += 1
+        print_test(name, result, details)
+        return result
+    except Exception as e:
+        print_test(name, False, f"Exception: {str(e)}")
+        return False
+
+# ============================================================================
+# TEST 1: GET /api/venues/availability - Structure and Active Venues Only
+# ============================================================================
+
+def test_venues_availability_structure():
+    """Test that /api/venues/availability returns correct structure with 4 active venues only"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
         
-        if resp.status_code != 200:
-            log_test("TEST 1: GET /api/prospects", "FAIL", f"Status {resp.status_code}")
-            return False
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
         
-        data = resp.json()
-        if not isinstance(data, list):
-            log_test("TEST 1: GET /api/prospects", "FAIL", "Response is not an array")
-            return False
+        data = response.json()
         
-        # Vérifier qu'au moins un prospect a les champs enrichis
-        if len(data) > 0:
-            prospect = data[0]
-            required_fields = ["id", "organization_name", "status"]
-            missing = [f for f in required_fields if f not in prospect]
-            if missing:
-                log_test("TEST 1: GET /api/prospects", "FAIL", f"Missing fields: {missing}")
-                return False
+        # Should be an object (dict), not an array
+        if not isinstance(data, dict):
+            return False, f"Expected object, got {type(data).__name__}"
+        
+        # Should have exactly 4 active venues (not 6)
+        venue_ids = list(data.keys())
+        if len(venue_ids) != 4:
+            return False, f"Expected 4 venues, got {len(venue_ids)}: {venue_ids}"
+        
+        # Check that we have the correct 4 venues
+        expected_venues = {'venue-faaa', 'venue-pun', 'venue-aru', 'venue-tar'}
+        actual_venues = set(venue_ids)
+        
+        if actual_venues != expected_venues:
+            missing = expected_venues - actual_venues
+            extra = actual_venues - expected_venues
+            return False, f"Venue mismatch. Missing: {missing}, Extra: {extra}"
+        
+        # Verify structure of each venue
+        required_fields = ['venue_id', 'venue_code', 'venue_name', 'capacity', 'validated', 
+                          'pre_reserved', 'waitlist', 'total_reserved', 'available', 'is_full']
+        
+        for venue_id, venue_data in data.items():
+            for field in required_fields:
+                if field not in venue_data:
+                    return False, f"Missing field '{field}' in {venue_id}"
+        
+        return True, f"4 active venues with complete structure: {', '.join(venue_ids)}"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# TEST 2: GET /api/venues/availability - Faaa Venue Values
+# ============================================================================
+
+def test_venues_availability_faaa():
+    """Test Faaa venue availability values"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        data = response.json()
+        
+        faaa = data.get('venue-faaa')
+        if not faaa:
+            return False, "venue-faaa not found in response"
+        
+        # Expected values for Faaa
+        expected = {
+            'capacity': 16,
+            'validated': 0,
+            'pre_reserved': 0,
+            'waitlist': 0,
+            'total_reserved': 0,
+            'available': 16,
+            'is_full': False
+        }
+        
+        errors = []
+        for key, expected_val in expected.items():
+            actual_val = faaa.get(key)
+            if actual_val != expected_val:
+                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
+        
+        if errors:
+            return False, "; ".join(errors)
+        
+        return True, f"Faaa: {faaa['capacity']} capacity, {faaa['available']} available, is_full={faaa['is_full']}"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# TEST 3: GET /api/venues/availability - Punaauia Venue Values
+# ============================================================================
+
+def test_venues_availability_punaauia():
+    """Test Punaauia venue availability values"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        data = response.json()
+        
+        pun = data.get('venue-pun')
+        if not pun:
+            return False, "venue-pun not found in response"
+        
+        # Expected values for Punaauia
+        expected = {
+            'capacity': 13,
+            'validated': 0,
+            'pre_reserved': 0,
+            'waitlist': 0,
+            'total_reserved': 0,
+            'available': 13,
+            'is_full': False
+        }
+        
+        errors = []
+        for key, expected_val in expected.items():
+            actual_val = pun.get(key)
+            if actual_val != expected_val:
+                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
+        
+        if errors:
+            return False, "; ".join(errors)
+        
+        return True, f"Punaauia: {pun['capacity']} capacity, {pun['available']} available, is_full={pun['is_full']}"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# TEST 4: GET /api/venues/availability - Arue Venue Values (with pre-reserved)
+# ============================================================================
+
+def test_venues_availability_arue():
+    """Test Arue venue availability values (should have 1 pre-reserved)"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        data = response.json()
+        
+        aru = data.get('venue-aru')
+        if not aru:
+            return False, "venue-aru not found in response"
+        
+        # Expected values for Arue (has 1 pre-reserved for I Mua Papeete)
+        expected = {
+            'capacity': 12,
+            'validated': 0,
+            'pre_reserved': 1,
+            'waitlist': 0,
+            'total_reserved': 1,
+            'available': 11,
+            'is_full': False
+        }
+        
+        errors = []
+        for key, expected_val in expected.items():
+            actual_val = aru.get(key)
+            if actual_val != expected_val:
+                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
+        
+        if errors:
+            return False, "; ".join(errors)
+        
+        return True, f"Arue: {aru['capacity']} capacity, {aru['pre_reserved']} pre-reserved, {aru['available']} available"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# TEST 5: GET /api/venues/availability - Taravao Venue Values
+# ============================================================================
+
+def test_venues_availability_taravao():
+    """Test Taravao venue availability values"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        data = response.json()
+        
+        tar = data.get('venue-tar')
+        if not tar:
+            return False, "venue-tar not found in response"
+        
+        # Expected values for Taravao
+        expected = {
+            'capacity': 12,
+            'validated': 0,
+            'pre_reserved': 0,
+            'waitlist': 0,
+            'total_reserved': 0,
+            'available': 12,
+            'is_full': False
+        }
+        
+        errors = []
+        for key, expected_val in expected.items():
+            actual_val = tar.get(key)
+            if actual_val != expected_val:
+                errors.append(f"{key}: expected {expected_val}, got {actual_val}")
+        
+        if errors:
+            return False, "; ".join(errors)
+        
+        return True, f"Taravao: {tar['capacity']} capacity, {tar['available']} available, is_full={tar['is_full']}"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# TEST 6: GET /api/venues/availability - Calculation Coherence
+# ============================================================================
+
+def test_venues_availability_calculations():
+    """Test that total_reserved = validated + pre_reserved and available = capacity - total_reserved"""
+    try:
+        response = requests.get(f"{API_BASE}/venues/availability", timeout=10)
+        data = response.json()
+        
+        errors = []
+        for venue_id, venue_data in data.items():
+            # Check total_reserved calculation
+            expected_total = venue_data['validated'] + venue_data['pre_reserved']
+            if venue_data['total_reserved'] != expected_total:
+                errors.append(f"{venue_id}: total_reserved={venue_data['total_reserved']}, expected {expected_total}")
             
-            # Vérifier enrichissement venue_name et venue_code
-            if "venue_name" not in prospect and "venue_code" not in prospect:
-                log_test("TEST 1: GET /api/prospects", "WARN", "No venue enrichment fields")
+            # Check available calculation
+            expected_available = max(0, venue_data['capacity'] - venue_data['total_reserved'])
+            if venue_data['available'] != expected_available:
+                errors.append(f"{venue_id}: available={venue_data['available']}, expected {expected_available}")
+            
+            # Check is_full logic
+            expected_full = venue_data['capacity'] > 0 and venue_data['total_reserved'] >= venue_data['capacity']
+            if venue_data['is_full'] != expected_full:
+                errors.append(f"{venue_id}: is_full={venue_data['is_full']}, expected {expected_full}")
         
-        log_test("TEST 1: GET /api/prospects", "PASS", f"{len(data)} prospects returned")
-        return True
+        if errors:
+            return False, "; ".join(errors)
+        
+        return True, "All calculations coherent across 4 venues"
+    
     except Exception as e:
-        log_test("TEST 1: GET /api/prospects", "FAIL", str(e))
-        return False
+        return False, f"Exception: {str(e)}"
 
-def test_get_prospects_filter_venue():
-    """TEST 2: GET /api/prospects?venue_id=venue-faaa (filtre par venue)"""
+# ============================================================================
+# TEST 7: GET /api/venues/venue-faaa/stands - No Assignments (seed filtered)
+# ============================================================================
+
+def test_faaa_stands_no_assignments():
+    """Test that Faaa stands have NO assignments (all seed assignments filtered)"""
     try:
-        headers = get_admin_headers()
-        resp = requests.get(f"{BASE_URL}/api/prospects?venue_id=venue-faaa", headers=headers, timeout=30)
+        headers = {'x-user-role': 'aracom_admin'}
+        response = requests.get(f"{API_BASE}/venues/venue-faaa/stands", headers=headers, timeout=10)
         
-        if resp.status_code != 200:
-            log_test("TEST 2: GET /api/prospects?venue_id=venue-faaa", "FAIL", f"Status {resp.status_code}")
-            return False
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
         
-        data = resp.json()
+        data = response.json()
+        
         if not isinstance(data, list):
-            log_test("TEST 2: GET /api/prospects?venue_id=venue-faaa", "FAIL", "Response is not an array")
-            return False
+            return False, f"Expected array, got {type(data).__name__}"
         
-        # Vérifier que tous les prospects retournés ont venue_id=venue-faaa
-        wrong_venue = [p for p in data if p.get("venue_id") != "venue-faaa"]
-        if wrong_venue:
-            log_test("TEST 2: GET /api/prospects?venue_id=venue-faaa", "FAIL", f"{len(wrong_venue)} prospects with wrong venue_id")
-            return False
+        # Should have 16 stands
+        if len(data) != 16:
+            return False, f"Expected 16 stands, got {len(data)}"
         
-        log_test("TEST 2: GET /api/prospects?venue_id=venue-faaa", "PASS", f"{len(data)} prospects filtered")
-        return True
+        # Count stands with assignments
+        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        
+        if len(assigned_stands) > 0:
+            stand_codes = [s.get('stand_code') for s in assigned_stands]
+            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
+        
+        return True, f"16 stands, 0 with assignments (seed filtered correctly)"
+    
     except Exception as e:
-        log_test("TEST 2: GET /api/prospects?venue_id=venue-faaa", "FAIL", str(e))
-        return False
+        return False, f"Exception: {str(e)}"
 
-def test_get_prospects_filter_status():
-    """TEST 3: GET /api/prospects?status=a_contacter (filtre par statut)"""
+# ============================================================================
+# TEST 8: GET /api/venues/venue-aru/stands - Exactly 1 Assignment (A-C01)
+# ============================================================================
+
+def test_arue_stands_one_assignment():
+    """Test that Arue stands have EXACTLY 1 assignment (A-C01 for I Mua Papeete)"""
     try:
-        headers = get_admin_headers()
-        resp = requests.get(f"{BASE_URL}/api/prospects?status=a_contacter", headers=headers, timeout=30)
+        headers = {'x-user-role': 'aracom_admin'}
+        response = requests.get(f"{API_BASE}/venues/venue-aru/stands", headers=headers, timeout=10)
         
-        if resp.status_code != 200:
-            log_test("TEST 3: GET /api/prospects?status=a_contacter", "FAIL", f"Status {resp.status_code}")
-            return False
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
         
-        data = resp.json()
+        data = response.json()
+        
         if not isinstance(data, list):
-            log_test("TEST 3: GET /api/prospects?status=a_contacter", "FAIL", "Response is not an array")
-            return False
+            return False, f"Expected array, got {type(data).__name__}"
         
-        # Vérifier que tous les prospects retournés ont status=a_contacter
-        wrong_status = [p for p in data if p.get("status") != "a_contacter"]
-        if wrong_status:
-            log_test("TEST 3: GET /api/prospects?status=a_contacter", "FAIL", f"{len(wrong_status)} prospects with wrong status")
-            return False
+        # Should have 12 stands
+        if len(data) != 12:
+            return False, f"Expected 12 stands, got {len(data)}"
         
-        log_test("TEST 3: GET /api/prospects?status=a_contacter", "PASS", f"{len(data)} prospects filtered")
-        return True
+        # Count stands with assignments
+        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        
+        if len(assigned_stands) != 1:
+            stand_codes = [s.get('stand_code') for s in assigned_stands]
+            return False, f"Expected 1 assignment, got {len(assigned_stands)}: {stand_codes}"
+        
+        # Verify it's A-C01
+        assigned_stand = assigned_stands[0]
+        if assigned_stand.get('stand_code') != 'A-C01':
+            return False, f"Expected A-C01, got {assigned_stand.get('stand_code')}"
+        
+        # Verify organization name contains "I Mua Papeete"
+        org_name = assigned_stand.get('organization', {}).get('name', '')
+        if 'I Mua Papeete' not in org_name:
+            return False, f"Expected 'I Mua Papeete', got '{org_name}'"
+        
+        return True, f"12 stands, 1 assignment: {assigned_stand.get('stand_code')} ({org_name})"
+    
     except Exception as e:
-        log_test("TEST 3: GET /api/prospects?status=a_contacter", "FAIL", str(e))
-        return False
+        return False, f"Exception: {str(e)}"
 
-def test_get_prospects_stats():
-    """TEST 4: GET /api/prospects/stats (KPIs)"""
-    try:
-        headers = get_admin_headers()
-        resp = requests.get(f"{BASE_URL}/api/prospects/stats", headers=headers, timeout=30)
-        
-        if resp.status_code != 200:
-            log_test("TEST 4: GET /api/prospects/stats", "FAIL", f"Status {resp.status_code}")
-            return False
-        
-        data = resp.json()
-        required_fields = ["total", "contacted", "converted", "by_status", "by_venue", "conversion_rate_pct", "contact_to_conversion_pct"]
-        missing = [f for f in required_fields if f not in data]
-        if missing:
-            log_test("TEST 4: GET /api/prospects/stats", "FAIL", f"Missing fields: {missing}")
-            return False
-        
-        # Vérifier que conversion_rate_pct est entre 0 et 100
-        if not (0 <= data["conversion_rate_pct"] <= 100):
-            log_test("TEST 4: GET /api/prospects/stats", "FAIL", f"conversion_rate_pct={data['conversion_rate_pct']} not in [0,100]")
-            return False
-        
-        # Vérifier structure by_status
-        expected_statuses = ["a_contacter", "contacte", "interesse", "converti", "refuse", "abandonne"]
-        missing_statuses = [s for s in expected_statuses if s not in data["by_status"]]
-        if missing_statuses:
-            log_test("TEST 4: GET /api/prospects/stats", "FAIL", f"Missing statuses: {missing_statuses}")
-            return False
-        
-        log_test("TEST 4: GET /api/prospects/stats", "PASS", f"total={data['total']}, conversion_rate={data['conversion_rate_pct']}%")
-        return True
-    except Exception as e:
-        log_test("TEST 4: GET /api/prospects/stats", "FAIL", str(e))
-        return False
+# ============================================================================
+# TEST 9: GET /api/venues/venue-pun/stands - No Assignments
+# ============================================================================
 
-def test_post_prospect_create():
-    """TEST 5: POST /api/prospects (création)"""
+def test_punaauia_stands_no_assignments():
+    """Test that Punaauia stands have NO assignments"""
     try:
-        headers = get_admin_headers()
-        timestamp = int(datetime.now().timestamp())
-        body = {
-            "organization_name": f"Test Prospect 48w {timestamp}",
-            "venue_id": "venue-faaa",
-            "contact_name": "John Doe",
-            "contact_email": "john@TEST.com",
-            "contact_phone": "87123456",
-            "discipline": "Sport",
-            "status": "a_contacter",
-            "initial_note": "Première prise de contact"
-        }
+        headers = {'x-user-role': 'aracom_admin'}
+        response = requests.get(f"{API_BASE}/venues/venue-pun/stands", headers=headers, timeout=10)
         
-        resp = requests.post(f"{BASE_URL}/api/prospects", headers=headers, json=body, timeout=30)
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
         
-        if resp.status_code != 200:
-            log_test("TEST 5: POST /api/prospects", "FAIL", f"Status {resp.status_code}")
-            return False, None
+        data = response.json()
         
-        data = resp.json()
-        
-        # Vérifier que l'ID a été généré
-        if "id" not in data:
-            log_test("TEST 5: POST /api/prospects", "FAIL", "No id in response")
-            return False, None
-        
-        # Vérifier que contact_email est en minuscules
-        if data.get("contact_email") != "john@test.com":
-            log_test("TEST 5: POST /api/prospects", "FAIL", f"contact_email not lowercase: {data.get('contact_email')}")
-            return False, data.get("id")
-        
-        # Vérifier que notes contient initial_note
-        if not data.get("notes") or len(data["notes"]) == 0:
-            log_test("TEST 5: POST /api/prospects", "FAIL", "notes array is empty")
-            return False, data.get("id")
-        
-        if data["notes"][0].get("text") != "Première prise de contact":
-            log_test("TEST 5: POST /api/prospects", "FAIL", f"initial_note not in notes: {data['notes'][0].get('text')}")
-            return False, data.get("id")
-        
-        # Vérifier status par défaut
-        if data.get("status") != "a_contacter":
-            log_test("TEST 5: POST /api/prospects", "FAIL", f"status={data.get('status')} instead of a_contacter")
-            return False, data.get("id")
-        
-        log_test("TEST 5: POST /api/prospects", "PASS", f"Created prospect id={data['id']}")
-        return True, data["id"]
-    except Exception as e:
-        log_test("TEST 5: POST /api/prospects", "FAIL", str(e))
-        return False, None
-
-def test_post_prospect_add_note(prospect_id):
-    """TEST 6: POST /api/prospects/:id/notes (ajout de note)"""
-    try:
-        headers = get_admin_headers()
-        body = {"text": "Relance téléphonique effectuée"}
-        
-        resp = requests.post(f"{BASE_URL}/api/prospects/{prospect_id}/notes", headers=headers, json=body, timeout=30)
-        
-        if resp.status_code != 200:
-            log_test("TEST 6: POST /api/prospects/:id/notes", "FAIL", f"Status {resp.status_code}")
-            return False
-        
-        data = resp.json()
-        
-        # Vérifier que notes contient maintenant 2 entrées
-        if not data.get("notes") or len(data["notes"]) < 2:
-            log_test("TEST 6: POST /api/prospects/:id/notes", "FAIL", f"notes count={len(data.get('notes', []))}, expected >=2")
-            return False
-        
-        # Vérifier que la dernière note est celle qu'on vient d'ajouter
-        last_note = data["notes"][-1]
-        if last_note.get("text") != "Relance téléphonique effectuée":
-            log_test("TEST 6: POST /api/prospects/:id/notes", "FAIL", f"Last note text={last_note.get('text')}")
-            return False
-        
-        log_test("TEST 6: POST /api/prospects/:id/notes", "PASS", f"{len(data['notes'])} notes total")
-        return True
-    except Exception as e:
-        log_test("TEST 6: POST /api/prospects/:id/notes", "FAIL", str(e))
-        return False
-
-def test_put_prospect_update(prospect_id):
-    """TEST 7: PUT /api/prospects/:id (mise à jour)"""
-    try:
-        headers = get_admin_headers()
-        body = {
-            "status": "contacte",
-            "contact_phone": "87654321"
-        }
-        
-        resp = requests.put(f"{BASE_URL}/api/prospects/{prospect_id}", headers=headers, json=body, timeout=30)
-        
-        if resp.status_code != 200:
-            log_test("TEST 7: PUT /api/prospects/:id", "FAIL", f"Status {resp.status_code}")
-            return False
-        
-        data = resp.json()
-        
-        # Vérifier que status a été mis à jour
-        if data.get("status") != "contacte":
-            log_test("TEST 7: PUT /api/prospects/:id", "FAIL", f"status={data.get('status')} instead of contacte")
-            return False
-        
-        # Vérifier que contact_phone a été mis à jour
-        if data.get("contact_phone") != "87654321":
-            log_test("TEST 7: PUT /api/prospects/:id", "FAIL", f"contact_phone={data.get('contact_phone')} instead of 87654321")
-            return False
-        
-        log_test("TEST 7: PUT /api/prospects/:id", "PASS", f"Updated status={data['status']}, phone={data['contact_phone']}")
-        return True
-    except Exception as e:
-        log_test("TEST 7: PUT /api/prospects/:id", "FAIL", str(e))
-        return False
-
-def test_post_prospect_convert(prospect_id):
-    """TEST 8: POST /api/prospects/:id/convert (conversion en exposant)"""
-    try:
-        headers = get_admin_headers()
-        
-        resp = requests.post(f"{BASE_URL}/api/prospects/{prospect_id}/convert", headers=headers, json={}, timeout=30)
-        
-        if resp.status_code != 200:
-            log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", f"Status {resp.status_code}")
-            return False
-        
-        data = resp.json()
-        
-        # Vérifier structure de la réponse
-        required_fields = ["ok", "organization_id", "registration_id"]
-        missing = [f for f in required_fields if f not in data]
-        if missing:
-            log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", f"Missing fields: {missing}")
-            return False
-        
-        if not data.get("ok"):
-            log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", "ok=false")
-            return False
-        
-        # Vérifier que le prospect a été marqué comme converti
-        resp2 = requests.get(f"{BASE_URL}/api/prospects", headers=headers, timeout=30)
-        if resp2.status_code == 200:
-            prospects = resp2.json()
-            converted_prospect = next((p for p in prospects if p["id"] == prospect_id), None)
-            if converted_prospect:
-                if converted_prospect.get("status") != "converti":
-                    log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", f"Prospect status={converted_prospect.get('status')} instead of converti")
-                    return False
-                if not converted_prospect.get("converted_to_registration_id"):
-                    log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", "converted_to_registration_id is null")
-                    return False
-        
-        # Tenter de re-convertir (doit échouer avec 400)
-        resp3 = requests.post(f"{BASE_URL}/api/prospects/{prospect_id}/convert", headers=headers, json={}, timeout=30)
-        if resp3.status_code != 400:
-            log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", f"Re-convert should return 400, got {resp3.status_code}")
-            return False
-        
-        log_test("TEST 8: POST /api/prospects/:id/convert", "PASS", f"org_id={data['organization_id']}, reg_id={data['registration_id']}")
-        return True
-    except Exception as e:
-        log_test("TEST 8: POST /api/prospects/:id/convert", "FAIL", str(e))
-        return False
-
-def test_delete_prospect():
-    """TEST 9: DELETE /api/prospects/:id (suppression)"""
-    try:
-        headers = get_admin_headers()
-        
-        # Créer un prospect temporaire pour le supprimer
-        timestamp = int(datetime.now().timestamp())
-        body = {
-            "organization_name": f"Test Delete Prospect {timestamp}",
-            "venue_id": "venue-faaa",
-            "contact_name": "Jane Doe",
-            "contact_email": "jane@test.com"
-        }
-        
-        resp = requests.post(f"{BASE_URL}/api/prospects", headers=headers, json=body, timeout=30)
-        if resp.status_code != 200:
-            log_test("TEST 9: DELETE /api/prospects/:id", "FAIL", "Failed to create test prospect")
-            return False
-        
-        prospect_id = resp.json()["id"]
-        
-        # Supprimer le prospect
-        resp2 = requests.delete(f"{BASE_URL}/api/prospects/{prospect_id}", headers=headers, timeout=30)
-        
-        if resp2.status_code != 200:
-            log_test("TEST 9: DELETE /api/prospects/:id", "FAIL", f"Status {resp2.status_code}")
-            return False
-        
-        data = resp2.json()
-        if not data.get("ok"):
-            log_test("TEST 9: DELETE /api/prospects/:id", "FAIL", "ok=false")
-            return False
-        
-        # Vérifier que le prospect a été supprimé
-        resp3 = requests.get(f"{BASE_URL}/api/prospects", headers=headers, timeout=30)
-        if resp3.status_code == 200:
-            prospects = resp3.json()
-            deleted_prospect = next((p for p in prospects if p["id"] == prospect_id), None)
-            if deleted_prospect:
-                log_test("TEST 9: DELETE /api/prospects/:id", "FAIL", "Prospect still exists after deletion")
-                return False
-        
-        log_test("TEST 9: DELETE /api/prospects/:id", "PASS", f"Deleted prospect id={prospect_id}")
-        return True
-    except Exception as e:
-        log_test("TEST 9: DELETE /api/prospects/:id", "FAIL", str(e))
-        return False
-
-def test_error_cases():
-    """TEST 10: Cas erreurs (404 pour IDs inexistants)"""
-    try:
-        headers = get_admin_headers()
-        
-        # POST /api/prospects/<id-inexistant>/notes → 404
-        resp1 = requests.post(f"{BASE_URL}/api/prospects/non-existent-id-12345/notes", 
-                             headers=headers, json={"text": "test"}, timeout=30)
-        if resp1.status_code != 404:
-            log_test("TEST 10: Error cases", "FAIL", f"POST notes on non-existent should return 404, got {resp1.status_code}")
-            return False
-        
-        # POST /api/prospects/<id-inexistant>/convert → 404
-        resp2 = requests.post(f"{BASE_URL}/api/prospects/non-existent-id-12345/convert", 
-                             headers=headers, json={}, timeout=30)
-        if resp2.status_code != 404:
-            log_test("TEST 10: Error cases", "FAIL", f"POST convert on non-existent should return 404, got {resp2.status_code}")
-            return False
-        
-        log_test("TEST 10: Error cases", "PASS", "404 errors returned correctly")
-        return True
-    except Exception as e:
-        log_test("TEST 10: Error cases", "FAIL", str(e))
-        return False
-
-def test_pacific_centers_filter():
-    """TEST 11: Filtre Pacific Centers (lecture seule restreinte)"""
-    try:
-        headers = get_pacific_headers()
-        
-        # GET /api/prospects avec Pacific Centers headers
-        resp = requests.get(f"{BASE_URL}/api/prospects", headers=headers, timeout=30)
-        
-        if resp.status_code != 200:
-            log_test("TEST 11: Pacific Centers filter", "FAIL", f"Status {resp.status_code}")
-            return False
-        
-        data = resp.json()
         if not isinstance(data, list):
-            log_test("TEST 11: Pacific Centers filter", "FAIL", "Response is not an array")
-            return False
+            return False, f"Expected array, got {type(data).__name__}"
         
-        # Note: Le filtre allowed_venue_ids ne s'applique que si le user Pacific a ce champ défini en DB
-        # Sans ce champ, tous les prospects sont retournés (comportement normal)
-        log_test("TEST 11: Pacific Centers filter", "PASS", f"{len(data)} prospects returned (filter applies only if allowed_venue_ids set)")
-        return True
+        # Should have 13 stands
+        if len(data) != 13:
+            return False, f"Expected 13 stands, got {len(data)}"
+        
+        # Count stands with assignments
+        assigned_stands = [s for s in data if s.get('assignment') is not None]
+        
+        if len(assigned_stands) > 0:
+            stand_codes = [s.get('stand_code') for s in assigned_stands]
+            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
+        
+        return True, f"13 stands, 0 with assignments"
+    
     except Exception as e:
-        log_test("TEST 11: Pacific Centers filter", "FAIL", str(e))
-        return False
+        return False, f"Exception: {str(e)}"
 
-def test_non_regression_checks():
-    """TEST 12: Checks de non-régression (endpoints non touchés)"""
+# ============================================================================
+# TEST 10: GET /api/venues/venue-tar/stands - No Assignments
+# ============================================================================
+
+def test_taravao_stands_no_assignments():
+    """Test that Taravao stands have NO assignments"""
     try:
-        headers = get_admin_headers()
+        headers = {'x-user-role': 'aracom_admin'}
+        response = requests.get(f"{API_BASE}/venues/venue-tar/stands", headers=headers, timeout=10)
         
-        # GET /api/menu-badges
-        resp1 = requests.get(f"{BASE_URL}/api/menu-badges", headers=headers, timeout=30)
-        if resp1.status_code != 200:
-            log_test("TEST 12: Non-regression - menu-badges", "FAIL", f"Status {resp1.status_code}")
-            return False
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
         
-        # GET /api/dashboard/kpis
-        resp2 = requests.get(f"{BASE_URL}/api/dashboard/kpis", headers=headers, timeout=30)
-        if resp2.status_code != 200:
-            log_test("TEST 12: Non-regression - dashboard/kpis", "FAIL", f"Status {resp2.status_code}")
-            return False
+        data = response.json()
         
-        # GET /api/venues
-        resp3 = requests.get(f"{BASE_URL}/api/venues", headers=headers, timeout=30)
-        if resp3.status_code != 200:
-            log_test("TEST 12: Non-regression - venues", "FAIL", f"Status {resp3.status_code}")
-            return False
+        if not isinstance(data, list):
+            return False, f"Expected array, got {type(data).__name__}"
         
-        # POST /api/auth/password-login
-        resp4 = requests.post(f"{BASE_URL}/api/auth/password-login",
-                             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=30)
-        if resp4.status_code != 200:
-            log_test("TEST 12: Non-regression - auth/password-login", "FAIL", f"Status {resp4.status_code}")
-            return False
+        # Should have 12 stands
+        if len(data) != 12:
+            return False, f"Expected 12 stands, got {len(data)}"
         
-        data4 = resp4.json()
-        if data4.get("user", {}).get("role_code") != "aracom_admin":
-            log_test("TEST 12: Non-regression - auth/password-login", "FAIL", f"role={data4.get('user', {}).get('role_code')}")
-            return False
+        # Count stands with assignments
+        assigned_stands = [s for s in data if s.get('assignment') is not None]
         
-        log_test("TEST 12: Non-regression checks", "PASS", "All 4 endpoints working")
-        return True
+        if len(assigned_stands) > 0:
+            stand_codes = [s.get('stand_code') for s in assigned_stands]
+            return False, f"Expected 0 assignments, got {len(assigned_stands)}: {stand_codes}"
+        
+        return True, f"12 stands, 0 with assignments"
+    
     except Exception as e:
-        log_test("TEST 12: Non-regression checks", "FAIL", str(e))
-        return False
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# NON-REGRESSION TESTS
+# ============================================================================
+
+def test_venues_only_active():
+    """Test GET /api/venues?only_active=1 returns 4 venues"""
+    try:
+        response = requests.get(f"{API_BASE}/venues?only_active=1", timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        
+        if not isinstance(data, list):
+            return False, f"Expected array, got {type(data).__name__}"
+        
+        if len(data) != 4:
+            venue_names = [v.get('name') for v in data]
+            return False, f"Expected 4 venues, got {len(data)}: {venue_names}"
+        
+        return True, f"4 active venues returned"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+def test_menu_badges():
+    """Test GET /api/menu-badges returns 200"""
+    try:
+        response = requests.get(f"{API_BASE}/menu-badges", timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        return True, "Menu badges endpoint working"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+def test_validation_queue():
+    """Test GET /api/admin/validation-queue returns 200"""
+    try:
+        headers = {'x-user-role': 'aracom_admin'}
+        response = requests.get(f"{API_BASE}/admin/validation-queue", headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        return True, "Validation queue endpoint working"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+def test_validation_requests():
+    """Test GET /api/validation-requests returns 200 and includes I Mua Papeete"""
+    try:
+        response = requests.get(f"{API_BASE}/validation-requests", timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        
+        # Check if I Mua Papeete appears in the list
+        found = False
+        for item in data:
+            org_name = item.get('organization', {}).get('name', '')
+            venue_name = item.get('venue', {}).get('name', '')
+            if 'I Mua Papeete' in org_name and 'Arue' in venue_name:
+                found = True
+                break
+        
+        if not found:
+            return False, "I Mua Papeete on Arue not found in validation requests"
+        
+        return True, "Validation requests includes I Mua Papeete on Arue"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+def test_registrations():
+    """Test GET /api/registrations returns 200"""
+    try:
+        response = requests.get(f"{API_BASE}/registrations", timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        return True, "Registrations endpoint working"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+def test_admin_login():
+    """Test POST /api/auth/password-login with admin credentials"""
+    try:
+        payload = {
+            'email': ADMIN_EMAIL,
+            'password': ADMIN_PASSWORD
+        }
+        response = requests.post(f"{API_BASE}/auth/password-login", json=payload, timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        
+        if not data.get('ok'):
+            return False, f"Login failed: {data.get('error')}"
+        
+        if data.get('user', {}).get('role_code') != 'aracom_admin':
+            return False, f"Expected role aracom_admin, got {data.get('user', {}).get('role_code')}"
+        
+        return True, f"Admin login successful, role={data.get('user', {}).get('role_code')}"
+    
+    except Exception as e:
+        return False, f"Exception: {str(e)}"
+
+# ============================================================================
+# MAIN TEST RUNNER
+# ============================================================================
 
 def main():
-    """Exécute tous les tests"""
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}SESSION 48w — Test de non-régression du refactoring PROSPECTS{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}\n")
+    """Run all tests"""
+    print(f"\n{BLUE}SESSION 48y — Backend Test Suite{RESET}")
+    print(f"{BLUE}Testing: {API_BASE}{RESET}\n")
     
-    results = []
-    prospect_id = None
+    # Test 1: New endpoint /api/venues/availability
+    print_section("TEST GROUP 1: GET /api/venues/availability - New Endpoint")
+    run_test("1.1 Structure and Active Venues Only (4 venues)", test_venues_availability_structure)
+    run_test("1.2 Faaa Venue Values", test_venues_availability_faaa)
+    run_test("1.3 Punaauia Venue Values", test_venues_availability_punaauia)
+    run_test("1.4 Arue Venue Values (with pre-reserved)", test_venues_availability_arue)
+    run_test("1.5 Taravao Venue Values", test_venues_availability_taravao)
+    run_test("1.6 Calculation Coherence", test_venues_availability_calculations)
     
-    # Tests principaux
-    results.append(test_get_prospects_list())
-    results.append(test_get_prospects_filter_venue())
-    results.append(test_get_prospects_filter_status())
-    results.append(test_get_prospects_stats())
+    # Test 2: Modified endpoint /api/venues/:id/stands
+    print_section("TEST GROUP 2: GET /api/venues/:id/stands - Seed Filtering")
+    run_test("2.1 Faaa Stands - No Assignments (seed filtered)", test_faaa_stands_no_assignments)
+    run_test("2.2 Arue Stands - Exactly 1 Assignment (A-C01)", test_arue_stands_one_assignment)
+    run_test("2.3 Punaauia Stands - No Assignments", test_punaauia_stands_no_assignments)
+    run_test("2.4 Taravao Stands - No Assignments", test_taravao_stands_no_assignments)
     
-    # Test création (retourne l'ID pour les tests suivants)
-    success, prospect_id = test_post_prospect_create()
-    results.append(success)
+    # Test 3: Non-regression
+    print_section("TEST GROUP 3: Non-Regression Checks")
+    run_test("3.1 GET /api/venues?only_active=1", test_venues_only_active)
+    run_test("3.2 GET /api/menu-badges", test_menu_badges)
+    run_test("3.3 GET /api/admin/validation-queue", test_validation_queue)
+    run_test("3.4 GET /api/validation-requests", test_validation_requests)
+    run_test("3.5 GET /api/registrations", test_registrations)
+    run_test("3.6 POST /api/auth/password-login (admin)", test_admin_login)
     
-    if prospect_id:
-        results.append(test_post_prospect_add_note(prospect_id))
-        results.append(test_put_prospect_update(prospect_id))
-        results.append(test_post_prospect_convert(prospect_id))
+    # Summary
+    print_section("TEST SUMMARY")
+    pass_rate = (tests_passed / tests_run * 100) if tests_run > 0 else 0
+    print(f"Total Tests: {tests_run}")
+    print(f"Passed: {GREEN}{tests_passed}{RESET}")
+    print(f"Failed: {RED}{tests_run - tests_passed}{RESET}")
+    print(f"Pass Rate: {GREEN if pass_rate == 100 else YELLOW}{pass_rate:.1f}%{RESET}\n")
+    
+    if tests_passed == tests_run:
+        print(f"{GREEN}{'='*80}{RESET}")
+        print(f"{GREEN}ALL TESTS PASSED ✅{RESET}")
+        print(f"{GREEN}{'='*80}{RESET}\n")
+        return 0
     else:
-        print(f"{YELLOW}⚠️  Skipping tests 6-8 (no prospect_id){RESET}")
-        results.extend([False, False, False])
-    
-    results.append(test_delete_prospect())
-    results.append(test_error_cases())
-    results.append(test_pacific_centers_filter())
-    results.append(test_non_regression_checks())
-    
-    # Résumé
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    passed = sum(results)
-    total = len(results)
-    percentage = (passed / total * 100) if total > 0 else 0
-    
-    if passed == total:
-        print(f"{GREEN}✅ TOUS LES TESTS PASSÉS: {passed}/{total} ({percentage:.1f}%){RESET}")
-        print(f"{GREEN}AUCUNE RÉGRESSION détectée. Refactoring prospects handlers 100% opérationnel.{RESET}")
-    else:
-        print(f"{RED}❌ TESTS ÉCHOUÉS: {total - passed}/{total} ({100 - percentage:.1f}%){RESET}")
-        print(f"{YELLOW}⚠️  Certains endpoints prospects ne fonctionnent pas comme avant le refactoring.{RESET}")
-    
-    print(f"{BLUE}{'='*80}{RESET}\n")
-    
-    return 0 if passed == total else 1
+        print(f"{RED}{'='*80}{RESET}")
+        print(f"{RED}SOME TESTS FAILED ❌{RESET}")
+        print(f"{RED}{'='*80}{RESET}\n")
+        return 1
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit(main())
