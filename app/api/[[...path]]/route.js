@@ -106,6 +106,34 @@ async function tryAutoMailGuard() {
   } catch (e) { console.error('[boot] mail guard error:', e?.message); }
 }
 
+// 🆕 SESSION 48n — Migration "Caution = Chèque uniquement"
+//    Force tous les preferred_payment et deposit_mode (autres que 'cheque') à 'cheque'.
+//    Idempotent — s'exécute 1× par boot.
+let __paymentMigrationRan = false;
+async function tryForceChequeOnly() {
+  if (__paymentMigrationRan) return;
+  __paymentMigrationRan = true;
+  try {
+    const db = await getDb();
+    const r1 = await db.collection('validation_requests').updateMany(
+      { preferred_payment: { $nin: ['cheque', null] } },
+      { $set: { preferred_payment: 'cheque', _payment_migrated_at: new Date() } }
+    );
+    const r2 = await db.collection('deposits').updateMany(
+      { deposit_mode: { $nin: ['cheque', null] } },
+      { $set: { deposit_mode: 'cheque', _payment_migrated_at: new Date() } }
+    );
+    const r3 = await db.collection('caution_appointments').updateMany(
+      { preferred_payment: { $nin: ['cheque', null] } },
+      { $set: { preferred_payment: 'cheque', _payment_migrated_at: new Date() } }
+    );
+    const total = (r1.modifiedCount || 0) + (r2.modifiedCount || 0) + (r3.modifiedCount || 0);
+    if (total > 0) {
+      console.log(`[boot] 💳 Caution=chèque only — migrated: validation_requests=${r1.modifiedCount}, deposits=${r2.modifiedCount}, caution_appointments=${r3.modifiedCount}`);
+    }
+  } catch (e) { console.error('[boot] cheque-only migration error:', e?.message); }
+}
+
 // ===== Tracking helpers =====
 
 // 🆕 Helper : génère le HTML d'une attestation de remboursement avec 2 exemplaires sur 2 pages A4
@@ -769,6 +797,8 @@ export async function GET(request, { params }) {
     tryAutoRestoreVenueLayouts();
     // 🛡️ Garde-fou anti-envoi mail accidentel (idempotent, tourne 1 seule fois)
     tryAutoMailGuard();
+    // 🆕 SESSION 48n — Migration "Caution = Chèque uniquement" (idempotent)
+    tryForceChequeOnly();
     const db = await getDb();
     const p = params.path || [];
     const route = p.join('/');
@@ -1626,6 +1656,18 @@ export async function GET(request, { params }) {
         unlocked: Boolean(cfg?.unlocked),
         unlocked_at: cfg?.unlocked_at || null,
         unlocked_by: cfg?.unlocked_by || null,
+      });
+    }
+
+    // 🆕 SESSION 48n — Toggle global "Activer le questionnaire de satisfaction" (côté Exposant)
+    //    GET : retourne { enabled: bool, updated_at, updated_by }
+    //    POST avec body { enabled: bool } : (admin uniquement) modifie le flag
+    if (route === 'settings/survey-enabled') {
+      const cfg = await db.collection('app_settings').findOne({ key: 'survey_enabled' });
+      return json({
+        enabled: Boolean(cfg?.enabled),
+        updated_at: cfg?.updated_at || null,
+        updated_by: cfg?.updated_by || null,
       });
     }
 
@@ -5941,6 +5983,35 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       return json({ ok: true, unlocked: Boolean(unlocked) });
     }
 
+    // 🆕 SESSION 48n — POST /api/settings/survey-enabled — toggle global du questionnaire
+    //   Body : { enabled: bool } · Réservé aracom_admin
+    if (route === 'settings/survey-enabled') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins', 403);
+      const { enabled } = body || {};
+      const userId = ctx.userId || request.headers.get('x-user-id');
+      const user = userId ? await db.collection('users').findOne({ id: userId }) : null;
+      await db.collection('app_settings').updateOne(
+        { key: 'survey_enabled' },
+        {
+          $set: {
+            key: 'survey_enabled',
+            enabled: Boolean(enabled),
+            updated_at: new Date(),
+            updated_by: user?.email || userId || 'admin',
+          },
+        },
+        { upsert: true }
+      );
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        action: 'SURVEY_TOGGLE',
+        actor_email: user?.email || 'admin',
+        metadata: { enabled: Boolean(enabled) },
+        at: new Date(),
+      }).catch(() => {});
+      return json({ ok: true, enabled: Boolean(enabled) });
+    }
+
     // ============ VALIDATION D'UN DOCUMENT REÇU PAR L'EXPOSANT ============
     // POST /api/registration-documents/:id/validate
     // body : { decision: 'approved'|'rejected', comment }
@@ -8736,7 +8807,9 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
       const slots = await db.collection('animation_slots').find({ registration_id: regId }).toArray();
       if (slots.length === 0) return err('Choisissez au moins 1 créneau d\'animation avant de valider', 400);
 
-      const { rdv_proposal = '', preferred_payment = 'cheque', notes = '' } = body;
+      const { rdv_proposal = '', preferred_payment: _ignoredPayment = 'cheque', notes = '' } = body;
+      // 🆕 SESSION 48n — Caution = Chèque uniquement (option espèces/virement supprimée)
+      const preferred_payment = 'cheque';
       // Cancel any previous pending request
       await db.collection('validation_requests').updateMany(
         { registration_id: regId, status: { $in: ['en_attente', 'rdv_fixe'] } },
@@ -8776,7 +8849,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
           const exposantName = ctx.org.name;
           const venueName = ctx.venue?.name || '—';
           const stand = ctx.reg.stand_code;
-          const paymentLabel = preferred_payment === 'especes' ? 'Espèces' : (preferred_payment === 'virement' ? 'Virement bancaire' : 'Chèque');
+          const paymentLabel = 'Chèque'; // 🆕 SESSION 48n — Caution = Chèque uniquement
           // 1) Mail à l'exposant : confirmation de prise en compte
           if (ctx.org.main_email) {
             sendMailAuto({
@@ -8873,7 +8946,9 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
     // ARACOM : verrouille DÉFINITIVEMENT (caution reçue + tout figé)
     if (route.match(/^validation-requests\/[^/]+\/lock$/)) {
       const reqId = p[1];
-      const { payment_mode = 'cheque', amount_xpf = 20000 } = body;
+      const { payment_mode: _ignoredMode = 'cheque', amount_xpf = 20000 } = body;
+      // 🆕 SESSION 48n — Caution = Chèque uniquement
+      const payment_mode = 'cheque';
       const vreq = await db.collection('validation_requests').findOne({ id: reqId });
       if (!vreq) return err('Demande introuvable', 404);
       const reg = await db.collection('registrations').findOne({ id: vreq.registration_id });
@@ -8934,7 +9009,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
           const org = await db.collection('organizations').findOne({ id: reg.organization_id });
           const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
           receiptNumber = `CAUT-2026-${String(reg.id).slice(0, 6).toUpperCase()}`;
-          const paymentLabel = payment_mode === 'especes' ? 'Espèces' : 'Chèque';
+          const paymentLabel = 'Chèque'; // 🆕 SESSION 48n — Caution = Chèque uniquement
           const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu de caution ${org?.name || ''}</title><style>body{font-family:Helvetica,Arial,sans-serif;max-width:680px;margin:32px auto;color:#1f2937;padding:0 16px}h1{color:#1d4ed8;margin:0 0 4px}.box{border:2px solid #1d4ed8;padding:20px;border-radius:8px;margin:20px 0}.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e5e7eb}.label{color:#64748b}.amount{font-size:28px;color:#1d4ed8;font-weight:800}.print-btn{position:fixed;top:20px;right:20px;padding:10px 20px;border-radius:6px;background:#1d4ed8;color:#fff;border:0;cursor:pointer;font-weight:600}@media print{.print-btn{display:none}}</style></head><body><button class="print-btn" onclick="window.print()">🖨️ Imprimer / PDF</button><div style="display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid #1d4ed8;padding-bottom:10px"><div><h1>REÇU DE CAUTION</h1><p style="margin:0;color:#64748b">Forum de la Rentrée 2026 · 14 & 15 août 2026</p></div><div style="text-align:right"><div style="background:#1d4ed8;color:#fff;font-weight:700;padding:6px 12px;border-radius:6px;display:inline-block;letter-spacing:.05em">ARACOM</div><div style="font-size:11px;color:#64748b;margin-top:6px">Émis le ${new Date().toLocaleDateString('fr-FR')}</div></div></div><div class="box"><div class="row"><span class="label">N° de reçu</span><b>${receiptNumber}</b></div><div class="row"><span class="label">Date d'émission</span><b>${new Date().toLocaleDateString('fr-FR')}</b></div><div class="row"><span class="label">Exposant</span><b>${org?.name || '—'}</b></div><div class="row"><span class="label">Discipline</span><span>${org?.discipline || '—'}</span></div><div class="row"><span class="label">Contact</span><span>${org?.contact_name || '—'}</span></div><div class="row"><span class="label">Site / Stand</span><span>${venue?.name || '—'} / ${reg.stand_code || '—'}</span></div><div class="row"><span class="label">Mode de paiement</span><b>${paymentLabel}</b></div></div><div style="text-align:center;padding:18px 0;background:#eff6ff;border-radius:8px"><div class="label">Montant reçu en garantie</div><div class="amount">20 000 XPF</div><div class="label" style="margin-top:6px">Caution restituée intégralement sous 2 semaines après l'événement<br/>sous réserve de présence et tenue conforme du stand</div></div><p style="font-size:12px;color:#64748b;margin-top:24px">Cette caution sera restituée sous 2 semaines après l'événement, à condition que toutes les conditions de présence et de tenue de stand soient respectées (présence sur les jours confirmés, montage et démontage du stand dans les horaires, aucune dégradation constatée).</p><div style="margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between"><div><i>Pour ARACOM,</i><br/><b>L'équipe organisation</b></div><div style="text-align:right;font-size:11px;color:#94a3b8">Document officiel — Forum de la Rentrée 2026<br/>${receiptNumber}</div></div></body></html>`;
           receiptDocId = uuid();
           await db.collection('registration_documents').insertOne({
