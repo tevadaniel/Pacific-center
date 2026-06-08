@@ -75,7 +75,6 @@ const TABS = [
   // — Exposants (cœur métier) —
   { key: 'exposants', label: 'Liste & fiches', icon: 'Users', href: '/aracom?tab=exposants' },
   { key: 'file-validation', label: 'File de validation', icon: 'ShieldCheck', href: '/aracom?tab=file-validation' },
-  { key: 'file-cession', label: 'File de cession', icon: 'Repeat', href: '/aracom?tab=file-cession' },
   { key: 'cautions', label: 'Cautions & restitutions', icon: 'Wallet', href: '/aracom?tab=cautions' },
   { key: 'relances', label: 'Relances IA', icon: 'Bell', href: '/aracom?tab=relances' },
   { key: 'validations', label: 'Validations dossiers', icon: 'ClipboardCheck', href: '/aracom?tab=validations' },
@@ -108,7 +107,7 @@ const TAB_GROUPS = [
     key: 'exposants_grp',
     label: 'Exposants',
     icon: 'Users',
-    items: ['exposants', 'file-validation', 'file-cession', 'waitlist', 'cautions', 'relances', 'validations', 'prospection'],
+    items: ['exposants', 'file-validation', 'waitlist', 'cautions', 'relances', 'validations', 'prospection'],
   },
   {
     key: 'terrain',
@@ -182,7 +181,6 @@ export default function AracomPage() {
   const BADGE_MAP = {
     'validations': 'validations',
     'file-validation': 'pending_validations',
-    'file-cession': 'pending_cessions',
     'relances': 'relances',
     'exposants': 'a_confirmer',
     'cautions': 'cautions',
@@ -194,7 +192,6 @@ export default function AracomPage() {
   const BADGE_TOOLTIPS = {
     'validations': `${menuBadges.validations || 0} demande(s) de validation en attente`,
     'file-validation': `${menuBadges.pending_validations || 0} demande(s) stand/animation en attente ARACOM`,
-    'file-cession': `${menuBadges.pending_cessions || 0} demande(s) de cession en attente d'approbation`,
     'relances': `${menuBadges.relances || 0} exposant(s) à relancer`,
     'exposants': `${menuBadges.a_confirmer || 0} dossier(s) à confirmer`,
     'cautions': `${menuBadges.cautions || 0} caution(s) non encaissée(s)`,
@@ -262,7 +259,6 @@ export default function AracomPage() {
       {activeTab === 'sites' && <SitesView />}
       {activeTab === 'validations' && <ValidationsView />}
       {activeTab === 'file-validation' && <ValidationQueueView />}
-      {activeTab === 'file-cession' && <CessionQueueView />}
       {activeTab === 'access' && <AccessTokensView />}
       {activeTab === 'cautions' && <CautionsView />}
       {activeTab === 'mailing' && <MailingView />}
@@ -3539,5 +3535,3 @@ function DisciplinesCard({ analytics }) {
     </Card>
   );
 }
-
-

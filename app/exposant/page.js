@@ -2104,8 +2104,7 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
                     {venue?.name} • {registration.status === 'confirme' ? 'Confirmé par ARACOM ✅' : (registration.is_waitlist ? 'ARACOM tranchera selon les disponibilités' : 'En attente de validation ARACOM ⏳')}
                   </div>
                 </div>
-                {/* 🆕 PHASE D — Bouton "Céder mon créneau" (uniquement si stand validé par Aracom) */}
-                <CessionButton stand={myStand} registrationId={registration.id} onRefresh={onRefresh} />
+                {/* 🆕 SESSION 48t — Bouton "Céder mon créneau" RETIRÉ — ARACOM gère les transferts via la liste d'attente */}
                 {!isLocked && <Button variant="outline" size="sm" onClick={release} disabled={busy} className="gap-1.5"><Trash2 className="w-3.5 h-3.5" /> Libérer</Button>}
               </>
             ) : (

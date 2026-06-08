@@ -19,7 +19,6 @@ const GROUPS = [
     accent: 'rose', // rouge urgent
     counters: [
       { key: 'pending_validations', tab: 'file-validation', label: 'Demandes', icon: ShieldCheck, hint: '⌨️ V = valider · R = refuser' },
-      { key: 'pending_cessions', tab: 'file-cession', label: 'Cessions', icon: Repeat },
       { key: 'validations', tab: 'validations', label: 'Candidatures', icon: ClipboardCheck },
       // 🆕 SESSION 48s — Liste d'attente : exposants en attente d'un stand libre
       { key: 'waitlist', tab: 'waitlist', label: 'Liste d\'attente', icon: Hourglass },
