@@ -204,7 +204,7 @@ export default function AnnexePage() {
           </div>
           <div>
             <div className="font-bold text-aracom-black mb-1">L&apos;Organisateur — ARACOM</div>
-            <div className="text-slate-500">Coraline DUPIEUX</div>
+            <div className="text-slate-500">Pour ARACOM Conseil</div>
             <div className="mt-12 border-t border-slate-400 pt-1 text-slate-500">Date et signature</div>
           </div>
         </section>
