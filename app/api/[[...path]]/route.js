@@ -20,6 +20,7 @@ import { handleExposantDocumentsGet } from '@/lib/api/handlers/exposant-document
 import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handlers/dashboard';
 import { handleValidationQueueGet } from '@/lib/api/handlers/validation-queue';
 import { handleValidationPost } from '@/lib/api/handlers/validation-post';
+import { handleProspectsGet, handleProspectsPost, handleProspectsPut, handleProspectsDelete } from '@/lib/api/handlers/prospects';
 
 // 🛡️ SESSION 28s/43-fix — Build version STABLE par déploiement (plus de Date.now() qui change à chaque HMR/instance)
 //     Source : .next/BUILD_ID (Next.js l'écrit une fois par build, stable) + fallback hash de package.json.
@@ -1673,66 +1674,12 @@ export async function GET(request, { params }) {
 
     // ============ PROSPECTION (Pacific Centers + ARACOM) ============
     // Liste des prospects. Pacific Centers voient uniquement leurs sites.
-    if (route === 'prospects') {
-      const q = new URL(request.url).searchParams;
-      const filter = {};
-      const venueId = q.get('venue_id');
-      if (venueId) filter.venue_id = venueId;
-      const status = q.get('status');
-      if (status) filter.status = status;
-      // Restreindre aux venues du pacific user si applicable
-      const role = request.headers.get('x-user-role');
-      if (role === 'pacific_centers_readonly') {
-        const userId = request.headers.get('x-user-id');
-        const user = await db.collection('users').findOne({ id: userId });
-        // Si le user a des venue_ids limités, filtrer
-        if (user?.allowed_venue_ids?.length) {
-          filter.venue_id = filter.venue_id || { $in: user.allowed_venue_ids };
-        }
-      }
-      const prospects = await db.collection('prospects').find(filter).sort({ updated_at: -1 }).toArray();
-      // Enrichit avec venue name
-      const vids = [...new Set(prospects.map(p => p.venue_id).filter(Boolean))];
-      const venues = vids.length ? await db.collection('venues').find({ id: { $in: vids } }).toArray() : [];
-      const vmap = Object.fromEntries(venues.map(v => [v.id, v]));
-      return json(prospects.map(p => {
-        delete p._id;
-        return { ...p, venue_name: vmap[p.venue_id]?.name || null, venue_code: vmap[p.venue_id]?.code || null };
-      }));
-    }
-
-    // Stats de prospection (pour KPI taux de conversion)
-    if (route === 'prospects/stats') {
-      const q = new URL(request.url).searchParams;
-      const filter = {};
-      const venueId = q.get('venue_id');
-      if (venueId) filter.venue_id = venueId;
-      const role = request.headers.get('x-user-role');
-      if (role === 'pacific_centers_readonly') {
-        const userId = request.headers.get('x-user-id');
-        const user = await db.collection('users').findOne({ id: userId });
-        if (user?.allowed_venue_ids?.length) {
-          filter.venue_id = filter.venue_id || { $in: user.allowed_venue_ids };
-        }
-      }
-      const all = await db.collection('prospects').find(filter).toArray();
-      const byStatus = { a_contacter: 0, contacte: 0, interesse: 0, converti: 0, refuse: 0, abandonne: 0 };
-      all.forEach(p => { if (p.status in byStatus) byStatus[p.status]++; else byStatus.a_contacter++; });
-      const total = all.length;
-      const contacted = total - byStatus.a_contacter;
-      const converted = byStatus.converti;
-      const conversion_rate_pct = total > 0 ? Math.round((converted / total) * 100) : 0;
-      const contact_to_conversion_pct = contacted > 0 ? Math.round((converted / contacted) * 100) : 0;
-      // Par site
-      const byVenue = {};
-      all.forEach(p => {
-        const k = p.venue_id || 'autre';
-        if (!byVenue[k]) byVenue[k] = { total: 0, converti: 0 };
-        byVenue[k].total++;
-        if (p.status === 'converti') byVenue[k].converti++;
-      });
-      return json({ total, contacted, converted, by_status: byStatus, by_venue: byVenue, conversion_rate_pct, contact_to_conversion_pct });
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    // 📇 Prospects (CRM léger Pacific Centers + ARACOM)
+    // (extraits dans /app/lib/api/handlers/prospects.js)
+    // ═══════════════════════════════════════════════════════════════════
+    const prospectsGetResp = await handleProspectsGet({ db, request, url, route });
+    if (prospectsGetResp) return prospectsGetResp;
 
     if (route.startsWith('venues/') && !route.includes('/stands')) {
       const id = p[1];
@@ -6129,78 +6076,12 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
     }
 
     // ============ PROSPECTS (création + ajout de note) ============
-    if (route === 'prospects') {
-      // Création d'un prospect
-      const now = new Date();
-      const doc = {
-        id: uuid(),
-        venue_id: body.venue_id || null,
-        organization_name: body.organization_name || '',
-        contact_name: body.contact_name || '',
-        contact_email: (body.contact_email || '').toLowerCase() || null,
-        contact_phone: body.contact_phone || null,
-        discipline: body.discipline || null,
-        status: body.status || 'a_contacter',
-        notes: [],
-        converted_to_registration_id: null,
-        created_at: now,
-        updated_at: now,
-        created_by: ctx.userId || null,
-      };
-      if (body.initial_note) {
-        doc.notes.push({ text: body.initial_note, at: now, by: ctx.userId || null });
-      }
-      await db.collection('prospects').insertOne(doc);
-      delete doc._id;
-      return json(doc);
-    }
-    if (route.match(/^prospects\/[^/]+\/notes$/)) {
-      // Ajout d'une note à un prospect
-      const pid = p[1];
-      const prospect = await db.collection('prospects').findOne({ id: pid });
-      if (!prospect) return err('Prospect introuvable', 404);
-      const note = { text: body.text || '', at: new Date(), by: ctx.userId || null };
-      await db.collection('prospects').updateOne({ id: pid }, { $push: { notes: note }, $set: { updated_at: new Date() } });
-      const out = await db.collection('prospects').findOne({ id: pid }); delete out._id;
-      return json(out);
-    }
-    if (route.match(/^prospects\/[^/]+\/convert$/)) {
-      // Conversion d'un prospect en exposant (création d'une organization + registration)
-      const pid = p[1];
-      const prospect = await db.collection('prospects').findOne({ id: pid });
-      if (!prospect) return err('Prospect introuvable', 404);
-      if (prospect.converted_to_registration_id) return err('Déjà converti', 400);
-      // Créer l'organisation
-      const orgId = uuid();
-      await db.collection('organizations').insertOne({
-        id: orgId,
-        name: prospect.organization_name,
-        discipline: prospect.discipline || 'autre',
-        primary_contact_email: prospect.contact_email,
-        primary_contact_name: prospect.contact_name,
-        primary_contact_phone: prospect.contact_phone,
-        created_at: new Date(), updated_at: new Date(),
-      });
-      // Créer la registration
-      const regId = uuid();
-      await db.collection('registrations').insertOne({
-        id: regId,
-        edition_id: EDITION_ID,
-        organization_id: orgId,
-        venue_id: prospect.venue_id,
-        stand_code: null,
-        status: 'a_confirmer',
-        priority: 'normale',
-        is_deposit_received: false,
-        created_at: new Date(), updated_at: new Date(),
-      });
-      // Marquer le prospect comme converti
-      await db.collection('prospects').updateOne(
-        { id: pid },
-        { $set: { status: 'converti', converted_to_registration_id: regId, converted_at: new Date(), updated_at: new Date() } }
-      );
-      return json({ ok: true, organization_id: orgId, registration_id: regId });
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    // 📇 Prospects POST (création, notes, conversion)
+    // (extraits dans /app/lib/api/handlers/prospects.js)
+    // ═══════════════════════════════════════════════════════════════════
+    const prospectsPostResp = await handleProspectsPost({ db, request, route, p, body });
+    if (prospectsPostResp) return prospectsPostResp;
 
     // ============ AUTO-RESTORE DES PLANS DE SALLES (après redéploiement) ============
     // Force l'import du backup JSON embarqué (/app/data-backup/venue-layouts-backup.json)
@@ -10998,16 +10879,12 @@ export async function PUT(request, { params }) {
     }
 
     // PUT /prospects/:id — mise à jour d'un prospect
-    if (route.startsWith('prospects/')) {
-      const id = p[1];
-      const allowed = ['venue_id','organization_name','contact_name','contact_email','contact_phone','discipline','status'];
-      const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
-      if (upd.contact_email) upd.contact_email = upd.contact_email.toLowerCase();
-      upd.updated_at = new Date();
-      await db.collection('prospects').updateOne({ id }, { $set: upd });
-      const out = await db.collection('prospects').findOne({ id }); delete out._id;
-      return json(out);
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    // 📇 Prospects PUT
+    // (extraits dans /app/lib/api/handlers/prospects.js)
+    // ═══════════════════════════════════════════════════════════════════
+    const prospectsPutResp = await handleProspectsPut({ db, route, p, body });
+    if (prospectsPutResp) return prospectsPutResp;
 
     return err(`Route PUT inconnue: ${route}`, 404);
   } catch (e) {
@@ -11115,10 +10992,12 @@ export async function DELETE(request, { params }) {
       await db.collection('mail_templates').deleteOne({ id: p[1] });
       return json({ ok: true });
     }
-    if (route.startsWith('prospects/')) {
-      await db.collection('prospects').deleteOne({ id: p[1] });
-      return json({ ok: true });
-    }
+    // ═══════════════════════════════════════════════════════════════════
+    // 📇 Prospects DELETE
+    // (extraits dans /app/lib/api/handlers/prospects.js)
+    // ═══════════════════════════════════════════════════════════════════
+    const prospectsDeleteResp = await handleProspectsDelete({ db, route, p });
+    if (prospectsDeleteResp) return prospectsDeleteResp;
     if (route.startsWith('official-documents/')) {
       const userRole = request.headers.get('x-user-role');
       if (userRole !== 'aracom_admin') return err('Réservé aux admins', 403);

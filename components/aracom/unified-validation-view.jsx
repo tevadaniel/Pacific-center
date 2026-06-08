@@ -25,7 +25,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ShieldCheck, Hourglass, ArrowUpCircle, ArrowLeftRight, Check, X, MapPin, RefreshCw, Trash2, Clock, Lock } from 'lucide-react';
 
-export default function UnifiedValidationView() {
+export default function UnifiedValidationView({ readonly = false, onExposantClick = null }) {
   const [venues, setVenues] = useState([]);
   const [requests, setRequests] = useState([]);
   const [standsByVenue, setStandsByVenue] = useState({});
@@ -44,11 +44,13 @@ export default function UnifiedValidationView() {
         api('/api/venues'),
         api('/api/validation-requests'),
       ]);
-      setVenues(vlist || []);
+      // 🆕 SESSION 48w — Filtre les sites désactivés (cohérence avec activation site/stands)
+      const activeVenues = (vlist || []).filter(v => v.is_active !== false && v.is_available_2026 !== false);
+      setVenues(activeVenues);
       setRequests(all || []);
-      // Charge les stands de tous les venues
+      // Charge les stands de tous les venues actifs
       const standsMap = {};
-      await Promise.all((vlist || []).map(async (v) => {
+      await Promise.all(activeVenues.map(async (v) => {
         try {
           const stands = await api(`/api/venues/${v.id}/stands`);
           standsMap[v.id] = stands || [];
@@ -239,7 +241,7 @@ export default function UnifiedValidationView() {
                   ) : (
                     g.validated.map(r => (
                       <Row key={r.id} icon="🔒" tone="emerald">
-                        <div className="font-semibold text-sm truncate">{r.organization?.name}</div>
+                        <ExposantName r={r} onClick={onExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1">
                           <span className="font-mono">{r.stand_code || '—'}</span>
                           {r.locked_at && <span>· verrouillé le {new Date(r.locked_at).toLocaleDateString('fr-FR')}</span>}
@@ -261,24 +263,26 @@ export default function UnifiedValidationView() {
                   ) : (
                     g.preReserved.map(r => (
                       <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
-                        <div className="font-semibold text-sm truncate">{r.organization?.name}</div>
+                        <ExposantName r={r} onClick={onExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                           <span className="font-mono">{r.stand_code}</span>
                           {r.created_at && <span>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>}
                         </div>
-                        <div className="flex items-center gap-1 mt-1">
-                          <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700">
-                            <Check className="w-3 h-3 mr-0.5" /> Valider
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-2 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50">
-                            <X className="w-3 h-3 mr-0.5" /> Refuser
-                          </Button>
-                          {g.waitlist.length > 0 && (
-                            <Button size="sm" variant="outline" onClick={() => openSwitch(g.waitlist[0], r)} className="h-6 px-2 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger avec ${g.waitlist[0].organization?.name} (#1 attente)`}>
-                              <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                        {!readonly && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700">
+                              <Check className="w-3 h-3 mr-0.5" /> Valider
                             </Button>
-                          )}
-                        </div>
+                            <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-2 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50">
+                              <X className="w-3 h-3 mr-0.5" /> Refuser
+                            </Button>
+                            {g.waitlist.length > 0 && (
+                              <Button size="sm" variant="outline" onClick={() => openSwitch(g.waitlist[0], r)} className="h-6 px-2 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger avec ${g.waitlist[0].organization?.name} (#1 attente)`}>
+                                <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </Row>
                     ))
                   )}
@@ -298,36 +302,38 @@ export default function UnifiedValidationView() {
                       const canPromote = g.freeStands.length > 0;
                       return (
                         <Row key={r.id} icon={`#${r.fifo_position}`} tone="amber">
-                          <div className="font-semibold text-sm truncate">{r.organization?.name}</div>
+                          <ExposantName r={r} onClick={onExposantClick} />
                           <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                             {r.requested_stand_code && <span>↦ <code className="font-mono">{r.requested_stand_code}</code></span>}
                             {r.created_at && <span>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>}
                           </div>
-                          <div className="flex items-center gap-1 mt-1">
-                            <Button
-                              size="sm"
-                              onClick={() => openPromote(r, g.freeStands)}
-                              disabled={!canPromote}
-                              className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40"
-                              title={canPromote ? 'Promouvoir vers un stand libre' : 'Aucun stand libre'}
-                            >
-                              <ArrowUpCircle className="w-3 h-3 mr-0.5" /> Promouvoir
-                            </Button>
-                            {g.preReserved.length > 0 && (
+                          {!readonly && (
+                            <div className="flex items-center gap-1 mt-1">
                               <Button
                                 size="sm"
-                                variant="outline"
-                                onClick={() => openSwitch(r, g.preReserved[0])}
-                                className="h-6 px-2 text-[10px] border-violet-200 text-violet-700 hover:bg-violet-50"
-                                title={`Échanger avec un pré-réservé`}
+                                onClick={() => openPromote(r, g.freeStands)}
+                                disabled={!canPromote}
+                                className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40"
+                                title={canPromote ? 'Promouvoir vers un stand libre' : 'Aucun stand libre'}
                               >
-                                <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                                <ArrowUpCircle className="w-3 h-3 mr-0.5" /> Promouvoir
                               </Button>
-                            )}
-                            <Button size="sm" variant="ghost" onClick={() => doRemoveWaitlist(r)} className="h-6 px-1.5 text-[10px] text-rose-600 hover:bg-rose-50" title="Retirer de la liste">
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </div>
+                              {g.preReserved.length > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openSwitch(r, g.preReserved[0])}
+                                  className="h-6 px-2 text-[10px] border-violet-200 text-violet-700 hover:bg-violet-50"
+                                  title={`Échanger avec un pré-réservé`}
+                                >
+                                  <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                                </Button>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => doRemoveWaitlist(r)} className="h-6 px-1.5 text-[10px] text-rose-600 hover:bg-rose-50" title="Retirer de la liste">
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
                         </Row>
                       );
                     })
@@ -430,4 +436,21 @@ function Row({ icon, tone, children }) {
 
 function Empty({ label }) {
   return <div className="text-[11px] text-slate-400 italic text-center py-2">{label}</div>;
+}
+
+// 🆕 SESSION 48w — Nom d'exposant cliquable (ouvre le drawer/handler externe)
+function ExposantName({ r, onClick }) {
+  const name = r.organization?.name || '—';
+  if (typeof onClick === 'function') {
+    return (
+      <button
+        onClick={() => onClick(r)}
+        className="font-semibold text-sm truncate text-blue-700 hover:underline cursor-pointer text-left w-full"
+        title="Voir la fiche détaillée"
+      >
+        {name}
+      </button>
+    );
+  }
+  return <div className="font-semibold text-sm truncate">{name}</div>;
 }

@@ -21,6 +21,7 @@ import HelpCard from '@/components/help-card';
 import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV, exportAnimationsCSV, exportAllZIP } from '@/lib/csv-export';
 import { Package, Loader2, Wallet, FileSpreadsheet } from 'lucide-react';
+import PacificValidationsView from '@/components/pacific/pacific-validations-view';
 
 export default function PacificCentersPage() {
   return (
@@ -43,15 +44,17 @@ export default function PacificCentersPage() {
         </Card>
 
         <Tabs defaultValue="synthese">
-          <TabsList className="w-full grid grid-cols-5">
+          <TabsList className="w-full grid grid-cols-6">
             <TabsTrigger value="synthese">Synthèse</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>
+            <TabsTrigger value="validations">📋 Validations & Attente</TabsTrigger>
             <TabsTrigger value="planning">Planning animations</TabsTrigger>
             <TabsTrigger value="prospection">🎯 Prospection</TabsTrigger>
             <TabsTrigger value="reporting">Reporting</TabsTrigger>
           </TabsList>
           <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
           <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
+          <TabsContent value="validations" className="space-y-6 mt-4"><PacificValidationsView /></TabsContent>
           <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
           <TabsContent value="prospection" className="space-y-6 mt-4"><ProspectionView /></TabsContent>
           <TabsContent value="reporting" className="space-y-6 mt-4"><ReportingView /></TabsContent>
