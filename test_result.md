@@ -3437,3 +3437,38 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52 Phase B LIVRÉE & VALIDÉE. Le portail exposant a maintenant un tunnel propre en 5 blocs : Sites priorisés (▲▼, up to 3), Jours, Stand CTA unique, Animations par jour, Soumission stricte avec tooltip. Le mode legacy reste disponible pour la gestion fine. Tous les blocs sont reliés au header sticky multi-candidatures de Phase A : un clic sur un chip du header → scroll vers le bloc concerné via data-section. À redéployer en production. SESSION 52 (Phase A + B) complètement terminée."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52c — Bug critique : Validation stricte par jour
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 52c — POST /api/registrations/:id/request-validation : validation STRICTE par jour"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (lignes 9131-9165 + 1590-1597)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ CRITIQUE — VALIDATION STRICTE IMPLÉMENTÉE & TESTÉE. (1) request-validation : vérifie que CHAQUE jour de attending_days a au moins 1 animation matching s.day_label. Message d'erreur précis : 'Animation manquante pour : Samedi 15 août. Vous devez avoir 1 animation par jour de présence.'. (2) is_complete dans GET /api/exposant/my-sites : ajoute le STAND obligatoire dans les critères (!!r.venue_id && !!r.stand_code && hasDatesChosen && animationsCoverChosenDays && regSlots.length > 0). Tests E2E backend : (a) sans jours → 400 'Indiquez d'abord vos jours de présence', (b) 2 jours/0 anim → 400 'Choisissez au moins 1 créneau', (c) 2 jours/1 anim Ven → 400 'Animation manquante pour Samedi 15 août', (d) 2 jours/2 anims → 200 OK. Cleanup automatique des registrations de test."
+
+frontend:
+  - task: "SESSION 52c — Fix bug format jours : 'vendredi'/'samedi' vs ISO dates"
+    implemented: true
+    working: true
+    file: "components/exposant/tunnel-v2.jsx, components/exposant/multi-candidatures-header.jsx, components/exposant/reconnection-alert-banner.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ FIX CRITIQUE. Les composants Phase A+B utilisaient des ISO dates ('2026-08-14'/'2026-08-15') pour matcher attending_days, mais la base de données stocke 'vendredi'/'samedi' (voir endpoint /set-attending-days qui filter ['vendredi','samedi']). Conséquence : AUCUNE animation n'était jamais détectée comme couvrant un jour → tous les statuts faux. Corrections : (1) tunnel-v2.jsx : DAY_FRI/DAY_SAT passent à 'vendredi'/'samedi', slots filtrés par s.day_label au lieu de s.date (qui est null en DB). (2) multi-candidatures-header.jsx : days.includes('vendredi'|'samedi'). (3) reconnection-alert-banner.jsx : idem. CACHE-BUST: package.json 1.0.13 → 1.0.14."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52c — Bug critique de validation corrigé : (a) Backend strict (1 animation par jour de présence obligatoire pour soumettre), (b) Frontend fix format 'vendredi'/'samedi' (avant : ISO dates qui ne matchent jamais). Maintenant impossible de soumettre une candidature sans : site + stand + ≥1 jour + 1 animation par jour. Tests E2E backend OK (4/4 cas). À redéployer en production pour bloquer les futures candidatures incomplètes (les candidatures déjà confirmées en prod ne sont pas affectées rétroactivement)."

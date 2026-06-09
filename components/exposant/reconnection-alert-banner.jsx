@@ -34,11 +34,11 @@ export function computeMissingItems(site) {
   if (!site.stand_code && !site.is_waitlist) {
     items.push({ label: 'Réserver un stand', block: 'stand' });
   }
-  // 3. Animations par jour sélectionné
-  if (days.includes('2026-08-14') && !site.has_vendredi_animation) {
+  // 3. Animations par jour sélectionné (format DB = 'vendredi'/'samedi')
+  if (days.includes('vendredi') && !site.has_vendredi_animation) {
     items.push({ label: 'Animation du vendredi 14 août', block: 'planning' });
   }
-  if (days.includes('2026-08-15') && !site.has_samedi_animation) {
+  if (days.includes('samedi') && !site.has_samedi_animation) {
     items.push({ label: 'Animation du samedi 15 août', block: 'planning' });
   }
   // 4. Documents

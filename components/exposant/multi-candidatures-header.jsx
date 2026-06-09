@@ -79,8 +79,9 @@ export default function MultiCandidaturesHeader({
     const sti = statusInfo(s.status);
     const hasStand = !!s.stand_code;
     const days = Array.isArray(s.attending_days) ? s.attending_days : [];
-    const hasVen = days.includes('2026-08-14');
-    const hasSam = days.includes('2026-08-15');
+    // 🔧 SESSION 52c — Format DB = 'vendredi'/'samedi' (pas ISO date)
+    const hasVen = days.includes('vendredi');
+    const hasSam = days.includes('samedi');
     // Animations par jour
     const animVen = !!s.has_vendredi_animation;
     const animSam = !!s.has_samedi_animation;
@@ -168,17 +169,17 @@ export default function MultiCandidaturesHeader({
                   sectionKey="stand"
                 />
                 <Chip
-                  ok={animVen && days.includes('2026-08-14')}
-                  partial={!days.includes('2026-08-14') && animSam} // pas requis ce jour
-                  missing={days.includes('2026-08-14') && !animVen}
+                  ok={animVen && days.includes('vendredi')}
+                  partial={!days.includes('vendredi') && animSam}
+                  missing={days.includes('vendredi') && !animVen}
                   label="Anim Ven"
                   onClick={onJumpTo}
                   sectionKey="planning"
                 />
                 <Chip
-                  ok={animSam && days.includes('2026-08-15')}
-                  partial={!days.includes('2026-08-15') && animVen}
-                  missing={days.includes('2026-08-15') && !animSam}
+                  ok={animSam && days.includes('samedi')}
+                  partial={!days.includes('samedi') && animVen}
+                  missing={days.includes('samedi') && !animSam}
                   label="Anim Sam"
                   onClick={onJumpTo}
                   sectionKey="planning"

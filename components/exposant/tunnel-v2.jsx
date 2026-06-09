@@ -27,8 +27,8 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 
-const DAY_FRI = '2026-08-14';
-const DAY_SAT = '2026-08-15';
+const DAY_FRI = 'vendredi';
+const DAY_SAT = 'samedi';
 
 function dayLabel(d) {
   if (d === DAY_FRI) return 'Vendredi 14 août';
@@ -356,7 +356,7 @@ function Bloc4Animations({ days, slots, onOpenAnimationPicker, onDeleteSlot, bus
         {days?.length > 0 && (
           <div className="space-y-2">
             {days.map((d) => {
-              const daySlots = (slots || []).filter((s) => s.date === d);
+              const daySlots = (slots || []).filter((s) => s.day_label === d);
               const hasAny = daySlots.length > 0;
               return (
                 <div
@@ -639,8 +639,8 @@ export default function TunnelV2({
   // =====================================================
   // BLOC 5 — Checks de complétude + soumission
   // =====================================================
-  const animVen = (slots || []).filter((s) => s.date === DAY_FRI);
-  const animSam = (slots || []).filter((s) => s.date === DAY_SAT);
+  const animVen = (slots || []).filter((s) => s.day_label === DAY_FRI);
+  const animSam = (slots || []).filter((s) => s.day_label === DAY_SAT);
 
   const checks = useMemo(() => {
     const list = [];

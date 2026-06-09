@@ -1587,12 +1587,12 @@ export async function GET(request, { params }) {
         const has_samedi = regSlots.some(s => s.day_label === 'samedi');
         delete r._id;
         const valReq = valReqByReg[r.id] || null;
-        // 🆕 SESSION 33 — Critères de complétion = dates de présence + animation pour chaque jour choisi
-        // (PAS le stand_code : l'exposant peut animer sur "stand" OU "zone d'exposition")
+        // 🆕 SESSION 33+52c — Critères de complétion STRICTS :
+        // site + jours + 1 animation par jour + STAND obligatoire (peut pas soumettre sans stand)
         const attendingDays = Array.isArray(r.attending_days) ? r.attending_days : [];
         const hasDatesChosen = attendingDays.length > 0;
         const animationsCoverChosenDays = attendingDays.length === 0 ? false : attendingDays.every(d => regSlots.some(s => s.day_label === d));
-        const isComplete = !!r.venue_id && hasDatesChosen && animationsCoverChosenDays && regSlots.length > 0;
+        const isComplete = !!r.venue_id && !!r.stand_code && hasDatesChosen && animationsCoverChosenDays && regSlots.length > 0;
         return {
           ...r,
           is_locked: r.is_locked ?? false,
@@ -9135,9 +9135,23 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
       if (reg.status === 'confirme') return err('Inscription déjà confirmée', 400);
       if (!reg.venue_id) return err('Choisissez d\'abord un site dans Sites & plan', 400);
       if (!reg.stand_code) return err('Pré-réservez un stand avant de demander la validation', 400);
-      // Vérifier qu'au moins 1 créneau animation existe pour ce reg
+      // 🆕 SESSION 52c — Validation STRICTE : il faut TOUTES les conditions
+      //   1) site (venue_id)        ✓ déjà checké
+      //   2) stand (stand_code)     ✓ déjà checké
+      //   3) au moins 1 jour de présence choisi
+      //   4) 1 animation PAR jour de présence (pas juste 1 total !)
+      const attendingDays = Array.isArray(reg.attending_days) ? reg.attending_days.filter(d => ['vendredi', 'samedi'].includes(d)) : [];
+      if (attendingDays.length === 0) {
+        return err('Indiquez d\'abord vos jours de présence (Vendredi et/ou Samedi)', 400);
+      }
       const slots = await db.collection('animation_slots').find({ registration_id: regId }).toArray();
       if (slots.length === 0) return err('Choisissez au moins 1 créneau d\'animation avant de valider', 400);
+      // Vérification STRICTE : chaque jour de présence doit avoir au moins 1 animation
+      const daysWithoutAnim = attendingDays.filter(d => !slots.some(s => s.day_label === d));
+      if (daysWithoutAnim.length > 0) {
+        const labels = daysWithoutAnim.map(d => d === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août').join(' + ');
+        return err(`Animation manquante pour : ${labels}. Vous devez avoir 1 animation par jour de présence.`, 400);
+      }
 
       const { rdv_proposal = '', preferred_payment: _ignoredPayment = 'cheque', notes = '' } = body;
       // 🆕 SESSION 48n — Caution = Chèque uniquement (option espèces/virement supprimée)
