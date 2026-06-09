@@ -2064,18 +2064,24 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
         </CardContent>
       </Card>
 
-      {/* 🆕 SESSION 47.15 — Bandeau SITE COMPLET avec proposition liste d'attente */}
+      {/* 🆕 SESSION 48ah — Bloc "Liste d'attente" enrichi avec compteur d'attente */}
       {siteIsFull && !myStand && (
         <Card className="border-2 border-amber-400 bg-amber-50">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start gap-3">
               <span className="text-3xl shrink-0">⏳</span>
               <div className="flex-1">
-                <div className="font-bold text-amber-900 text-base mb-1">{venue?.name} est complet — Inscrivez-vous en liste d&apos;attente</div>
+                <div className="font-bold text-amber-900 text-base mb-1">{venue?.name} — Liste d&apos;attente</div>
                 <div className="text-sm text-amber-800 leading-snug">
-                  Tous les stands de ce site sont actuellement demandés ou validés par d&apos;autres exposants.
+                  Ce site est complet. {(() => {
+                    const wlCount = stands.filter(s => s.assignment?.request_status === 'waitlist').length;
+                    if (wlCount > 0) return <><b>{wlCount} exposant{wlCount > 1 ? 's sont' : ' est'}</b> actuellement en attente d&apos;attribution de stand.</>;
+                    return 'Tous les stands sont attribués ou pré-réservés.';
+                  })()}
                 </div>
-                {/* 🆕 SESSION 48s — Inscription sur liste d'attente du SITE (n'importe quel stand libéré) */}
+                <div className="text-sm text-amber-800 leading-snug mt-1">
+                  En rejoignant la liste, vous serez contacté(e) automatiquement si un stand se libère.
+                </div>
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <Button
                     onClick={async () => {
@@ -2090,9 +2096,8 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
                     className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
                     data-testid="site-waitlist-subscribe"
                   >
-                    <Hourglass className="w-4 h-4" /> M&apos;inscrire en liste d&apos;attente pour {venue?.name}
+                    <Hourglass className="w-4 h-4" /> Soumettre ma demande en liste d&apos;attente
                   </Button>
-                  <span className="text-[11px] text-amber-700 italic">Vous serez attribué(e) sur n&apos;importe quel stand libéré.</span>
                 </div>
                 {deadlineLabel && (
                   <div className="mt-3 bg-white border border-amber-300 rounded p-2 text-xs text-slate-800">
@@ -2161,8 +2166,11 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
         </Card>
       )}
 
-      {/* 🆕 SESSION 47.15 — Stands rejoignables en waitlist (visibles surtout quand site complet) */}
-      {selectedVenueId && !isLocked && !myStand && waitlistableStands.length > 0 && (
+      {/* 🆕 SESSION 48ah — Grille "Rejoindre liste d'attente" SUPPRIMÉE quand site complet
+          (remplacée par le bloc synthétique ci-dessus qui inscrit en liste d'attente site-level).
+          Elle reste visible UNIQUEMENT si l'exposant veut explicitement viser un stand pré-réservé
+          alors que des stands LIBRES existent encore (cas rare). */}
+      {selectedVenueId && !isLocked && !myStand && !siteIsFull && waitlistableStands.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -2198,8 +2206,10 @@ function SiteAndStandPicker({ registration, organization, onRefresh }) {
         </Card>
       )}
 
-      {/* Visual map */}
-      {selectedVenueId && venue && (
+      {/* 🆕 SESSION 48ah — Plan interactif masqué quand site complet ET exposant pas encore inscrit
+          Rationale : sans stand cliquable, le plan n'apporte pas de valeur. On l'affiche seulement
+          si l'exposant a déjà un stand (highlight) OU s'il existe des stands libres. */}
+      {selectedVenueId && venue && (myStand || freeStands.length > 0) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-blue-600" /> Plan interactif — {venue.name}</CardTitle>
