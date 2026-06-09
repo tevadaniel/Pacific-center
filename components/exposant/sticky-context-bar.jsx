@@ -43,8 +43,10 @@ export default function StickyContextBar({
   const [collapsed, setCollapsed] = useState(false);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [manualCollapsed, setManualCollapsed] = useState(false);
-  // 🆕 État dropdown ouvert (1 à la fois) : 'site' | 'stand' | 'animations' | null
+  // 🆕 État dropdown ouvert (1 à la fois) : 'site' | 'stand' | 'caution' | 'planning' | 'rappel' | null
   const [openDropdown, setOpenDropdown] = useState(null);
+  // 🆕 Reminder/rappel : déduit dynamiquement le prochain rappel critique
+  // (deadline 31/07 + caution + animations manquantes)
 
   // Détection scroll : sur mobile, repli auto au scroll-down, dépli au scroll-up
   useEffect(() => {
@@ -97,34 +99,34 @@ export default function StickyContextBar({
       return { label: '🔁 Cession en cours', desc: 'ARACOM traite votre demande', tone: 'amber', target: null };
     }
     if (state.isWaitlist) {
-      return { label: '⏳ En liste d\'attente', desc: 'ARACOM vous notifiera dès qu\'un créneau se libère', tone: 'amber', target: 'parcours' };
+      return { label: '⏳ En liste d\'attente', desc: 'ARACOM vous notifiera dès qu\'un créneau se libère', tone: 'amber', target: 'stand' };
     }
     if (!state.hasSite) {
-      return { label: 'Choisir mon site', desc: 'Sélectionnez le centre commercial qui vous intéresse', tone: 'orange', target: 'parcours' };
+      return { label: 'Choisir mon site', desc: 'Sélectionnez le centre commercial qui vous intéresse', tone: 'orange', target: 'site' };
     }
     if (!state.hasAttendingDays) {
-      return { label: 'Indiquer mes jours de présence', desc: 'Vendredi et/ou Samedi', tone: 'orange', target: 'parcours' };
+      return { label: 'Indiquer mes jours de présence', desc: 'Vendredi et/ou Samedi', tone: 'orange', target: 'site' };
     }
     if (!state.hasStand) {
-      return { label: 'Choisir mon stand', desc: 'Cliquez sur un stand libre sur le plan', tone: 'orange', target: 'parcours' };
+      return { label: 'Choisir mon stand', desc: 'Cliquez sur un stand libre sur le plan', tone: 'orange', target: 'stand' };
     }
     if (state.isPending && !state.isValidated) {
       // Stand demandé, en attente Aracom
       if (!state.animsOK) {
-        return { label: 'Compléter mes animations', desc: `${state.animsCount}/${state.minAnimsRequired} minimum requis`, tone: 'orange', target: 'parcours' };
+        return { label: 'Compléter mon planning', desc: `${state.animsCount}/${state.minAnimsRequired} minimum requis`, tone: 'orange', target: 'planning' };
       }
-      return { label: '⏳ Validation ARACOM en cours', desc: 'Votre dossier est complet et en attente', tone: 'blue', target: 'infos' };
+      return { label: '⏳ Validation ARACOM en cours', desc: 'Votre dossier est complet et en attente', tone: 'blue', target: 'rappel' };
     }
     if (state.isValidated && !state.animsOK) {
-      return { label: 'Ajouter mes animations', desc: `${state.animsCount}/${state.minAnimsRequired} minimum (obligatoire)`, tone: 'orange', target: 'parcours' };
+      return { label: 'Ajouter mes animations', desc: `${state.animsCount}/${state.minAnimsRequired} minimum (obligatoire)`, tone: 'orange', target: 'planning' };
     }
     if (state.isValidated && state.animsOK && !state.cautionReceived) {
-      return { label: 'Apporter mon chèque de caution', desc: '20 000 XPF — RDV avec ARACOM avant le 31/07', tone: 'orange', target: 'documents' };
+      return { label: 'Apporter mon chèque de caution', desc: '20 000 XPF — RDV avec ARACOM avant le 31/07', tone: 'orange', target: 'caution' };
     }
     if (state.cautionReceived && state.animsOK && state.isValidated) {
       return { label: 'Imprimer mon annexe + Convention', desc: 'Dossier complet ✓ — préparez vos documents', tone: 'emerald', target: 'documents' };
     }
-    return { label: 'Voir mon parcours', desc: 'Continuer mon inscription', tone: 'orange', target: 'parcours' };
+    return { label: 'Voir mon parcours', desc: 'Continuer mon inscription', tone: 'orange', target: 'site' };
   }, [state]);
 
   const TONE = {
@@ -226,31 +228,33 @@ export default function StickyContextBar({
               onClick={() => setOpenDropdown(openDropdown === 'stand' ? null : 'stand')}
             />
             <Chip
-              icon="🎭"
-              label="Animations"
-              value={`${state.animsCount}/${state.minAnimsRequired}`}
-              ok={state.animsOK}
-              missing={state.hasStand && !state.animsOK}
-              isDropdown
-              isOpen={openDropdown === 'animations'}
-              onClick={() => setOpenDropdown(openDropdown === 'animations' ? null : 'animations')}
-            />
-            <Chip
               icon="💰"
               label="Caution"
               value={state.cautionReturned ? '🔄 Rendue' : state.cautionReceived ? '✅ Reçue' : '⏳ À recevoir'}
               ok={state.cautionReceived || state.cautionReturned}
               warning={!state.cautionReceived && !state.cautionReturned}
-              onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('documents'); }}
+              onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('caution'); }}
+            />
+            <Chip
+              icon="🎭"
+              label="Planning"
+              value={`${state.animsCount}/${state.minAnimsRequired}`}
+              ok={state.animsOK}
+              missing={state.hasStand && !state.animsOK}
+              isDropdown
+              isOpen={openDropdown === 'planning'}
+              onClick={() => setOpenDropdown(openDropdown === 'planning' ? null : 'planning')}
             />
             <Chip
               icon="⏰"
-              label="Deadline 31/07"
+              label="Rappel"
               value={deadlineLeft.short}
               ok={!deadlineLeft.passed && !deadlineLeft.urgent && !deadlineLeft.warning}
               warning={deadlineLeft.warning}
               danger={deadlineLeft.urgent || deadlineLeft.passed}
-              onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('documents'); }}
+              isDropdown
+              isOpen={openDropdown === 'rappel'}
+              onClick={() => setOpenDropdown(openDropdown === 'rappel' ? null : 'rappel')}
             />
           </div>
 
@@ -367,7 +371,7 @@ export default function StickyContextBar({
                   )}
 
                   <button
-                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('site'); }}
                     className="w-full mt-2 px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700"
                   >
                     Modifier mes choix en détail
@@ -392,18 +396,18 @@ export default function StickyContextBar({
                     <div className="text-xs text-slate-500 italic mb-2 px-1">Pas de stand sélectionné</div>
                   )}
                   <button
-                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('stand'); }}
                     className="w-full px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
                   >
                     {registration?.stand_code ? 'Changer de stand' : 'Choisir un stand'}
                   </button>
                 </div>
               )}
-              {openDropdown === 'animations' && (
+              {openDropdown === 'planning' && (
                 <div className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
-                      🎭 Mes animations ({state.animsCount}/{state.minAnimsRequired})
+                      🎭 Mon planning d&apos;animations ({state.animsCount}/{state.minAnimsRequired})
                     </div>
                     <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
                   </div>
@@ -425,10 +429,81 @@ export default function StickyContextBar({
                     </ul>
                   )}
                   <button
-                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('parcours'); }}
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('planning'); }}
                     className="w-full px-2.5 py-1.5 rounded bg-aracom-orange hover:bg-orange-600 text-white text-xs font-semibold"
                   >
                     Ajouter / Modifier une animation
+                  </button>
+                </div>
+              )}
+              {openDropdown === 'rappel' && (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-bold text-xs uppercase tracking-wide text-aracom-orange flex items-center gap-1.5">
+                      ⏰ Mes rappels & échéances
+                    </div>
+                    <button onClick={() => setOpenDropdown(null)} className="text-slate-400 hover:text-slate-700 text-xs">✕</button>
+                  </div>
+                  <ul className="space-y-1.5 mb-2 text-xs">
+                    {/* Deadline globale */}
+                    <li className={`flex items-start gap-2 px-2.5 py-1.5 rounded border ${
+                      deadlineLeft.passed ? 'bg-rose-50 border-rose-200 text-rose-800'
+                      : deadlineLeft.urgent ? 'bg-rose-50 border-rose-200 text-rose-800'
+                      : deadlineLeft.warning ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}>
+                      <span className="text-base shrink-0">📅</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold">Deadline finalisation — 31/07/2026</div>
+                        <div className="text-[10px] opacity-80">{deadlineLeft.label}</div>
+                      </div>
+                    </li>
+                    {/* Rappel caution */}
+                    {!state.cautionReceived && !state.cautionReturned && (
+                      <li className="flex items-start gap-2 px-2.5 py-1.5 rounded border bg-amber-50 border-amber-200 text-amber-800">
+                        <span className="text-base shrink-0">💰</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold">Caution à déposer (20 000 XPF)</div>
+                          <div className="text-[10px] opacity-80">Chèque uniquement, à l&apos;ordre d&apos;ARACOM</div>
+                        </div>
+                      </li>
+                    )}
+                    {/* Rappel animations */}
+                    {state.hasStand && !state.animsOK && (
+                      <li className="flex items-start gap-2 px-2.5 py-1.5 rounded border bg-amber-50 border-amber-200 text-amber-800">
+                        <span className="text-base shrink-0">🎭</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold">Planning incomplet</div>
+                          <div className="text-[10px] opacity-80">{state.animsCount}/{state.minAnimsRequired} animation(s) renseignée(s)</div>
+                        </div>
+                      </li>
+                    )}
+                    {/* Rappel stand */}
+                    {state.hasSite && !state.hasStand && !state.isWaitlist && (
+                      <li className="flex items-start gap-2 px-2.5 py-1.5 rounded border bg-amber-50 border-amber-200 text-amber-800">
+                        <span className="text-base shrink-0">🎪</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold">Stand non choisi</div>
+                          <div className="text-[10px] opacity-80">Cliquez sur un emplacement libre du plan</div>
+                        </div>
+                      </li>
+                    )}
+                    {/* Tout est OK */}
+                    {state.cautionReceived && state.animsOK && state.hasStand && (
+                      <li className="flex items-start gap-2 px-2.5 py-1.5 rounded border bg-emerald-50 border-emerald-200 text-emerald-800">
+                        <span className="text-base shrink-0">✅</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold">Dossier complet</div>
+                          <div className="text-[10px] opacity-80">Plus rien à faire — rendez-vous le 14/08 !</div>
+                        </div>
+                      </li>
+                    )}
+                  </ul>
+                  <button
+                    onClick={() => { setOpenDropdown(null); onJumpTo && onJumpTo('rappel'); }}
+                    className="w-full px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700"
+                  >
+                    Voir le détail dans mon dossier
                   </button>
                 </div>
               )}

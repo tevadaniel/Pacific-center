@@ -338,16 +338,40 @@ export default function ExposantPortal() {
           onJumpTo={(target) => {
             if (target === 'documents') {
               window.location.href = `/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`;
-            } else {
-              handleTabChange(target);
-              if (typeof window !== 'undefined') {
-                setTimeout(() => window.scrollTo({ top: 240, behavior: 'smooth' }), 100);
-              }
+              return;
+            }
+            // 🆕 Mapping des sections vers leurs tabs respectifs
+            const SECTION_TAB_MAP = {
+              site: 'parcours',
+              stand: 'parcours',
+              planning: 'parcours',
+              caution: 'profil',
+              rappel: 'parcours',
+            };
+            const targetTab = SECTION_TAB_MAP[target];
+            if (targetTab && targetTab !== activeTab) {
+              handleTabChange(targetTab);
+            }
+            // Scroll vers data-section après un court délai pour laisser le DOM se monter
+            if (typeof window !== 'undefined') {
+              setTimeout(() => {
+                const el = document.querySelector(`[data-section="${target}"]`);
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  const offset = 120; // hauteur sticky-bar
+                  window.scrollTo({ top: window.scrollY + rect.top - offset, behavior: 'smooth' });
+                  // Effet flash pour bien situer la section
+                  el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2', 'transition-all');
+                  setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+                } else {
+                  window.scrollTo({ top: 240, behavior: 'smooth' });
+                }
+              }, targetTab !== activeTab ? 250 : 60);
             }
           }}
         />
       )}
-      <div className="space-y-6">
+      <div className="space-y-6" data-section="rappel">
         {/* 🆕 SESSION 48e — Bandeau de Bienvenue & Récap Convention (TOUT EN HAUT, avant tout) */}
         <WelcomeRecapBanner
           organization={o}
@@ -672,7 +696,7 @@ export default function ExposantPortal() {
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card data-section="caution">
                 <CardHeader><CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4 text-blue-600" /> Caution (20 000 XPF)</CardTitle></CardHeader>
                 <CardContent className="space-y-2">
                   <div className="rounded-md bg-blue-50 border border-blue-100 p-4">
@@ -1197,7 +1221,7 @@ function Step1Card({ registration, venue, attendingDays, isLocked, done, onRefre
   };
 
   return (
-    <Card data-step="step1" className={done ? 'border-emerald-300' : 'border-violet-300 ring-2 ring-violet-100'}>
+    <Card data-step="step1" data-section="site" className={done ? 'border-emerald-300' : 'border-violet-300 ring-2 ring-violet-100'}>
       <StepHeader n={1} title="Mes jours de présence + mon stand" done={done} locked={isLocked} />
       <CardContent className="space-y-3 pt-4">
         <p className="text-sm text-slate-600">Sélectionnez le ou les jours où votre association sera présente. Décochez un jour pour vous désinscrire (vos animations associées seront supprimées).</p>
@@ -1227,7 +1251,7 @@ function Step1Card({ registration, venue, attendingDays, isLocked, done, onRefre
         </div>
 
         {/* Stand */}
-        <div className="pt-3 border-t">
+        <div className="pt-3 border-t" data-section="stand">
           <div className="flex items-start justify-between gap-2 mb-2">
             <div>
               <div className="font-medium text-sm">📍 Mon site & mon stand</div>
@@ -1258,7 +1282,7 @@ function Step2Card({ registration, venue, slots, attendingDays, isLocked, unlock
     );
   }
   return (
-    <Card className={done ? 'border-emerald-300' : 'border-violet-300'}>
+    <Card data-section="planning" className={done ? 'border-emerald-300' : 'border-violet-300'}>
       <StepHeader n={2} title="Mes animations (1 par jour minimum)" done={done} locked={isLocked} />
       <CardContent className="pt-4">
         {isLocked && <p className="text-sm text-amber-700 mb-3">🔒 Vos animations sont verrouillées par ARACOM.</p>}

@@ -3279,3 +3279,25 @@ agent_communication:
   - agent: "testing"
     message: "SESSION 48am — AUDIT EXHAUSTIF DES WORKFLOWS INTERCONNECTÉS COMPLETE. Tested all 5 scenarios requested by user with comprehensive validation of interconnected workflows. RESULTS: 40/41 tests passed (97.6% success rate). SCÉNARIO 1 (P0): Partially completed - created test registration successfully, verified availability counters, but could not complete full swap workflow due to no 'a_confirmer' registrations in current database state (not a bug, just data state). SCÉNARIO 2 (P0): 100% PASSED - Verified consistency between menu-badges and availability endpoints. NO INCONSISTENCIES found. menu-badges.validations (45) exactly matches Σ availability.pre_reserved (45). menu-badges.waitlist (0) exactly matches Σ availability.waitlist (0). All 4 active venues have consistent data. SCÉNARIO 3 (P1): 100% PASSED - All data integrity rules respected. No venue exceeds capacity. Waitlist logic correct. Inactive sites (Mahina, Moorea) correctly excluded from all endpoints. SCÉNARIO 4 (P1): 100% PASSED - All 13 critical endpoints return 200 OK including auth, dashboard, venues, registrations, prospects. SCÉNARIO 5 (P2): 100% PASSED - All error handling correct (404s, 400s, 403s). CRITICAL FINDINGS: (1) NO INCONSISTENCIES between endpoints - all counters match perfectly. (2) All data integrity constraints respected. (3) All critical endpoints operational. (4) Error handling working correctly. (5) Inactive sites properly filtered everywhere. RECOMMENDATION: Backend is 100% production-ready. All interconnected workflows are functioning correctly. Main agent should summarize and finish."
 
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 49a — UX EXPOSANT : Barre Sticky dynamique (Corrections 2-3-4)
+# ═════════════════════════════════════════════════════════════════════════
+
+frontend:
+  - task: "SESSION 49a — Barre sticky dynamique (Site→Stand→Caution→Planning→Rappel)"
+    implemented: true
+    working: "NA"
+    file: "components/exposant/sticky-context-bar.jsx, app/exposant/page.js, package.json"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "✅ IMPLÉMENTÉ - Barre sticky entièrement refactorisée selon les spécifications utilisateur. CHANGEMENTS APPLIQUÉS: (1) RÉORGANISATION DES CHIPS: Ordre exact Site → Stand → Caution → Planning → Rappel (au lieu de Site/Stand/Animations/Caution/Deadline). (2) RENOMMAGE: 'Animations' → 'Planning', 'Deadline 31/07' → 'Rappel'. (3) NOUVEAU DROPDOWN 'Rappel': liste dynamique des échéances et rappels critiques (deadline 31/07, caution à déposer, animations manquantes, stand non choisi, dossier complet). (4) SCROLL CIBLÉ: onJumpTo refactorisé pour scroller vers des data-section précis (site, stand, planning, caution, rappel) au lieu de simples changements de tabs. Mappage automatique tab→section via SECTION_TAB_MAP. Effet flash ring-2 ring-aracom-orange sur la section ciblée pendant 1.8s pour bien situer visuellement. (5) DATA-SECTION ANCHORS ajoutés: 'site' sur Step1Card, 'stand' sur le bloc stand de Step1Card, 'planning' sur Step2Card, 'caution' sur la card Caution (onglet profil), 'rappel' sur le conteneur principal. (6) NEXT-ACTION RETARGETING: tous les targets de nextAction (Choisir mon site, Choisir mon stand, Compléter planning, Caution, etc.) utilisent les nouvelles clés section. (7) CACHE-BUST: package.json version 1.0.7 → 1.0.8 (BUILD_VERSION changé de pkg-20982359a6c2 à pkg-b63a6a1cb673). DÉCISION TREE (Correction 3): déjà en place via Step1Ok→Step2Ok→Step3Ok unlocked progression dans ParcoursWizard + masquage automatique du grid quand siteIsFull. CARTE GÉOGRAPHIQUE (Correction 4): infrastructure VenueMapPng déjà en place, l'utilisateur indique qu'il crée lui-même les plans via les données déjà présentes en DB. À TESTER PAR UTILISATEUR EN PRODUCTION: vérifier que (a) la barre affiche les 5 chips dans l'ordre Site/Stand/Caution/Planning/Rappel, (b) chaque clic scrolle vers la bonne section avec flash visuel, (c) le dropdown Rappel liste correctement les échéances actives."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 49a — IMPLÉMENTATION CORRECTIONS UX EXPOSANT TERMINÉE. (1) Barre sticky entièrement refactorisée selon spec utilisateur (Site/Stand/Caution/Planning/Rappel). (2) Scroll réel vers des ancres data-section précises avec effet flash visuel pour bien situer. (3) Nouveau dropdown 'Rappel' agrégeant tous les rappels critiques (deadlines, caution, animations manquantes). (4) Mappage tab↔section automatique. (5) Cache-bust appliqué (pkg-20982359a6c2 → pkg-b63a6a1cb673). À noter: utilisateur teste en production (le preview n'ouvre pas correctement /exposant pour lui), donc il faudra redéployer pour validation visuelle."
