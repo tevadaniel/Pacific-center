@@ -3393,3 +3393,25 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 51 — Vue 'Remplissage par jour' livrée et validée. Tableau matriciel sites × jours, calcul indépendant par jour, 4 niveaux de couleur, toggle Attribués/Confirmés pour adapter à la maturité de la base de données (peu de confirmés strictement à ce stade). Placé en tête du Cockpit Multi-sites. Backend agrège tout en une seule requête (perf OK). BUILD_VERSION bumpé (pkg-6ef4fc9d61db) pour cache PWA. À redéployer en production."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52 — Refonte Portail Exposant (Phase A) — Multi-Candidatures
+# ═════════════════════════════════════════════════════════════════════════
+
+frontend:
+  - task: "SESSION 52 Phase A — MultiCandidaturesHeader + ReconnectionAlertBanner"
+    implemented: true
+    working: true
+    file: "components/exposant/multi-candidatures-header.jsx (NEW), components/exposant/reconnection-alert-banner.jsx (NEW), app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ VALIDÉ VISUELLEMENT via Playwright (screenshot conforme à 100% à la spec). MultiCandidaturesHeader: header sticky en haut avec en-tête global (org name + total candidatures + % global), UNE LIGNE PAR CANDIDATURE (max test = 5 lignes pour 'I Mua Papeete'). Chaque ligne contient : badge rang (Site 1/2/3) + ⭐ si site prioritaire utilisateur + nom du site + statut (Validée/Soumise/En cours/Refusée/Liste d'attente) + chips cliquables (Stand ✅⚠️, Anim Ven ⏳❌, Anim Sam, Convention, Assurance). Clic sur une ligne = switch via ?reg=. Clic sur un chip = scroll vers le data-section correspondant via onJumpTo. ReconnectionAlertBanner: bandeaux empilés (un par candidature incomplète, excluant refusées/annulées). Calcul des manques via computeMissingItems() : jours, stand/waitlist, animation Ven, animation Sam, convention, assurance, caution. Format exact 'Site [X] — il vous reste : [liste]'. Bouton 'Reprendre →' bascule vers le site cible + ?goto=<premier bloc manquant> qui est consommé par un nouvel useEffect dans page.js pour auto-scroll + flash visuel. Test E2E : 5 candidature lines + 4 reconnection banners détectés. CACHE-BUST: package.json 1.0.11 → 1.0.12 (BUILD_VERSION pkg-6ef4fc9d61db → pkg-42d11bdd8890). PHASE B à venir (sur validation utilisateur) : refonte Blocs 2-3 (Jours + Stand CTA unique), refonte Blocs 4-5 (Animations par jour + Soumission stricte)."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52 Phase A LIVRÉE. (1) Nouveau header sticky multi-candidatures (1 ligne/site, chips cliquables vers data-section, switcher de site actif). (2) Bandeau de reconnexion avec calcul automatique des manques + Bouton Reprendre → goto via URL param. (3) Auto-scroll via useEffect quand ?goto= présent dans URL. Backend my-sites contient déjà toutes les données nécessaires (has_vendredi_animation, has_samedi_animation, is_complete, can_submit, etc.). Aucun changement backend en Phase A. À redéployer en production. Phase B = refonte des 5 blocs du tunnel (Site picker priorisé, Stand CTA unique, Animations par jour, Soumission stricte) — sur validation utilisateur."

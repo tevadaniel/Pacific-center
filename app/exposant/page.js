@@ -22,6 +22,8 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import StandViewToggle from '@/components/stand-view-toggle';
 import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
+import MultiCandidaturesHeader from '@/components/exposant/multi-candidatures-header';
+import ReconnectionAlertBanner from '@/components/exposant/reconnection-alert-banner';
 import ContactFooter from '@/components/exposant/contact-footer';
 import ExposantStatusBanner from '@/components/exposant/exposant-status-banner';
 import WelcomeRecapBanner from '@/components/exposant/welcome-recap-banner';
@@ -193,6 +195,32 @@ export default function ExposantPortal() {
     api('/api/post-event-status').then(s => setPostEvent(s || { unlocked: false })).catch(() => {});
   }, []);
 
+  // 🆕 SESSION 52 — Auto-scroll vers le bloc cible si présent dans l'URL (?goto=stand|planning|site|caution)
+  // Permet de "reprendre" sur le bon site + le bon bloc après un Site switch via le bandeau de reconnexion.
+  useEffect(() => {
+    if (!data?.registration?.id || typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const goto = url.searchParams.get('goto');
+    if (!goto) return;
+    // Mapping bloc → tab
+    const TAB_MAP = { site: 'parcours', stand: 'parcours', planning: 'parcours', caution: 'profil' };
+    const targetTab = TAB_MAP[goto];
+    if (targetTab && targetTab !== activeTab) setActiveTab(targetTab);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-section="${goto}"]`);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 140, behavior: 'smooth' });
+        el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+      }
+      // Nettoie le paramètre de l'URL (sans reload)
+      url.searchParams.delete('goto');
+      window.history.replaceState({}, '', url.toString());
+    }, 500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.registration?.id]);
+
   if (loading) return <Shell title="Mon dossier exposant" allowedRoles={['exposant']}><div className="py-20 text-center text-slate-500">Chargement…</div></Shell>;
   if (!data?.registration) {
     // 🆕 Distinguer les 2 causes possibles pour mieux orienter l'utilisateur
@@ -288,6 +316,57 @@ export default function ExposantPortal() {
         organizationName={o?.name}
         userRole={user?.role}
       >
+      {/* 🆕 SESSION 52 — MultiCandidaturesHeader (Phase A) : header sticky multi-candidatures
+            Affiche UNE LIGNE PAR CANDIDATURE (= par site) avec résumé synthétique cliquable.
+            Clic sur une ligne = bascule sur ce site. Clic sur un chip = scroll vers le bloc. */}
+      {r?.id && (data.allSites || []).length > 0 && (
+        <MultiCandidaturesHeader
+          allSites={data.allSites || []}
+          activeRegId={r?.id}
+          orgName={o?.name}
+          globalPercent={completion}
+          onSwitchSite={(newRegId) => {
+            if (newRegId === r?.id) return;
+            if (typeof window !== 'undefined') {
+              const url = new URL(window.location.href);
+              url.searchParams.set('reg', newRegId);
+              window.location.href = url.toString();
+            }
+          }}
+          onJumpTo={(sectionKey) => {
+            // Re-utilise la même logique que StickyContextBar (data-section anchors)
+            if (sectionKey === 'documents') {
+              window.location.href = `/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`;
+              return;
+            }
+            const SECTION_TAB_MAP = {
+              site: 'parcours',
+              stand: 'parcours',
+              planning: 'parcours',
+              caution: 'profil',
+              rappel: 'parcours',
+            };
+            const targetTab = SECTION_TAB_MAP[sectionKey];
+            if (targetTab && targetTab !== activeTab) {
+              handleTabChange(targetTab);
+            }
+            if (typeof window !== 'undefined') {
+              setTimeout(() => {
+                const el = document.querySelector(`[data-section="${sectionKey}"]`);
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  window.scrollTo({ top: window.scrollY + rect.top - 140, behavior: 'smooth' });
+                  el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2', 'transition-all');
+                  setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+                } else {
+                  window.scrollTo({ top: 240, behavior: 'smooth' });
+                }
+              }, targetTab !== activeTab ? 250 : 60);
+            }
+          }}
+        />
+      )}
+
       {/* 🆕 PHASE G1 — Bandeau contextuel STICKY (toujours visible, dynamique) */}
       {r?.id && (
         <StickyContextBar
@@ -379,6 +458,45 @@ export default function ExposantPortal() {
           isLocked={isLocked}
           activeVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false).map(vv => ({ id: vv.id, name: vv.name }))}
         />
+
+        {/* 🆕 SESSION 52 — Bandeau de reconnexion : 1 alerte par candidature incomplète */}
+        {(data.allSites || []).length > 0 && (
+          <ReconnectionAlertBanner
+            allSites={data.allSites || []}
+            onResume={(regId, firstBlock) => {
+              const switchSite = (regId !== r?.id);
+              if (switchSite) {
+                // Bascule de site : on encode aussi le bloc cible dans l'URL pour scroll après reload
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('reg', regId);
+                  if (firstBlock) url.searchParams.set('goto', firstBlock);
+                  window.location.href = url.toString();
+                }
+                return;
+              }
+              // Même site, on scrolle directement
+              if (firstBlock === 'documents') {
+                window.location.href = `/exposant/documents${r?.id ? `?regId=${r.id}` : ''}`;
+                return;
+              }
+              const SECTION_TAB_MAP = { site: 'parcours', stand: 'parcours', planning: 'parcours', caution: 'profil' };
+              const targetTab = SECTION_TAB_MAP[firstBlock];
+              if (targetTab && targetTab !== activeTab) handleTabChange(targetTab);
+              setTimeout(() => {
+                const el = document.querySelector(`[data-section="${firstBlock}"]`);
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  window.scrollTo({ top: window.scrollY + rect.top - 140, behavior: 'smooth' });
+                  el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2');
+                  setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+                } else {
+                  window.scrollTo({ top: 240, behavior: 'smooth' });
+                }
+              }, targetTab && targetTab !== activeTab ? 250 : 60);
+            }}
+          />
+        )}
 
         {/* 🔐 Bandeau gestion mot de passe — visible seulement à l'exposant (pas en mode aperçu admin) */}
         {user?.role === 'exposant' && o?.id && (
