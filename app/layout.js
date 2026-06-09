@@ -70,7 +70,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
         {children}
-        <Toaster position="top-right" richColors />
+        <Toaster position="top-center" richColors duration={5000} closeButton style={{ zIndex: 99999 }} />
         <PwaRegister />
       </body>
     </html>

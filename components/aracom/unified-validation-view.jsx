@@ -256,6 +256,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       `• ${waitlister.organization?.name} sera PROMU sur le stand ${preReserved.stand_code}\n\n` +
       `Cette action est définitive.`
     )) return;
+    setSwitchOp({ ...switchOp, _processing: true });
     try {
       const promoteId = waitlister.registration_id || waitlister.id;
       const refuseId = preReserved.registration_id || preReserved.id;
@@ -263,10 +264,27 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         method: 'POST',
         body: JSON.stringify({ with_registration_id: refuseId }),
       });
-      toast.success(`✅ Échange effectué — ${waitlister.organization?.name} sur stand ${preReserved.stand_code}`);
-      setSwitchOp(null);
+      // 🆕 SESSION 48af — Toast très visible + état success dans le dialog
+      toast.success(`✅ Échange effectué — ${waitlister.organization?.name || 'Exposant'} placé sur stand ${preReserved.stand_code}`, {
+        description: `${preReserved.organization?.name || 'L\'ancien exposant'} a été refusé et libère le stand.`,
+        duration: 6000,
+      });
+      setSwitchOp({
+        ...switchOp,
+        _processing: false,
+        _success: {
+          promotedName: waitlister.organization?.name || 'Exposant',
+          refusedName: preReserved.organization?.name || 'Ancien exposant',
+          newStand: preReserved.stand_code,
+        }
+      });
+      // Recharge les données puis ferme la modale après 2.5s
       await load();
-    } catch (e) { toast.error(`❌ ${e.message}`); }
+      setTimeout(() => setSwitchOp(null), 2500);
+    } catch (e) {
+      toast.error(`❌ ${e.message}`, { duration: 6000 });
+      setSwitchOp({ ...switchOp, _processing: false });
+    }
   };
 
   if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
@@ -506,7 +524,20 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               Choisissez qui remplace qui sur le site <b>{switchOp?.venue?.name}</b>. L&apos;exposant pré-réservé sera refusé et le waitlister prendra son stand.
             </DialogDescription>
           </DialogHeader>
-          {switchOp && (
+          {switchOp?._success ? (
+            /* 🆕 SESSION 48af — Écran de succès très visible */
+            <div className="space-y-3 py-6 text-center">
+              <div className="mx-auto w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center">
+                <Check className="w-9 h-9 text-emerald-600" />
+              </div>
+              <div className="text-lg font-bold text-emerald-800">Échange effectué !</div>
+              <div className="rounded-md border-2 border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 space-y-1">
+                <div>🟢 <b>{switchOp._success.promotedName}</b> placé sur stand <code className="font-mono bg-white px-1.5 py-0.5 rounded">{switchOp._success.newStand}</code></div>
+                <div>🔴 <b>{switchOp._success.refusedName}</b> refusé et libéré</div>
+              </div>
+              <div className="text-xs text-slate-500">Cette fenêtre se ferme dans 2 secondes…</div>
+            </div>
+          ) : switchOp && (
             <div className="space-y-4 py-2">
               {/* Pré-réservé à refuser */}
               <div className="space-y-1.5">
@@ -516,6 +547,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                 <Select
                   value={switchOp.selectedPreReservedId}
                   onValueChange={(v) => setSwitchOp({ ...switchOp, selectedPreReservedId: v })}
+                  disabled={switchOp._processing}
                 >
                   <SelectTrigger className="border-rose-300 bg-rose-50/40">
                     <SelectValue placeholder="Choisir un pré-réservé…" />
@@ -542,6 +574,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                 <Select
                   value={switchOp.selectedWaitlisterId}
                   onValueChange={(v) => setSwitchOp({ ...switchOp, selectedWaitlisterId: v })}
+                  disabled={switchOp._processing}
                 >
                   <SelectTrigger className="border-emerald-300 bg-emerald-50/40">
                     <SelectValue placeholder="Choisir un waitlister…" />
@@ -574,16 +607,22 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               })()}
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSwitchOp(null)}>Annuler</Button>
-            <Button
-              onClick={doSwitch}
-              disabled={!switchOp?.selectedPreReservedId || !switchOp?.selectedWaitlisterId || switchOp.preReservedOptions.length === 0 || switchOp.waitlistOptions.length === 0}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              <ArrowLeftRight className="w-4 h-4 mr-1.5" /> Confirmer l&apos;échange
-            </Button>
-          </DialogFooter>
+          {!switchOp?._success && (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSwitchOp(null)} disabled={switchOp?._processing}>Annuler</Button>
+              <Button
+                onClick={doSwitch}
+                disabled={!switchOp?.selectedPreReservedId || !switchOp?.selectedWaitlisterId || switchOp?.preReservedOptions.length === 0 || switchOp?.waitlistOptions.length === 0 || switchOp?._processing}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                {switchOp?._processing ? (
+                  <><RefreshCw className="w-4 h-4 mr-1.5 animate-spin" /> Échange en cours…</>
+                ) : (
+                  <><ArrowLeftRight className="w-4 h-4 mr-1.5" /> Confirmer l&apos;échange</>
+                )}
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>
