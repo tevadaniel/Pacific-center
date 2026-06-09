@@ -3864,11 +3864,19 @@ export async function POST(request, { params }) {
         { $set: {
             status: 'a_confirmer',
             stand_code: targetStandCode,
-            // marquer la promotion manuelle (sert pour le tri : passe en TÊTE)
             swap_promoted_at: now,
+            ex_pre_reserved: false, // 🆕 SESSION 48ak — clear éventuel ancien flag
+            ex_pre_reserved_at: null,
+            swap_demoted_at: null,
             updated_at: now,
           }
         }
+      );
+      // 🆕 SESSION 48ak — Met aussi à jour le validation_request associé au promu (s'il existe)
+      //                  pour éviter qu'un ancien status='waitlist' ne le retienne en attente
+      await db.collection('validation_requests').updateMany(
+        { registration_id: promoteId },
+        { $set: { status: 'en_attente', stand_code: targetStandCode, updated_at: now } }
       );
       const stand = await db.collection('venue_stands').findOne({ venue_id: promoteReg.venue_id, stand_code: targetStandCode });
       if (stand) {
