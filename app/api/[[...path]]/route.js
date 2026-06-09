@@ -6210,6 +6210,58 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       });
     }
 
+    // 🆕 SESSION 52d — Cleanup PAR REGISTRATION (utilisé par simulation-engine sur abandon)
+    // Supprime UNE candidature de simulation (cascade slots, validation_requests, etc.)
+    // Garde l'organisation/utilisateur si d'autres regs y sont rattachées.
+    if (route === 'admin/simulation/abandon-cleanup') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const regId = body?.registration_id;
+      if (!regId) return err('registration_id requis', 400);
+      const reg = await db.collection('registrations').findOne({ id: regId });
+      if (!reg) return json({ ok: true, skipped: 'not_found' });
+      // Sécurité : NE supprime que les regs flaggées simulation (jamais de vraies données)
+      if (!reg.is_simulation && !reg.sim_session_id) {
+        return err('Cette registration n\'est pas une simulation — refus', 403);
+      }
+      const orgId = reg.organization_id;
+      const cascade = {};
+      const childCollections = [
+        'animation_slots', 'stand_assignments', 'validation_requests',
+        'modification_tokens', 'modification_requests', 'registration_documents',
+        'deposit_transactions', 'caution_appointments', 'attendance_sessions',
+        'attendance_events', 'registration_anomalies', 'field_comments',
+        'field_media', 'tasks_or_followups', 'email_messages',
+      ];
+      for (const c of childCollections) {
+        try {
+          const r = await db.collection(c).deleteMany({ registration_id: regId });
+          cascade[c] = r.deletedCount;
+        } catch { cascade[c] = 0; }
+      }
+      const regDel = await db.collection('registrations').deleteOne({ id: regId });
+      // Si l'org n'a plus de regs et est de simulation, on la supprime aussi
+      let orgDeleted = 0;
+      if (orgId) {
+        const org = await db.collection('organizations').findOne({ id: orgId });
+        if (org?.is_simulation) {
+          const remainingRegs = await db.collection('registrations').countDocuments({ organization_id: orgId });
+          if (remainingRegs === 0) {
+            await db.collection('organizations').deleteOne({ id: orgId });
+            orgDeleted = 1;
+            await db.collection('users').deleteMany({ organization_id: orgId, is_simulation: true });
+          }
+        }
+      }
+      return json({
+        ok: true,
+        registration_id: regId,
+        cascade,
+        registration_deleted: regDel.deletedCount,
+        organization_deleted: orgDeleted,
+      });
+
+    }
+
     // ============ DOCUMENTS OFFICIELS (admin upload) ============
     // POST /api/official-documents — upload d'un PDF/document partagé à tous les exposants
     // body : { title, description, category, file_data (base64), mime_type, file_name }

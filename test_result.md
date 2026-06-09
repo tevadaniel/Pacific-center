@@ -3472,3 +3472,38 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52c — Bug critique de validation corrigé : (a) Backend strict (1 animation par jour de présence obligatoire pour soumettre), (b) Frontend fix format 'vendredi'/'samedi' (avant : ISO dates qui ne matchent jamais). Maintenant impossible de soumettre une candidature sans : site + stand + ≥1 jour + 1 animation par jour. Tests E2E backend OK (4/4 cas). À redéployer en production pour bloquer les futures candidatures incomplètes (les candidatures déjà confirmées en prod ne sont pas affectées rétroactivement)."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52d — Simulation cleanup orphelins (cohérent avec validation stricte)
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 52d — POST /api/admin/simulation/abandon-cleanup (cleanup par-reg)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (lignes 6213-6263)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ ENDPOINT BACKEND VALIDÉ. Supprime UNE candidature de simulation (cascade slots, validation_requests, etc.) si reg.is_simulation=true OU sim_session_id présent. Auto-supprime aussi l'organisation et les users si plus aucune reg n'y est rattachée. SÉCURITÉ : retourne 403 si la reg n'est pas une simulation (protection contre suppression accidentelle de vraies données). Tests E2E: (A) reg sim valide → 200 OK, cascade {animation_slots:1, ...}, reg+org+slot supprimés; (B) vraie reg (non-sim) → 403 'Cette registration n'est pas une simulation — refus'; (C) reg inexistante → 200 {skipped:'not_found'}."
+
+frontend:
+  - task: "SESSION 52d — simulation-engine.js : cleanup automatique sur abandon"
+    implemented: true
+    working: true
+    file: "lib/simulation-engine.js (méthode _cleanupAbandoned + appels dans tous les paths d'abandon)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ ENGINE PATCHED. Nouvelle méthode _cleanupAbandoned(regId, reason) best-effort qui appelle /admin/simulation/abandon-cleanup. Appelée à chaque path d'abandon : (1) aucun créneau d'animation libre, (2) plus de slots de secours (pending), (3) plus de slots de secours (conflit), (4) aucun créneau après 4 essais, (5) catch centralisé pour TOUS les ABANDON_STEP_X (intentionnels) ET les erreurs si step ≥ 2 (la reg existe alors). Résultat : plus aucune candidature simulation fantôme (site+stand+jours sans animation) ne reste en base. Cohérent avec la validation backend stricte de SESSION 52c. CACHE-BUST: package.json 1.0.14 → 1.0.15 (BUILD_VERSION pkg-1cd708a0ae65 → pkg-eb62d49b7138)."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52d — Simulation cleanup ajusté en cohérence avec la validation stricte. (1) Nouvel endpoint backend /admin/simulation/abandon-cleanup avec garde-fou anti-suppression de vraies données. (2) Engine de simulation appelle ce endpoint à CHAQUE path d'abandon (5 paths au total : no_slot, no_backup_pending, no_backup_conflict, no_slot_after_4_retries, et le catch centralisé pour ABANDON_STEP_X). Les prochaines simulations ne laisseront PLUS aucune candidature à moitié remplie. Tests E2E backend OK (3/3 cas). À redéployer en production."
