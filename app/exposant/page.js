@@ -24,6 +24,7 @@ import ConflictDialog from '@/components/wizard/conflict-dialog';
 import StickyContextBar from '@/components/exposant/sticky-context-bar';
 import MultiCandidaturesHeader from '@/components/exposant/multi-candidatures-header';
 import ReconnectionAlertBanner from '@/components/exposant/reconnection-alert-banner';
+import TunnelV2 from '@/components/exposant/tunnel-v2';
 import ContactFooter from '@/components/exposant/contact-footer';
 import ExposantStatusBanner from '@/components/exposant/exposant-status-banner';
 import WelcomeRecapBanner from '@/components/exposant/welcome-recap-banner';
@@ -772,15 +773,80 @@ export default function ExposantPortal() {
               organizationId={o.id}
               onRefresh={load}
             />
-            <ParcoursWizard
+
+            {/* 🚀 SESSION 52 Phase B — Nouveau Tunnel V2 (5 blocs, soumission stricte) */}
+            <TunnelV2
               registration={r}
               organization={o}
               venue={v}
+              slots={slotsArr}
               docs={docs}
-              slots={data.slots}
+              deposit={d}
+              allSites={data.allSites || []}
+              availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false && vv.exposant_visible !== false)}
+              venuesAvailability={(allVenues || []).reduce((acc, vv) => {
+                const av = venuesAvailability[vv.id];
+                if (av) {
+                  acc[vv.id] = {
+                    available_stands: av.available,
+                    total_stands: av.capacity,
+                    capacity_full: av.is_full,
+                    waitlist_count: av.waitlist_count || 0,
+                  };
+                } else {
+                  acc[vv.id] = { available_stands: vv.capacity_stands || 0, total_stands: vv.capacity_stands || 0, capacity_full: false, waitlist_count: 0 };
+                }
+                return acc;
+              }, {})}
               validationRequest={validationRequest}
+              isLocked={isLocked}
               onRefresh={load}
+              onSwitchSite={(newRegId) => {
+                if (newRegId === r?.id) return;
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('reg', newRegId);
+                  window.location.href = url.toString();
+                }
+              }}
+              onOpenStandPicker={() => {
+                // Scroll vers le wizard détaillé (Step1Card a la picker complète)
+                if (typeof window !== 'undefined') {
+                  const el = document.querySelector('[data-section="stand"]');
+                  if (el) {
+                    const rect = el.getBoundingClientRect();
+                    window.scrollTo({ top: window.scrollY + rect.top - 140, behavior: 'smooth' });
+                  }
+                }
+              }}
+              onOpenAnimationPicker={(day) => {
+                if (typeof window !== 'undefined') {
+                  const el = document.querySelector('[data-section="planning"]');
+                  if (el) {
+                    const rect = el.getBoundingClientRect();
+                    window.scrollTo({ top: window.scrollY + rect.top - 140, behavior: 'smooth' });
+                  }
+                }
+              }}
             />
+
+            {/* 📚 MODE DÉTAILLÉ / LEGACY — wizard complet pour la gestion fine (stand picker plan, animations CRUD…) */}
+            <details className="rounded-lg border border-slate-200 bg-slate-50/50">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+                <span>⚙️ Mode détaillé — Plan interactif + Gestion CRUD animations</span>
+              </summary>
+              <div className="p-3 pt-1">
+                <ParcoursWizard
+                  registration={r}
+                  organization={o}
+                  venue={v}
+                  docs={docs}
+                  slots={data.slots}
+                  validationRequest={validationRequest}
+                  onRefresh={load}
+                />
+              </div>
+            </details>
           </TabsContent>
 
           <TabsContent value="profil" className="space-y-4">

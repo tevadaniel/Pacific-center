@@ -3415,3 +3415,25 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52 Phase A LIVRÉE. (1) Nouveau header sticky multi-candidatures (1 ligne/site, chips cliquables vers data-section, switcher de site actif). (2) Bandeau de reconnexion avec calcul automatique des manques + Bouton Reprendre → goto via URL param. (3) Auto-scroll via useEffect quand ?goto= présent dans URL. Backend my-sites contient déjà toutes les données nécessaires (has_vendredi_animation, has_samedi_animation, is_complete, can_submit, etc.). Aucun changement backend en Phase A. À redéployer en production. Phase B = refonte des 5 blocs du tunnel (Site picker priorisé, Stand CTA unique, Animations par jour, Soumission stricte) — sur validation utilisateur."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52 — Phase B COMPLÈTE : TunnelV2 (5 blocs portail exposant)
+# ═════════════════════════════════════════════════════════════════════════
+
+frontend:
+  - task: "SESSION 52 Phase B — TunnelV2 (5 blocs : Sites priority + Jours + Stand CTA + Animations + Submit strict)"
+    implemented: true
+    working: true
+    file: "components/exposant/tunnel-v2.jsx (NEW ~550 lignes), app/exposant/page.js (integration)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ VALIDÉ VISUELLEMENT (screenshot complet conforme à la spec). 5 BLOCS data-section détectés : site, days, stand, planning, submit. BLOC 1 — Mes sites (jusqu'à 3) : tri par site_priority, ▲▼ pour réordonner, Site 1 badge orange (prioritaire), suppression via corbeille, compteur 'X stands libres' ou 'Complet — liste d'attente : N inscrits', message clair 'Votre Site 1 est prioritaire. ARACOM traitera vos demandes dans cet ordre. Site 2 et 3 sont optionnels.', section repliable 'Ajouter un site (N restant)' avec grille des venues dispo. API: POST /api/exposant/sites/add, POST /api/exposant/sites/:id/remove, POST /api/exposant/sites/:id/priority. BLOC 2 — Mes jours de présence : 2 cases (Vendredi 14 / Samedi 15) avec horaires, rappel 'Vous devrez choisir 1 animation par jour'. API: POST /api/registrations/:id/set-attending-days. BLOC 3 — Mon stand : CTA UNIQUE selon état : (a) hasStand→affichage verrouillé en vert + bouton Libérer, (b) isWaitlist→bandeau orange 'En liste d'attente', (c) isFull→bouton 'Rejoindre la liste d'attente (N inscrits)', (d) libre→bouton 'X stands libres — Réserver un stand' qui scroll vers le plan interactif legacy. API: POST /api/wizard/waitlist, POST /api/registrations/:id/release-stand. BLOC 4 — Animations par jour : pour chaque jour sélectionné au Bloc 2, sous-carte avec liste anim existantes + bouton ajouter. Si aucune anim : carte rouge + alerte 'Aucune animation' + CTA rouge 'Choisir une animation'. Badges 🟡 Zone démo / 🔵 Sur stand. Format 'Vendredi 14 août — 14h00–14h30 ✅'. API: DELETE /api/animation-slots/:id, le scroll renvoie au panel CRUD legacy pour ajouter. BLOC 5 — Documents & Soumission : liste des docs ✅/⚠️, bouton vert 'Soumettre ma candidature' activé UNIQUEMENT si missingList.length=0, bloc tooltip listant exactement les manques en orange + bloc succès vert si tout prêt. API: POST /api/registrations/:id/request-validation. Le mode 'détaillé/legacy' (plan interactif + animations CRUD complet) reste accessible via <details> repliable pour la gestion fine. Tests E2E : 5/5 sections présentes + 7/7 textes clés détectés dans le DOM (Mes sites jusqu'à, Mes jours de présence, Mon stand, Mes animations, Documents & Soumission, Soumettre ma candidature, Votre Site 1 est prioritaire). CACHE-BUST: package.json 1.0.12 → 1.0.13 (BUILD_VERSION pkg-42d11bdd8890 → pkg-6361a5d53351)."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52 Phase B LIVRÉE & VALIDÉE. Le portail exposant a maintenant un tunnel propre en 5 blocs : Sites priorisés (▲▼, up to 3), Jours, Stand CTA unique, Animations par jour, Soumission stricte avec tooltip. Le mode legacy reste disponible pour la gestion fine. Tous les blocs sont reliés au header sticky multi-candidatures de Phase A : un clic sur un chip du header → scroll vers le bloc concerné via data-section. À redéployer en production. SESSION 52 (Phase A + B) complètement terminée."
