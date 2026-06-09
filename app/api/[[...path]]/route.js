@@ -2242,6 +2242,82 @@ export async function GET(request, { params }) {
       });
     }
 
+    // 🆕 SESSION 51 — Vue "Remplissage par jour" — 1 ligne/site × 1 colonne/jour
+    // Pour CHAQUE jour : count exposants présents ce jour-là (attending_days inclut le jour)
+    // - confirmed : status='confirme' AND stand_code != null
+    // - attributed : stand_code != null AND status not in [refuse, annule]
+    // attending_days null/undef => considéré comme "les 2 jours" (forum default)
+    if (route === 'admin/filling-by-day') {
+      const ctx = getUserContext(request);
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const days = [
+        { value: '2026-08-14', label: 'Vendredi 14 août', short: 'Ven. 14' },
+        { value: '2026-08-15', label: 'Samedi 15 août', short: 'Sam. 15' },
+      ];
+      const venues = await db.collection('venues').find({
+        $or: [{ is_active: { $ne: false } }, { is_active: { $exists: false } }],
+        $and: [{ $or: [{ is_available_2026: { $ne: false } }, { is_available_2026: { $exists: false } }] }],
+      }).sort({ name: 1 }).toArray();
+      const allRegs = await db.collection('registrations').find({
+        status: { $nin: ['annule', 'annulé', 'refuse', 'refusé'] },
+      }).toArray();
+
+      const sites = venues.map((v) => {
+        const venueRegs = allRegs.filter((r) => r.venue_id === v.id);
+        const per_day = {};
+        for (const d of days) {
+          const dayValue = d.value;
+          // Helper : reg présent ce jour ?
+          const isPresentThisDay = (r) => {
+            const arr = Array.isArray(r.attending_days) ? r.attending_days : null;
+            // attending_days null/undef => considéré présent les 2 jours (default forum)
+            if (!arr || arr.length === 0) return true;
+            return arr.includes(dayValue);
+          };
+          const presentRegs = venueRegs.filter(isPresentThisDay);
+          const attributed = presentRegs.filter((r) => !!r.stand_code).length;
+          const confirmed = presentRegs.filter((r) => !!r.stand_code && r.status === 'confirme').length;
+          const capacity = v.capacity_stands || 0;
+          per_day[dayValue] = {
+            confirmed,
+            attributed,
+            capacity,
+            missing_attributed: Math.max(0, capacity - attributed),
+            missing_confirmed: Math.max(0, capacity - confirmed),
+            percent_attributed: capacity > 0 ? Math.round((attributed / capacity) * 100) : 0,
+            percent_confirmed: capacity > 0 ? Math.round((confirmed / capacity) * 100) : 0,
+          };
+        }
+        return {
+          id: v.id,
+          name: v.name,
+          code: v.code,
+          capacity: v.capacity_stands || 0,
+          per_day,
+        };
+      });
+
+      // Totaux toute Polynésie
+      const totals = {};
+      for (const d of days) {
+        totals[d.value] = sites.reduce((acc, s) => {
+          acc.confirmed += s.per_day[d.value].confirmed;
+          acc.attributed += s.per_day[d.value].attributed;
+          acc.capacity += s.per_day[d.value].capacity;
+          return acc;
+        }, { confirmed: 0, attributed: 0, capacity: 0 });
+        totals[d.value].missing_attributed = Math.max(0, totals[d.value].capacity - totals[d.value].attributed);
+        totals[d.value].missing_confirmed = Math.max(0, totals[d.value].capacity - totals[d.value].confirmed);
+        totals[d.value].percent_attributed = totals[d.value].capacity > 0
+          ? Math.round((totals[d.value].attributed / totals[d.value].capacity) * 100) : 0;
+        totals[d.value].percent_confirmed = totals[d.value].capacity > 0
+          ? Math.round((totals[d.value].confirmed / totals[d.value].capacity) * 100) : 0;
+      }
+
+      return json({ days, sites, totals });
+    }
+
+
     // Get/create magic access link for an exposant (admin only)
     if (route.match(/^organizations\/[^/]+\/access-link$/)) {
       const ctx = getUserContext(request);

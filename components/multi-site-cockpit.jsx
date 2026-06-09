@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, MapPin, Users, Loader2, ArrowLeftRight, Calendar, Music, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import FillingByDayTable from '@/components/aracom/filling-by-day-table';
 
 async function api(path) {
   const r = await fetch(`/api${path}`, { headers: { 'x-user-role': 'aracom_admin', 'x-user-id': 'u-admin' } });
@@ -48,6 +49,9 @@ export default function MultiSiteCockpit() {
 
   return (
     <div className="space-y-6">
+      {/* 🆕 SESSION 51 — VUE REMPLISSAGE PAR JOUR (en haut, tout de suite visible) */}
+      <FillingByDayTable />
+
       {/* === ALERTES MULTI-SITES === */}
       <Card>
         <CardContent className="p-5">

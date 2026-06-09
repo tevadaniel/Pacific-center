@@ -3358,3 +3358,38 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 50b — Pastille '⭐ Prioritaire' ajoutée dans toutes les vues 'gestion exposants par site' : (1) Vue par site (MultiSiteCockpit, Terrain) — badge orange complet avec bordure mise en évidence. (2) Site animations overview — étoile inline avant le nom (compact). Backend enrichi pour exposer is_user_priority sur GET /api/admin/site-view/:venueId. Validé via Playwright avec setup/cleanup automatique. BUILD_VERSION bumpé (pkg-d909d7dcb9b0). À redéployer en production pour mise à disposition utilisateur."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 51 — Vue "Remplissage par jour" (Cockpit Multi-sites)
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 51 — GET /api/admin/filling-by-day (agrégat remplissage par site × jour)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (route admin/filling-by-day)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ TESTÉ. GET /api/admin/filling-by-day retourne {days, sites, totals}. Pour chaque site × chaque jour : confirmed (status=confirme + stand_code), attributed (stand_code + status not in refuse/annule), capacity, missing_*, percent_*. attending_days null/empty = considéré présent les 2 jours (default forum). Filtre sur sites actifs (is_active != false) + disponibles 2026. Exclut les statuts refuse/annule. Validé via curl + UI : Arue 12/12, Faaa 12/16, Punaauia 13/13, Taravao 12/12. Total 49/53 attribués."
+
+frontend:
+  - task: "SESSION 51 — Composant FillingByDayTable intégré au Cockpit Multi-sites"
+    implemented: true
+    working: true
+    file: "components/aracom/filling-by-day-table.jsx (nouveau), components/multi-site-cockpit.jsx (intégration)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ VALIDÉ VISUELLEMENT (2 screenshots, mode Attribués + mode Confirmés). Tableau avec 1 ligne par site × 1 colonne par jour (Ven. 14 + Sam. 15). Chaque cellule : nombre value/capacité + % + label couleur (vert=Complet≥100, orange=Presque 80-99, jaune=À combler 50-79, rouge=Incomplet <50) + stands manquants. Toggle Attribués/Confirmés en haut à droite (default=Attribués). Bouton Rafraîchir. Ligne TOTAL POLYNÉSIE en bas avec agrégats. Légende couleur + mention 'Animations exclues du calcul'. Placé tout en haut du Cockpit Multi-sites (avant Alertes multi-sites). CACHE-BUST: package.json 1.0.10 → 1.0.11 (BUILD_VERSION pkg-d909d7dcb9b0 → pkg-6ef4fc9d61db). Tests E2E: titre/colonnes/toggle/légende/mention animations TOUS détectés dans le DOM."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 51 — Vue 'Remplissage par jour' livrée et validée. Tableau matriciel sites × jours, calcul indépendant par jour, 4 niveaux de couleur, toggle Attribués/Confirmés pour adapter à la maturité de la base de données (peu de confirmés strictement à ce stade). Placé en tête du Cockpit Multi-sites. Backend agrège tout en une seule requête (perf OK). BUILD_VERSION bumpé (pkg-6ef4fc9d61db) pour cache PWA. À redéployer en production."
