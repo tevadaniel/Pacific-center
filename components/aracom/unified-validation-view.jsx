@@ -88,6 +88,11 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
             organization: reg.organization,
             venue: reg.venue,
             locked_at: reg.locked_at || null,
+            // 🆕 SESSION 48aj — Flags d'échange pour le tri FIFO + affichage badge
+            ex_pre_reserved: !!reg.ex_pre_reserved,
+            ex_pre_reserved_at: reg.ex_pre_reserved_at || null,
+            swap_promoted_at: reg.swap_promoted_at || null,
+            swap_demoted_at: reg.swap_demoted_at || null,
             _source: 'registration',
             registration: reg,
           });
@@ -145,8 +150,16 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       const g = out[k];
       const capacity = g.venue.capacity_stands || 0;
       const slotsForPre = Math.max(0, capacity - g.validated.length);
-      // Tri FIFO : les plus anciens d'abord (date de soumission croissante)
-      g._candidates.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      // 🆕 SESSION 48aj — Tri FIFO avancé :
+      //   1. swap_promoted_at en TÊTE (l'admin a choisi de les promouvoir)
+      //   2. created_at normal au milieu
+      //   3. swap_demoted_at en FIN (ex-pré-réservés rétrogradés)
+      const sortKey = (r) => {
+        if (r.swap_promoted_at) return new Date(r.swap_promoted_at).getTime() - 1e15; // tout en haut
+        if (r.swap_demoted_at) return new Date(r.swap_demoted_at).getTime() + 1e15;   // tout en bas
+        return new Date(r.created_at || 0).getTime();
+      };
+      g._candidates.sort((a, b) => sortKey(a) - sortKey(b));
       g.preReserved = g._candidates.slice(0, slotsForPre);
       const overflow = g._candidates.slice(slotsForPre);
       // Conserve les marquages auto-waitlist et numéro FIFO
@@ -452,6 +465,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                               <span title={new Date(r.created_at).toLocaleString('fr-FR')}>
                                 · inscrit le {new Date(r.created_at).toLocaleDateString('fr-FR')} à {new Date(r.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                               </span>
+                            )}
+                            {/* 🆕 SESSION 48aj — Vignette « Ancien pré-réservé » */}
+                            {r.ex_pre_reserved && (
+                              <Badge className="bg-orange-100 text-orange-800 border border-orange-300 text-[9px] px-1 py-0">
+                                ↩️ Ancien pré-réservé
+                              </Badge>
                             )}
                           </div>
                           {!readonly && (

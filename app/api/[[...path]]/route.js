@@ -3831,26 +3831,45 @@ export async function POST(request, { params }) {
       const targetStandCode = refuseReg.stand_code;
       const originalPromoteStand = promoteReg.stand_code;
       const now = new Date();
-      const reason = `Échange avec ${promoteReg.organization_id} (admin manuel)`;
-      // 1) Refuser le pré-réservé
+      // 🆕 SESSION 48aj — Échange = SWAP RÉEL (pas de suppression)
+      //   • L'ex-pré-réservé bascule en LISTE D'ATTENTE (status a_relancer, stand libéré)
+      //     + flag ex_pre_reserved + swap_demoted_at (pour le tri FIFO : il passe en bas)
+      //   • Le waitlister choisi prend le stand libéré + status a_confirmer
+      //   • Le waitlister conserve sa created_at d'origine (gardera sa position FIFO)
       await db.collection('registrations').updateOne(
         { id: refuseId },
-        { $set: { status: 'refuse', refused_at: now, refused_by: ctx.userId || 'u-admin', refused_reason: reason, stand_code: null, updated_at: now } }
+        { $set: {
+            status: 'a_relancer',
+            stand_code: null,
+            ex_pre_reserved: true,
+            ex_pre_reserved_at: now,
+            swap_demoted_at: now, // ← utilisé pour le tri FIFO descendant
+            updated_at: now,
+          }
+        }
       );
+      // L'ancien validation_request (si présent) repasse en en_attente
       await db.collection('validation_requests').updateMany(
-        { registration_id: refuseId, status: { $in: ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer'] } },
-        { $set: { status: 'refused', refused_at: now, refused_reason: reason, updated_at: now } }
+        { registration_id: refuseId, status: { $in: ['validated', 'confirme', 'locked', 'a_confirmer', 'rdv_fixe'] } },
+        { $set: { status: 'en_attente', updated_at: now } }
       );
+      // Libère le stand côté assignations
       await db.collection('stand_assignments').updateMany(
         { registration_id: refuseId },
         { $set: { status: 'annule', updated_at: now } }
       );
-      // 2) Promouvoir : prend le stand libéré + statut a_confirmer
+      // 2) Promouvoir le waitlister choisi sur le stand libéré
       await db.collection('registrations').updateOne(
         { id: promoteId },
-        { $set: { status: 'a_confirmer', stand_code: targetStandCode, updated_at: now } }
+        { $set: {
+            status: 'a_confirmer',
+            stand_code: targetStandCode,
+            // marquer la promotion manuelle (sert pour le tri : passe en TÊTE)
+            swap_promoted_at: now,
+            updated_at: now,
+          }
+        }
       );
-      // Met à jour ou crée le stand_assignment pour le promu
       const stand = await db.collection('venue_stands').findOne({ venue_id: promoteReg.venue_id, stand_code: targetStandCode });
       if (stand) {
         await db.collection('stand_assignments').updateOne(
@@ -3863,7 +3882,7 @@ export async function POST(request, { params }) {
         id: uuid(),
         actor_user_id: ctx.userId || 'u-admin',
         action: 'REGISTRATION_SWAP',
-        description: `Échange manuel : ${refuseId} refusée → ${promoteId} promue sur ${targetStandCode}`,
+        description: `Échange manuel : ${refuseId} → liste d'attente, ${promoteId} → pré-réservé sur ${targetStandCode}`,
         metadata: { promote_id: promoteId, refuse_id: refuseId, target_stand: targetStandCode, original_promote_stand: originalPromoteStand },
         created_at: now,
       });
