@@ -69,7 +69,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       const merged = [];
       for (const reg of (allRegs || [])) {
         // Exclut explicitement les statuts non-actifs (prospect → pas encore engagé)
-        if (reg.status === 'prospect' || reg.status === 'cancelled' || reg.status === 'annule') continue;
+        // 🆕 SESSION 48ag — Exclut aussi le statut 'refuse' (exposants refusés ne doivent plus apparaître nulle part)
+        if (['prospect', 'cancelled', 'annule', 'refuse', 'refused'].includes(reg.status)) continue;
         const valReq = valByRegId[reg.id];
         if (valReq) {
           // Le validation_request a priorité, on ajoute les infos de contact venant de la reg

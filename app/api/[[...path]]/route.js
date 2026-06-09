@@ -1714,7 +1714,7 @@ export async function GET(request, { params }) {
         const items = [];
         // Registrations
         for (const reg of regs.filter(r => r.venue_id === v.id)) {
-          if (reg.status === 'prospect' || reg.status === 'cancelled' || reg.status === 'annule') continue;
+          if (['prospect', 'cancelled', 'annule', 'refuse', 'refused'].includes(reg.status)) continue;
           const valReq = valByRegId[reg.id];
           items.push({ status: valReq ? valReq.status : reg.status });
         }
@@ -1787,7 +1787,7 @@ export async function GET(request, { params }) {
       const activeRegIds = new Set([
         ...activeValidations.map(v => v.registration_id),
         // Inclure aussi les registrations avec statut actif (hors prospect/annule)
-        ...regs.filter(r => !['prospect', 'cancelled', 'annule'].includes(r.status)).map(r => r.id),
+        ...regs.filter(r => !['prospect', 'cancelled', 'annule', 'refuse', 'refused'].includes(r.status)).map(r => r.id),
       ]);
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const regById = Object.fromEntries(regs.map(r => [r.id, r]));
