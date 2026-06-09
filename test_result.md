@@ -3565,3 +3565,25 @@ backend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52e — Audit waitlist rigoureux. Le testing agent avait signalé 3 'bugs critiques' avec une thèse erronée (MongoDB updateOne not persisting) basée sur 2 faux positifs (mauvais paramètres et endpoints inexistants). J'ai investigué manuellement et trouvé 2 VRAIS bugs : (1) swap demote en a_relancer + sans is_waitlist=true → exposant croit sa candidature refusée; (2) promote post-swap garde is_waitlist=true → exposant ne voit pas son stand. Corrections appliquées + tests E2E 4/4 OK. AUTO-PROMOTION sur cancel/release-stand n'existe PAS dans le code — à clarifier avec l'utilisateur si feature attendue."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52f — Toggle site désactivé : SYNCHRONISATION TOTALE
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 52f — Toggle principal sync TOUS les flags is_active/is_active_2026/pacific_visible/exposant_visible"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (set-availability ligne 7909-7926)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ TOGGLE PRINCIPAL SYNCHRONISE DESORMAIS TOUS LES FLAGS. Avant: set-availability ne mettait à jour QUE is_available_2026, laissant is_active=true, is_active_2026=true et pacific_visible/exposant_visible inchangés lors d'une désactivation. Conséquence: sites désactivés réapparaissaient dans les endpoints qui filtrent par is_active. FIX: ON → tous flags TRUE / OFF → tous flags FALSE (is_available_2026, is_active, is_active_2026, pacific_visible, exposant_visible). MIGRATION DONNEES: 2 sites désactivés (Mahina, Moorea) synchronisés à FALSE partout, 4 sites actifs (Faaa, Punaauia, Arue, Taravao) à TRUE partout. TESTS PASSE: /venues admin = 6 sites (admin voit tout pour gestion), /venues?only_active=1 = 4 sites (Mahina/Moorea exclus), /venues public = 4 sites, /admin/filling-by-day = 4 sites, toggle ON/OFF synchronise tous les flags en une seule requete. CACHE-BUST: package.json 1.0.16 → 1.0.17."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52f — Toggle site désactivé corrigé une bonne fois pour toutes. (1) Endpoint set-availability synchronise désormais 5 flags en cohérence: is_available_2026, is_active, is_active_2026, pacific_visible, exposant_visible. (2) Migration data appliquée: Mahina et Moorea désactivés partout, autres sites actifs partout. (3) Tous les endpoints consommateurs (admin/filling-by-day, /venues?only_active=1, /venues public, exposant my-sites) excluent correctement Mahina/Moorea. Plus de désynchronisation possible. À redéployer en production + relance script de migration sur la DB de prod si nécessaire (les flags is_active/pacific_visible/exposant_visible pourraient être désynchronisés en prod)."

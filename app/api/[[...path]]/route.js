@@ -7910,13 +7910,18 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       const id = p[1];
       const { is_available_2026 } = body;
       const newVal = Boolean(is_available_2026);
-      // 🆕 Synchronisation : si on active globalement le site, on active aussi Pacific et Exposants
-      //                     si on désactive, le filtrage par is_available_2026 masque le site partout (Pacific + Exposants)
-      const upd = { is_available_2026: newVal, updated_at: new Date() };
-      if (newVal) {
-        upd.pacific_visible = true;
-        upd.exposant_visible = true;
-      }
+      // 🆕 SESSION 52f — TOGGLE PRINCIPAL = synchronisation TOTALE des flags actifs/visibles
+      //   ON  → is_available_2026=true + is_active=true + pacific_visible=true + exposant_visible=true
+      //   OFF → is_available_2026=false + is_active=false + pacific_visible=false + exposant_visible=false
+      //   Garantit que TOUS les endpoints (qui filtrent sur l'un OU l'autre) voient le site cohérent.
+      const upd = {
+        is_available_2026: newVal,
+        is_active: newVal,           // ⭐ fix : aligner is_active sur le toggle principal
+        is_active_2026: newVal,      // ⭐ certains endpoints utilisent cette variante
+        pacific_visible: newVal,
+        exposant_visible: newVal,
+        updated_at: new Date(),
+      };
       await db.collection('venues').updateOne({ id }, { $set: upd });
       return json({ ok: true, is_available_2026: newVal, synced: newVal });
     }
