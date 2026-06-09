@@ -233,32 +233,40 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
     } catch (e) { toast.error(`❌ ${e.message}`); }
   };
 
-  const openSwitch = (waitlister, preReserved) => setSwitchOp({ waitlister, preReserved });
+  // 🆕 SESSION 48ae — Le dialogue d'échange s'ouvre désormais au niveau du site (venue)
+  //                  et propose 2 menus déroulants pour choisir qui remplace qui.
+  const openSwitch = (venueGroup, initialWaitlister = null, initialPreReserved = null) => {
+    setSwitchOp({
+      venue: venueGroup.venue,
+      preReservedOptions: venueGroup.preReserved,
+      waitlistOptions: venueGroup.waitlist,
+      selectedPreReservedId: initialPreReserved?.registration_id || initialPreReserved?.id || venueGroup.preReserved[0]?.registration_id || venueGroup.preReserved[0]?.id || '',
+      selectedWaitlisterId: initialWaitlister?.registration_id || initialWaitlister?.id || venueGroup.waitlist[0]?.registration_id || venueGroup.waitlist[0]?.id || '',
+    });
+  };
   const doSwitch = async () => {
     if (!switchOp) return;
-    const { waitlister, preReserved } = switchOp;
+    const { preReservedOptions, waitlistOptions, selectedPreReservedId, selectedWaitlisterId } = switchOp;
+    const preReserved = preReservedOptions.find(r => (r.registration_id || r.id) === selectedPreReservedId);
+    const waitlister = waitlistOptions.find(r => (r.registration_id || r.id) === selectedWaitlisterId);
+    if (!preReserved || !waitlister) { toast.error('Sélection incomplète'); return; }
     if (!window.confirm(
       `Échanger ?\n\n` +
-      `• ${preReserved.organization?.name} (pré-réservé sur stand ${preReserved.stand_code}) sera REFUSÉ\n` +
+      `• ${preReserved.organization?.name || preReservedOptions[0]?.organization?.name} (pré-réservé sur stand ${preReserved.stand_code}) sera REFUSÉ\n` +
       `• ${waitlister.organization?.name} sera PROMU sur le stand ${preReserved.stand_code}\n\n` +
       `Cette action est définitive.`
     )) return;
     try {
-      const targetStandCode = preReserved.stand_code;
-      // 1) Refuser le pré-réservé (libère le stand)
-      await api(`/api/validation-requests/${preReserved.id}/decline`, {
+      const promoteId = waitlister.registration_id || waitlister.id;
+      const refuseId = preReserved.registration_id || preReserved.id;
+      await api(`/api/admin/registrations/${promoteId}/swap`, {
         method: 'POST',
-        body: JSON.stringify({ reason: `Échange manuel avec ${waitlister.organization?.name}` }),
+        body: JSON.stringify({ with_registration_id: refuseId }),
       });
-      // 2) Promouvoir le waitlister sur le stand libéré
-      await api(`/api/admin/waitlist/${waitlister.id}/promote`, {
-        method: 'POST',
-        body: JSON.stringify({ stand_code: targetStandCode }),
-      });
-      toast.success(`✅ Échange effectué — ${waitlister.organization?.name} sur stand ${targetStandCode}`);
+      toast.success(`✅ Échange effectué — ${waitlister.organization?.name} sur stand ${preReserved.stand_code}`);
       setSwitchOp(null);
       await load();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) { toast.error(`❌ ${e.message}`); }
   };
 
   if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
@@ -393,7 +401,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                               <X className="w-3 h-3 mr-0.5" /> Refuser
                             </Button>
                             {g.waitlist.length > 0 && (
-                              <Button size="sm" variant="outline" onClick={() => openSwitch(g.waitlist[0], r)} className="h-6 px-2 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger avec ${g.waitlist[0].organization?.name} (#1 attente)`}>
+                              <Button size="sm" variant="outline" onClick={() => openSwitch(g, g.waitlist[0], r)} className="h-6 px-2 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Choisir qui remplace qui sur ${g.venue.name}`}>
                                 <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
                               </Button>
                             )}
@@ -442,9 +450,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => openSwitch(r, g.preReserved[0])}
+                                  onClick={() => openSwitch(g, r, g.preReserved[0])}
                                   className="h-6 px-2 text-[10px] border-violet-200 text-violet-700 hover:bg-violet-50"
-                                  title={`Échanger avec un pré-réservé`}
+                                  title={`Choisir qui remplace qui sur ${g.venue.name}`}
                                 >
                                   <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
                                 </Button>
@@ -491,29 +499,90 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
 
       {/* Dialog Échange */}
       <Dialog open={!!switchOp} onOpenChange={(open) => { if (!open) setSwitchOp(null); }}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ArrowLeftRight className="w-5 h-5 text-amber-600" /> Échanger pré-réservé ↔ liste d&apos;attente</DialogTitle>
-            <DialogDescription>L&apos;exposant pré-réservé sera refusé et le waitlister sera placé sur ce stand.</DialogDescription>
+            <DialogDescription>
+              Choisissez qui remplace qui sur le site <b>{switchOp?.venue?.name}</b>. L&apos;exposant pré-réservé sera refusé et le waitlister prendra son stand.
+            </DialogDescription>
           </DialogHeader>
           {switchOp && (
-            <div className="space-y-3 py-2">
-              <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm">
-                <div className="text-[10px] uppercase text-rose-700 font-bold mb-0.5">À refuser</div>
-                <div className="font-semibold">{switchOp.preReserved.organization?.name}</div>
-                <div className="text-xs text-slate-600">Stand <code className="font-mono">{switchOp.preReserved.stand_code}</code></div>
+            <div className="space-y-4 py-2">
+              {/* Pré-réservé à refuser */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-rose-800 flex items-center gap-1">
+                  <X className="w-3.5 h-3.5" /> Pré-réservé à refuser (libère son stand)
+                </label>
+                <Select
+                  value={switchOp.selectedPreReservedId}
+                  onValueChange={(v) => setSwitchOp({ ...switchOp, selectedPreReservedId: v })}
+                >
+                  <SelectTrigger className="border-rose-300 bg-rose-50/40">
+                    <SelectValue placeholder="Choisir un pré-réservé…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {switchOp.preReservedOptions.length === 0 ? (
+                      <SelectItem value="__empty__" disabled>Aucun pré-réservé disponible</SelectItem>
+                    ) : (
+                      switchOp.preReservedOptions.map(r => (
+                        <SelectItem key={r.registration_id || r.id} value={r.registration_id || r.id}>
+                          {r.organization?.name || r.organization?.main_email || 'Sans nom'} — Stand {r.stand_code || '—'}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="text-center text-xl">⇅</div>
-              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
-                <div className="text-[10px] uppercase text-emerald-700 font-bold mb-0.5">À promouvoir</div>
-                <div className="font-semibold">{switchOp.waitlister.organization?.name}</div>
-                <div className="text-xs text-slate-600">Liste d&apos;attente — sera placé sur stand <b>{switchOp.preReserved.stand_code}</b></div>
+              {/* Waitlister à promouvoir */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-emerald-800 flex items-center gap-1">
+                  <ArrowUpCircle className="w-3.5 h-3.5" /> Waitlister à promouvoir (prend le stand libéré)
+                </label>
+                <Select
+                  value={switchOp.selectedWaitlisterId}
+                  onValueChange={(v) => setSwitchOp({ ...switchOp, selectedWaitlisterId: v })}
+                >
+                  <SelectTrigger className="border-emerald-300 bg-emerald-50/40">
+                    <SelectValue placeholder="Choisir un waitlister…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {switchOp.waitlistOptions.length === 0 ? (
+                      <SelectItem value="__empty__" disabled>Aucune liste d&apos;attente</SelectItem>
+                    ) : (
+                      switchOp.waitlistOptions.map((r, i) => (
+                        <SelectItem key={r.registration_id || r.id} value={r.registration_id || r.id}>
+                          #{i + 1} — {r.organization?.name || r.organization?.main_email || 'Sans nom'}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
+              {/* Récap */}
+              {switchOp.selectedPreReservedId && switchOp.selectedWaitlisterId && (() => {
+                const preR = switchOp.preReservedOptions.find(r => (r.registration_id || r.id) === switchOp.selectedPreReservedId);
+                const wl = switchOp.waitlistOptions.find(r => (r.registration_id || r.id) === switchOp.selectedWaitlisterId);
+                if (!preR || !wl) return null;
+                return (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs">
+                    <b>Récapitulatif :</b><br />
+                    🔴 <b>{preR.organization?.name}</b> refusé sur stand <code className="font-mono">{preR.stand_code}</code><br />
+                    🟢 <b>{wl.organization?.name}</b> placé sur stand <code className="font-mono">{preR.stand_code}</code>
+                  </div>
+                );
+              })()}
             </div>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSwitchOp(null)}>Annuler</Button>
-            <Button onClick={doSwitch} className="bg-amber-600 hover:bg-amber-700"><ArrowLeftRight className="w-4 h-4 mr-1.5" /> Confirmer l&apos;échange</Button>
+            <Button
+              onClick={doSwitch}
+              disabled={!switchOp?.selectedPreReservedId || !switchOp?.selectedWaitlisterId || switchOp.preReservedOptions.length === 0 || switchOp.waitlistOptions.length === 0}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              <ArrowLeftRight className="w-4 h-4 mr-1.5" /> Confirmer l&apos;échange
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -3808,7 +3808,69 @@ export async function POST(request, { params }) {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 🆕 SESSION 48ab — Validation directe d'une INSCRIPTION (registration)
+    // 🆕 SESSION 48ae — Échange manuel : promouvoir un waitlister sur le stand d'un pré-réservé
+    // POST /api/admin/registrations/:id/swap
+    //   body: { with_registration_id }
+    //   → with_registration sera refusée (libère son stand)
+    //   → la registration courante prend le stand libéré (et son statut devient a_confirmer)
+    //   Réservé ARACOM.
+    // ═══════════════════════════════════════════════════════════════════
+    if (route.startsWith('admin/registrations/') && route.endsWith('/swap')) {
+      if (ctx.role !== 'aracom_admin') return err('Réservé ARACOM', 403);
+      const promoteId = route.split('/')[2];
+      const refuseId = body?.with_registration_id;
+      if (!refuseId) return err('with_registration_id manquant', 400);
+      if (promoteId === refuseId) return err('Identifiants identiques', 400);
+      const [promoteReg, refuseReg] = await Promise.all([
+        db.collection('registrations').findOne({ id: promoteId }),
+        db.collection('registrations').findOne({ id: refuseId }),
+      ]);
+      if (!promoteReg) return err('Inscription à promouvoir introuvable', 404);
+      if (!refuseReg) return err('Inscription à refuser introuvable', 404);
+      if (promoteReg.venue_id !== refuseReg.venue_id) return err('Les deux inscriptions doivent être sur le même site', 400);
+      const targetStandCode = refuseReg.stand_code;
+      const originalPromoteStand = promoteReg.stand_code;
+      const now = new Date();
+      const reason = `Échange avec ${promoteReg.organization_id} (admin manuel)`;
+      // 1) Refuser le pré-réservé
+      await db.collection('registrations').updateOne(
+        { id: refuseId },
+        { $set: { status: 'refuse', refused_at: now, refused_by: ctx.userId || 'u-admin', refused_reason: reason, stand_code: null, updated_at: now } }
+      );
+      await db.collection('validation_requests').updateMany(
+        { registration_id: refuseId, status: { $in: ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer'] } },
+        { $set: { status: 'refused', refused_at: now, refused_reason: reason, updated_at: now } }
+      );
+      await db.collection('stand_assignments').updateMany(
+        { registration_id: refuseId },
+        { $set: { status: 'annule', updated_at: now } }
+      );
+      // 2) Promouvoir : prend le stand libéré + statut a_confirmer
+      await db.collection('registrations').updateOne(
+        { id: promoteId },
+        { $set: { status: 'a_confirmer', stand_code: targetStandCode, updated_at: now } }
+      );
+      // Met à jour ou crée le stand_assignment pour le promu
+      const stand = await db.collection('venue_stands').findOne({ venue_id: promoteReg.venue_id, stand_code: targetStandCode });
+      if (stand) {
+        await db.collection('stand_assignments').updateOne(
+          { venue_stand_id: stand.id, registration_id: promoteId },
+          { $set: { status: 'provisoire', request_status: 'pending', updated_at: now } },
+          { upsert: true }
+        );
+      }
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'REGISTRATION_SWAP',
+        description: `Échange manuel : ${refuseId} refusée → ${promoteId} promue sur ${targetStandCode}`,
+        metadata: { promote_id: promoteId, refuse_id: refuseId, target_stand: targetStandCode, original_promote_stand: originalPromoteStand },
+        created_at: now,
+      });
+      return json({ ok: true, promote_id: promoteId, refuse_id: refuseId, new_stand_code: targetStandCode });
+    }
+
+
     // POST /api/admin/registrations/:id/validate
     //   → registration.status = 'confirme' + locked_at + locked_by
     //   → met aussi à jour validation_request si elle existe
