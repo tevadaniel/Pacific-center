@@ -136,10 +136,26 @@ export default function MultiSiteCockpit() {
                 {siteView.exposants.length === 0 ? (
                   <div className="text-center text-slate-400 py-6">Aucun exposant sur ce site.</div>
                 ) : siteView.exposants.map(e => (
-                  <div key={e.registration_id} className="border rounded-lg p-3 bg-white hover:bg-slate-50 transition">
+                  <div
+                    key={e.registration_id}
+                    className={`border rounded-lg p-3 bg-white hover:bg-slate-50 transition ${
+                      e.is_user_priority ? 'border-amber-400 ring-1 ring-amber-200 bg-amber-50/30' : ''
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-slate-900 truncate">{e.org_name}</div>
+                        <div className="font-bold text-slate-900 truncate flex items-center gap-1.5 flex-wrap">
+                          {/* 🆕 SESSION 50b — Pastille "Site prioritaire" si l'exposant a marqué CE site comme prioritaire */}
+                          {e.is_user_priority && (
+                            <Badge
+                              className="bg-amber-500 text-white border-amber-600 text-[10px] h-5 px-1.5 gap-0.5 shrink-0"
+                              title="L'exposant a désigné ce site comme prioritaire"
+                            >
+                              ⭐ Prioritaire
+                            </Badge>
+                          )}
+                          <span className="truncate">{e.org_name}</span>
+                        </div>
                         <div className="text-xs text-slate-500">{e.discipline} · {e.contact_name}</div>
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {e.stand_code && <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-800 text-[10px]"><MapPin className="w-3 h-3 mr-1" />{e.stand_code}</Badge>}

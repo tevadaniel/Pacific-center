@@ -2228,6 +2228,9 @@ export async function GET(request, { params }) {
           attending_days: r.attending_days || [],
           attending_day_times: r.attending_day_times || {},
           animations: anims.filter(a => a.registration_id === r.id),
+          // 🆕 SESSION 50b — Pastille "Site prioritaire" si l'exposant a explicitement marqué CE site comme prioritaire
+          is_user_priority: r.is_user_priority === true,
+          site_priority: r.site_priority || null,
         };
       });
 

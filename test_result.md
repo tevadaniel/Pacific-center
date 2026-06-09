@@ -3323,3 +3323,38 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 50 — REFACTOR COMPLET FicheExposantV2 (Profil Exposant Admin) TERMINÉ ET VALIDÉ VISUELLEMENT. Le panneau a été entièrement restructuré selon la spec utilisateur en 9 zones distinctes : (1) Header avec 4 métriques + 3 actions, (2) Bloc Dossier Incomplet orange (uploads obligatoires), (3-8) 6 accordéons fermés par défaut (Identité&Contact, Stand&Site, Caution, Documents auto-générés, Portail&Accès, Bilan Jour J), (9) Zone suppression rouge. Le bouton de statut stand est verrouillé (workflow plateforme). Statut visuel par site calculé dynamiquement (vert=Validé, orange=Pré-réservé, gris=Liste d'attente). Tous les sous-composants existants préservés (AdminMultiSites, Animations, StandPicker, etc.). Cache PWA bumped (BUILD_VERSION pkg-902a4a4bbe46). Screenshot confirme l'UI conforme à la spec. À déployer en production pour validation utilisateur final."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 50b — Pastille "⭐ Prioritaire" dans Vue par site
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 50b — GET /api/admin/site-view/:venueId enrichi avec is_user_priority + site_priority"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (lignes 2218-2235)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ TESTÉ AU SUCCÈS via Playwright. Payload exposants enrichi avec is_user_priority (bool) + site_priority (number). Test: POST /api/exposant/sites/reg-arue-A-C01/priority avec priority=1 → 200 {ok:true,is_user_priority:true}. GET /api/admin/site-view/venue-aru retourne ensuite l'exposant 'I Mua Papeete' avec is_user_priority=true. Cleanup OK avec priority=0."
+
+frontend:
+  - task: "SESSION 50b — Pastille ⭐ Prioritaire dans MultiSiteCockpit + site-animations-overview"
+    implemented: true
+    working: true
+    file: "components/multi-site-cockpit.jsx, components/aracom/site-animations-overview.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "✅ VALIDÉ VISUELLEMENT. Screenshot confirme l'affichage du badge orange '⭐ Prioritaire' à gauche du nom de l'exposant 'I Mua Papeete' dans la Vue par site (Arue), avec bordure orange et fond légèrement teinté sur la Card. Console: '⭐ Prioritaire badge present in UI: True'. Modifications: (1) multi-site-cockpit.jsx Card des exposants avec bordure amber-400 + ring quand is_user_priority=true + Badge inline '⭐ Prioritaire'. (2) site-animations-overview.jsx ExposantLink (2 instances : 'sans animation' + 'Tous les exposants') avec ⭐ inline avant le nom. CACHE-BUST: package.json 1.0.9 → 1.0.10 (BUILD_VERSION pkg-902a4a4bbe46 → pkg-d909d7dcb9b0)."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 50b — Pastille '⭐ Prioritaire' ajoutée dans toutes les vues 'gestion exposants par site' : (1) Vue par site (MultiSiteCockpit, Terrain) — badge orange complet avec bordure mise en évidence. (2) Site animations overview — étoile inline avant le nom (compact). Backend enrichi pour exposer is_user_priority sur GET /api/admin/site-view/:venueId. Validé via Playwright avec setup/cleanup automatique. BUILD_VERSION bumpé (pkg-d909d7dcb9b0). À redéployer en production pour mise à disposition utilisateur."

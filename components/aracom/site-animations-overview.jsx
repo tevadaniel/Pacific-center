@@ -425,6 +425,10 @@ function SiteDetailPanel({ site }) {
               >
                 <span className="truncate">
                   <Users className="w-3 h-3 inline mr-1 text-slate-400" />
+                  {/* 🆕 SESSION 50b — Pastille "Site prioritaire" */}
+                  {r.is_user_priority === true && (
+                    <span className="text-amber-500 mr-0.5" title="L'exposant a marqué ce site comme prioritaire">⭐</span>
+                  )}
                   {r.organization_name || '(sans nom)'}
                 </span>
                 <span className="text-[9px] text-slate-500 shrink-0">
@@ -452,7 +456,13 @@ function SiteDetailPanel({ site }) {
                 exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization_name || '—' }}
                 className="text-[11px] text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded px-2 py-1 transition flex items-center justify-between gap-2"
               >
-                <span className="truncate">{r.organization_name || '(sans nom)'}</span>
+                <span className="truncate">
+                  {/* 🆕 SESSION 50b — Pastille "Site prioritaire" */}
+                  {r.is_user_priority === true && (
+                    <span className="text-amber-500 mr-0.5" title="L'exposant a marqué ce site comme prioritaire">⭐</span>
+                  )}
+                  {r.organization_name || '(sans nom)'}
+                </span>
                 <span className="text-[9px] text-slate-400 shrink-0">{r.stand_code || '—'}</span>
               </ExposantLink>
             ))}
