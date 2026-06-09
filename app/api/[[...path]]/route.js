@@ -3911,15 +3911,20 @@ export async function POST(request, { params }) {
       const originalPromoteStand = promoteReg.stand_code;
       const now = new Date();
       // 🆕 SESSION 48aj — Échange = SWAP RÉEL (pas de suppression)
-      //   • L'ex-pré-réservé bascule en LISTE D'ATTENTE (status a_relancer, stand libéré)
+      //   • L'ex-pré-réservé bascule en LISTE D'ATTENTE (status liste_attente, stand libéré)
       //     + flag ex_pre_reserved + swap_demoted_at (pour le tri FIFO : il passe en bas)
+      //     + is_waitlist=true (visibilité côté exposant my-sites)
       //   • Le waitlister choisi prend le stand libéré + status a_confirmer
       //   • Le waitlister conserve sa created_at d'origine (gardera sa position FIFO)
+      // 🆕 SESSION 52e — FIX : status = 'liste_attente' (et plus 'a_relancer') + is_waitlist=true
+      //   pour que le demote soit correctement visible comme en liste d'attente côté exposant
+      //   (sinon il croit que sa candidature a été refusée).
       await db.collection('registrations').updateOne(
         { id: refuseId },
         { $set: {
-            status: 'a_relancer',
+            status: 'liste_attente',
             stand_code: null,
+            is_waitlist: true,
             ex_pre_reserved: true,
             ex_pre_reserved_at: now,
             swap_demoted_at: now, // ← utilisé pour le tri FIFO descendant
@@ -3944,6 +3949,7 @@ export async function POST(request, { params }) {
             status: 'a_confirmer',
             stand_code: targetStandCode,
             swap_promoted_at: now,
+            is_waitlist: false, // 🆕 SESSION 52e — clear le flag waitlist : il a maintenant un stand
             ex_pre_reserved: false, // 🆕 SESSION 48ak — clear éventuel ancien flag
             ex_pre_reserved_at: null,
             swap_demoted_at: null,
@@ -4729,9 +4735,10 @@ export async function POST(request, { params }) {
       const org = await db.collection('organizations').findOne({ id: reg.organization_id });
 
       // 1) Met à jour la registration : status=liste_attente + venue_id défini, stand_code vide
+      // 🆕 SESSION 52e — set aussi is_waitlist=true pour cohérence avec my-sites (qui utilise ce flag)
       await db.collection('registrations').updateOne(
         { id: registration_id },
-        { $set: { status: 'liste_attente', venue_id, stand_code: null, updated_at: new Date() } }
+        { $set: { status: 'liste_attente', venue_id, stand_code: null, is_waitlist: true, updated_at: new Date() } }
       );
 
       // 2) Crée (ou met à jour) la validation_request en mode waitlist

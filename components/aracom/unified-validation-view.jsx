@@ -76,10 +76,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           // 🆕 SESSION 48ak/al — Propagation des flags swap depuis la registration
           //   On override le status SEULEMENT si valReq est dans la zone "en attente" (pas validé/refusé)
           //   Sinon valReq.status (validated/confirme/refused) a TOUJOURS priorité.
-          const valStatusInFlight = ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer', 'waitlist'].includes(valReq.status);
+          // 🆕 SESSION 52e FIX — ex_pre_reserved demotés → 'liste_attente' (cohérent avec is_waitlist=true en DB)
+          //   tri en fin de liste assuré par swap_demoted_at (cf. ligne ~182)
+          const valStatusInFlight = ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer', 'waitlist', 'liste_attente'].includes(valReq.status);
           let effectiveStatus = valReq.status;
           if (valStatusInFlight) {
-            if (reg.ex_pre_reserved) effectiveStatus = 'a_relancer';
+            if (reg.ex_pre_reserved) effectiveStatus = 'liste_attente';
             else if (reg.swap_promoted_at) effectiveStatus = 'a_confirmer';
           }
           // Si reg est explicitement validé/refusé/verrouille → prime sur tout
