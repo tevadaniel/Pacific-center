@@ -12,14 +12,15 @@
  * Stack : Next.js + MongoDB (les references "Supabase" du brief sont mappées sur nos APIs)
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   ChevronDown, ChevronUp, Pencil, Plus, X, Check, CheckCircle2, Loader2,
   User, Phone, FileText, MapPin, History, ListChecks, Wallet,
   FileBox, Sparkles, Activity, StickyNote, AlertTriangle, Trash2,
   Mail, ExternalLink, Building2, Users as UsersIcon, CalendarClock,
-  FileCheck2,
+  FileCheck2, Upload, Download, RefreshCw, Copy, Link as LinkIcon,
+  IdCard, Shield, FileSpreadsheet, Receipt, FileBadge, Lock,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
@@ -155,6 +156,179 @@ function EditableField({ label, value, type = 'text', options, placeholder, onSa
 }
 
 // =======================================================
+// 🆕 SESSION 50 — Sous-composants pour la nouvelle structure
+// =======================================================
+
+/**
+ * Card pour un document REQUIS uploadable (Convention / Assurance / ID / Justif)
+ */
+function RequiredDocCard({ icon: Icon, title, required = true, doc, regId, docType, onReload, extraAction }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const hasFile = !!doc;
+
+  const upload = async (file) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error('Fichier trop volumineux (max 10 Mo)'); return; }
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const base64 = String(dataUrl).split(',')[1];
+      await api('/api/registration-documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: regId,
+          document_type: docType,
+          category: docType,
+          file_name: file.name,
+          mime_type: file.type || 'application/octet-stream',
+          file_data: base64,
+          status: 'recu',
+        }),
+      });
+      toast.success(`✅ ${title} uploadé`);
+      onReload?.();
+    } catch (e) { toast.error(e?.message || 'Erreur upload'); }
+    finally { setUploading(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-white p-2.5 flex items-center gap-2.5">
+      <div className="w-8 h-8 rounded-md bg-amber-100 flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4 text-amber-700" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-xs text-slate-900">{title}</span>
+          <Badge className={`text-[9px] h-4 px-1.5 ${required ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+            {required ? 'Obligatoire' : 'Optionnel'}
+          </Badge>
+          {hasFile && <Badge className="text-[9px] h-4 px-1.5 bg-emerald-100 text-emerald-800 border-emerald-300">✓ Reçu</Badge>}
+        </div>
+        {hasFile && <div className="text-[10px] text-slate-500 truncate italic mt-0.5">📎 {doc.file_name}</div>}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading} className="h-7 px-2 text-[10px] gap-1">
+          {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+          {hasFile ? 'Remplacer' : 'Uploader'}
+        </Button>
+        {extraAction}
+      </div>
+      <input
+        type="file"
+        ref={inputRef}
+        className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png"
+        onChange={(e) => upload(e.target.files?.[0])}
+      />
+    </div>
+  );
+}
+
+/**
+ * Card simplifiée pour un document AUTO-GÉNÉRÉ (Reçu / Attestation / Badge / Guide)
+ */
+function AutoDocCard({ icon: Icon, iconBg, title, doc, regId, docType, onReload, disabled = false, disabledReason }) {
+  const [busy, setBusy] = useState(false);
+  const hasFile = !!doc;
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      await api('/api/documents/generate', {
+        method: 'POST',
+        body: JSON.stringify({ registration_id: regId, doc_type: docType }),
+      });
+      toast.success(`✅ ${title} généré`);
+      onReload?.();
+    } catch (e) { toast.error(e?.message || 'Erreur génération'); }
+    finally { setBusy(false); }
+  };
+
+  const download = () => doc?.id && window.open(`/api/documents/${doc.id}/download`, '_blank');
+  const sendMail = async () => {
+    if (!doc?.id) return;
+    try {
+      await api('/api/documents/send', {
+        method: 'POST',
+        body: JSON.stringify({ registration_id: regId, doc_id: doc.id, doc_type: docType }),
+      });
+      toast.success('📧 Envoyé par mail');
+    } catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-2.5 flex items-center gap-2.5">
+      <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${iconBg}`}>
+        <Icon className="w-4 h-4 text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-xs text-slate-900">{title}</span>
+          <Badge className="text-[9px] h-4 px-1.5 bg-blue-50 text-blue-700 border-blue-200">Auto</Badge>
+          <Badge className={`text-[9px] h-4 px-1.5 ${
+            hasFile ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+            : disabled ? 'bg-slate-100 text-slate-500 border-slate-300'
+            : 'bg-amber-100 text-amber-800 border-amber-300'
+          }`}>
+            {hasFile ? '✓ Généré' : disabled ? 'En attente' : 'À générer'}
+          </Badge>
+        </div>
+        {disabled && disabledReason && (
+          <div className="text-[10px] text-slate-500 italic mt-0.5">{disabledReason}</div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {!hasFile && (
+          <Button
+            size="sm"
+            onClick={generate}
+            disabled={busy || disabled}
+            className="h-7 px-2 text-[10px] bg-slate-900 hover:bg-slate-800 text-white gap-1 disabled:opacity-40"
+            title={disabled ? disabledReason : ''}
+          >
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Générer
+          </Button>
+        )}
+        {hasFile && (
+          <>
+            <Button size="sm" variant="outline" onClick={generate} disabled={busy} className="h-7 px-2 text-[10px] gap-1">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Régén.
+            </Button>
+            <Button size="sm" variant="outline" onClick={download} className="h-7 px-2 text-[10px] gap-1">
+              <Download className="w-3 h-3" />
+            </Button>
+            <Button size="sm" variant="outline" onClick={sendMail} className="h-7 px-2 text-[10px] gap-1">
+              <Mail className="w-3 h-3" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Petite ligne "condition" avec icône ✓/✗/⏳
+ */
+function ConditionRow({ ok, partial = false, label }) {
+  const icon = ok ? '✓' : partial ? '⏳' : '✗';
+  const cls = ok ? 'text-emerald-600' : partial ? 'text-amber-600' : 'text-red-500';
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`font-bold ${cls} w-3 text-center`}>{icon}</span>
+      <span className={`${ok ? 'text-slate-700' : 'text-slate-500'}`}>{label}</span>
+    </div>
+  );
+}
+
+
+// =======================================================
 // 🚀 MAIN COMPONENT
 // =======================================================
 
@@ -167,6 +341,10 @@ export default function FicheExposantV2({ id, onClose }) {
   const [showDelete2Step, setShowDelete2Step] = useState(false);
   const [showMailDialog, setShowMailDialog] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // 🆕 SESSION 50 — Multi-sites + magic-link
+  const [sitesList, setSitesList] = useState([]);
+  const [magicLink, setMagicLink] = useState(null);
+  const [magicLinkBusy, setMagicLinkBusy] = useState(false);
   const { open: openExposantPanel } = useExposantPanel();
 
   const load = async () => {
@@ -179,6 +357,16 @@ export default function FicheExposantV2({ id, onClose }) {
       ]);
       setData(d);
       setAllVenues(Array.isArray(v) ? v : []);
+      // 🆕 Multi-sites + magic-link en parallèle (silent fail)
+      const orgId = d?.organization?.id;
+      if (orgId) {
+        api(`/api/exposant/my-sites?organization_id=${encodeURIComponent(orgId)}`)
+          .then((s) => setSitesList(Array.isArray(s) ? s : []))
+          .catch(() => setSitesList([]));
+      }
+      api(`/api/registrations/${id}/access-link`)
+        .then((r) => setMagicLink(r || null))
+        .catch(() => setMagicLink(null));
     } catch (e) {
       toast.error(e.message || 'Erreur de chargement');
     } finally {
@@ -325,30 +513,140 @@ export default function FicheExposantV2({ id, onClose }) {
     } catch (e) { toast.error(e.message); }
   };
 
+  // 🆕 SESSION 50 — Magic link handlers (regenerate / send / copy / open)
+  const copyMagicLink = async () => {
+    try {
+      const url = magicLink?.url || magicLink?.link;
+      if (!url) throw new Error('Lien indisponible');
+      await navigator.clipboard.writeText(url);
+      toast.success('📋 Lien copié');
+    } catch (e) { toast.error(e.message); }
+  };
+  const openMagicLink = () => {
+    const url = magicLink?.url || magicLink?.link;
+    if (!url) { toast.error('Lien indisponible'); return; }
+    window.open(url, '_blank');
+  };
+  const sendMagicLinkByMail = async () => {
+    setMagicLinkBusy(true);
+    try {
+      await api(`/api/registrations/${reg.id}/send-access-link`, { method: 'POST' });
+      toast.success('📧 Lien envoyé à l\'exposant');
+    } catch (e) { toast.error(e.message); }
+    finally { setMagicLinkBusy(false); }
+  };
+  const regenerateMagicLink = async () => {
+    setMagicLinkBusy(true);
+    try {
+      await api(`/api/registrations/${reg.id}/regenerate-token`, { method: 'POST' });
+      // Refetch the link
+      const fresh = await api(`/api/registrations/${reg.id}/access-link`).catch(() => null);
+      setMagicLink(fresh);
+      toast.success('🔄 Nouveau lien généré');
+    } catch (e) { toast.error(e.message); }
+    finally { setMagicLinkBusy(false); }
+  };
+
+  // 🆕 SESSION 50 — Statut visuel d'un site (vert/orange/gris) selon règle métier
+  // vert (validé) = stand assigné + date(s) + ≥1 anim/jour + caution remise
+  // orange (pré-réservé) = stand assigné + date(s) + ≥1 anim/jour mais caution manquante
+  // gris (liste d'attente) = conditions incomplètes
+  const computeSiteCardStatus = (site, siteSlots) => {
+    const hasStand = !!site.stand_code;
+    const days = Array.isArray(site.attending_days) ? site.attending_days : [];
+    const hasDates = days.length > 0;
+    const animsByDay = days.map((d) => ({ day: d, slots: (siteSlots || []).filter((s) => s.date === d) }));
+    const minOneAnimPerDay = hasDates && animsByDay.every((g) => g.slots.length >= 1);
+    const cautionOk = !!(dep?.amount_xpf || reg.caution_received_date);
+    if (hasStand && hasDates && minOneAnimPerDay && cautionOk) return 'valide';
+    if (hasStand && hasDates && minOneAnimPerDay) return 'pre_reserve';
+    return 'liste_attente';
+  };
+
+  // 🆕 SESSION 50 — Liste agrégée des sites (multi-sites OU site courant)
+  const aggregatedSites = (sitesList && sitesList.length > 0)
+    ? sitesList
+    : [{
+        id: reg.id,
+        venue: venue,
+        venue_id: reg.venue_id,
+        stand_code: reg.stand_code,
+        attending_days: reg.attending_days,
+        status: reg.status,
+        is_locked: reg.is_locked,
+      }];
+
+  // 🆕 SESSION 50 — Documents catégorisés
+  const findDoc = (type) => (docs || []).find((d) => d.document_type === type || d.category === type);
+  const conventionDoc = findDoc('convention');
+  const assuranceDoc = findDoc('assurance');
+  const identiteDoc = findDoc('identite');
+  const immatDoc = findDoc('immatriculation');
+  const recuCautionDoc = findDoc('recu_caution');
+  const attestRemboursDoc = findDoc('attestation_remboursement');
+  const badgeDoc = findDoc('badge_exposant');
+  const guideDoc = findDoc('guide_participant');
+
+  // 🆕 SESSION 50 — Liste des docs manquants (Convention/Assurance/Identité = obligatoires, Immat = optionnel)
+  const missingDocs = [];
+  if (!conventionDoc && !isConventionOk) missingDocs.push({ key: 'convention', icon: FileCheck2, title: 'Convention signée', required: true, docType: 'convention', doc: conventionDoc });
+  if (!assuranceDoc && !isAssuranceOk) missingDocs.push({ key: 'assurance', icon: Shield, title: 'Attestation d\'assurance', required: true, docType: 'assurance', doc: assuranceDoc });
+  if (!identiteDoc && !reg.identity_received) missingDocs.push({ key: 'identite', icon: IdCard, title: 'Pièce d\'identité du référent', required: true, docType: 'identite', doc: identiteDoc });
+  if (!immatDoc && !org.tahiti_number && !org.siret && !org.siren) missingDocs.push({ key: 'immat', icon: FileSpreadsheet, title: 'Justificatif d\'immatriculation', required: false, docType: 'immatriculation', doc: immatDoc });
+
+  // 🆕 SESSION 50 — Statut "global" du dossier pour le badge header (locked = workflow)
+  const stsLabel = reg.status === 'confirme' ? 'Confirmé'
+    : reg.status === 'annule' ? 'Annulé'
+    : reg.status === 'liste_attente' ? 'Liste d\'attente'
+    : 'À confirmer';
+  const stsClass = reg.status === 'confirme' ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+    : reg.status === 'annule' ? 'bg-red-100 text-red-800 border-red-300'
+    : reg.status === 'liste_attente' ? 'bg-violet-100 text-violet-800 border-violet-300'
+    : 'bg-amber-100 text-amber-800 border-amber-300';
+
+  // Format date for "Dernier accès" / "Validité token"
+  const fmtLastAccess = (d) => d ? fmtDateTime(d) : 'Jamais';
+
   return (
     <div className="space-y-3 max-w-3xl mx-auto pb-8">
-      {/* ═══════════════════ HEADER ═══════════════════ */}
+      {/* ═══════════════════ 1. HEADER (toujours visible) ═══════════════════ */}
       <div className="rounded-xl border border-slate-200 bg-white p-3.5">
         <div className="flex items-start gap-3">
           <div className={`w-12 h-12 rounded-full ${avatarBg} text-white flex items-center justify-center font-bold text-lg shrink-0`}>
             {getInitials(fullName)}
           </div>
           <div className="flex-1 min-w-0">
+            {/* Ligne 1 — Nom représentant + Nom structure */}
             <div className="font-bold text-base text-slate-900 truncate">{fullName}</div>
             <div className="text-xs text-slate-500 truncate">
-              {orgDisplay} {reg.stand_code ? `· Stand ${reg.stand_code}` : ''} {venue?.name ? `· ${venue.name}` : ''}
-              {org.priority_level && (
-                <Badge className={`ml-2 ${
-                  org.priority_level === 'A' ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                  : org.priority_level === 'B' ? 'bg-amber-100 text-amber-800 border-amber-300'
-                  : 'bg-blue-100 text-blue-800 border-blue-300'} text-[10px]`}>Priorité {org.priority_level}</Badge>
-              )}
+              <span className="font-medium">{orgDisplay}</span>
+              {reg.stand_code && <span> · 🎪 <span className="font-mono font-semibold text-slate-700">{reg.stand_code}</span></span>}
+              {venue?.name && <span> · 📍 {venue.name}</span>}
             </div>
 
-            {/* 🗓️ Métadonnées temporelles : création + dernière MAJ */}
+            {/* Ligne 2 — Badges statut + secteur/discipline + priorité */}
+            <div className="flex flex-wrap gap-1 mt-2">
+              <Badge className={`text-[10px] ${stsClass}`}>
+                {reg.status === 'confirme' ? '✓' : reg.status === 'annule' ? '⛔' : reg.status === 'liste_attente' ? '⏳' : '⏱'} {stsLabel}
+              </Badge>
+              {org.discipline && (
+                <Badge variant="outline" className="text-[10px] border-slate-300 text-slate-600">
+                  🎨 {org.discipline}
+                </Badge>
+              )}
+              {org.priority_level && (
+                <Badge className={`text-[10px] ${
+                  org.priority_level === 'A' ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : org.priority_level === 'B' ? 'bg-amber-100 text-amber-800 border-amber-300'
+                  : 'bg-blue-100 text-blue-800 border-blue-300'}`}>Priorité {org.priority_level}</Badge>
+              )}
+              {isEmailMissing && <Badge className="bg-red-100 text-red-800 border-red-300 text-[10px]">📧 Email manquant</Badge>}
+            </div>
+
+            {/* Ligne 3 — Métadonnées temporelles */}
             {(orgCreatedAt || regCreatedAt) && (
               <div
-                className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] text-slate-500"
+                className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] text-slate-500"
                 title={[
                   orgCreatedAtFull && `Profil organisation créé : ${orgCreatedAtFull}`,
                   regCreatedAtFull && `Inscription créée : ${regCreatedAtFull}`,
@@ -356,359 +654,577 @@ export default function FicheExposantV2({ id, onClose }) {
                 ].filter(Boolean).join('\n')}
               >
                 <CalendarClock className="w-3 h-3 text-slate-400" />
-                {orgCreatedAt && (
-                  <span>
-                    Profil créé le <span className="font-semibold text-slate-700">{orgCreatedAt}</span>
-                  </span>
-                )}
+                {orgCreatedAt && <span>Profil créé le <span className="font-semibold text-slate-700">{orgCreatedAt}</span></span>}
                 {regCreatedAt && regCreatedAt !== orgCreatedAt && (
                   <span>· Inscription le <span className="font-semibold text-slate-700">{regCreatedAt}</span></span>
                 )}
-                {org.source_origin && (
-                  <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-slate-200 text-slate-500 font-normal">
-                    {org.source_origin === 'import_excel_2026' ? 'Import 2026'
-                      : org.source_origin === 'public_inscription' ? 'Inscription publique'
-                      : org.source_origin === 'admin_manual' ? 'Création admin'
-                      : org.source_origin}
-                  </Badge>
-                )}
               </div>
             )}
-
-            {/* Status badges */}
-            <div className="flex flex-wrap gap-1 mt-2">
-              <Badge className={`text-[10px] ${
-                reg.status === 'confirme' ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                : reg.status === 'annule' ? 'bg-red-100 text-red-800 border-red-300'
-                : reg.status === 'liste_attente' ? 'bg-violet-100 text-violet-800 border-violet-300'
-                : 'bg-amber-100 text-amber-800 border-amber-300'
-              }`}>
-                {reg.status === 'confirme' ? '✓ Confirmé' : reg.status === 'annule' ? '⛔ Annulé' : reg.status === 'liste_attente' ? '⏳ Liste d\'attente' : '⏱ À confirmer'}
-              </Badge>
-              {isEmailMissing && <Badge className="bg-red-100 text-red-800 border-red-300 text-[10px]">📧 Email manquant</Badge>}
-              <Badge className={`text-[10px] ${isCautionOk ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-slate-100 text-slate-600 border-slate-300'}`}>
-                💰 Caution {isCautionOk ? '✓' : '—'}
-              </Badge>
-              <Badge className={`text-[10px] ${isConventionOk ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                📝 Convention {isConventionOk ? '✓' : 'à signer'}
-              </Badge>
-              <Badge className={`text-[10px] ${isAssuranceOk ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                🛡 Assurance {isAssuranceOk ? '✓' : 'manquante'}
-              </Badge>
-            </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 shrink-0 p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Contextual alert */}
-        {dossierPct < 80 && (
-          <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>Dossier incomplet — {!isAssuranceOk && 'Attestation d\'assurance manquante · '}{!isConventionOk && 'Convention non signée · '}{dossierPct}%</span>
+        {/* 4 métriques EN LIGNE */}
+        <div className="grid grid-cols-4 gap-2 mt-3">
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider">Dossier</div>
+            <div className="font-bold text-slate-900 text-sm">{dossierPct}%</div>
           </div>
-        )}
-        {dossierPct >= 80 && (
-          <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800 flex items-start gap-2">
-            <Check className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>Dossier complet à {dossierPct}% — prêt pour le Forum</span>
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider">Caution</div>
+            <div className="font-bold text-slate-900 text-sm">{dep?.amount_xpf ? `${(dep.amount_xpf / 1000).toFixed(0)}K` : '—'}</div>
           </div>
-        )}
-
-        {/* 4 metrics 2x2 */}
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-[10px] text-slate-500 uppercase">Dossier</div>
-            <div className="font-bold text-slate-900 text-base">{dossierPct}%</div>
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider">Animations</div>
+            <div className="font-bold text-slate-900 text-sm">{slots.length}</div>
           </div>
-          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-[10px] text-slate-500 uppercase">Statut</div>
-            <div className="font-bold text-slate-900 text-sm capitalize">{reg.status?.replace('_', ' ') || '—'}</div>
-          </div>
-          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-[10px] text-slate-500 uppercase">Caution</div>
-            <div className="font-bold text-slate-900 text-sm">{dep?.amount_xpf ? `${dep.amount_xpf.toLocaleString('fr')} XPF` : '—'}</div>
-          </div>
-          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-[10px] text-slate-500 uppercase">Animations</div>
-            <div className="font-bold text-slate-900 text-base">{slots.length}</div>
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider">Jour(s)</div>
+            <div className="font-bold text-slate-900 text-sm">
+              {Array.isArray(reg.attending_days) ? reg.attending_days.length : 0}/2
+            </div>
           </div>
         </div>
 
-        {/* Quick action strip */}
+        {/* 3 boutons d'action */}
         <div className="flex flex-wrap gap-1.5 mt-3">
-          <Button size="sm" onClick={confirmInscription} disabled={confirming || reg.status === 'confirme'} className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1">
+          <Button
+            size="sm"
+            onClick={confirmInscription}
+            disabled={confirming || reg.status === 'confirme'}
+            className="flex-1 min-w-[110px] h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+          >
             {confirming ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             Confirmer
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setShowMailDialog(true)} disabled={!org.main_email} className="h-7 text-[11px] gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowMailDialog(true)}
+            disabled={!org.main_email}
+            className="flex-1 min-w-[110px] h-8 text-xs gap-1"
+          >
             <Mail className="w-3 h-3" /> Envoyer mail
           </Button>
-          <AiInsightTrigger
-            scope="exposant"
-            registrationId={reg.id}
-            organizationId={org.id}
-            label="✨ Synthèse IA"
-            buttonClassName="h-7 text-[11px] px-3 rounded-md border border-violet-300 bg-violet-50 text-violet-800 hover:bg-violet-100"
-          />
-          <Button size="sm" variant="outline" onClick={copyAccessLink} className="h-7 text-[11px] gap-1">
-            <ExternalLink className="w-3 h-3" /> Lien accès
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={copyAccessLink}
+            className="flex-1 min-w-[110px] h-8 text-xs gap-1"
+          >
+            <LinkIcon className="w-3 h-3" /> Lien accès
           </Button>
         </div>
       </div>
 
-      {/* ═══════════════════ TOUT-EN-UN — SCROLL UNIQUE PAR SITE ═══════════════════ */}
-      <div className="space-y-3 mt-3">
+      {/* ═══════════════════ 2. BLOC DOSSIER INCOMPLET (orange warning, si manquant) ═══════════════════ */}
+      {missingDocs.length > 0 && (
+        <div className="rounded-xl border-2 border-amber-400 bg-amber-50/40 p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4 text-amber-700" />
+            <span className="font-bold text-xs uppercase tracking-wider text-amber-900">
+              Dossier incomplet — {missingDocs.filter(d => d.required).length} document(s) obligatoire(s)
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {missingDocs.map((m) => (
+              <RequiredDocCard
+                key={m.key}
+                icon={m.icon}
+                title={m.title}
+                required={m.required}
+                doc={m.doc}
+                regId={reg.id}
+                docType={m.docType}
+                onReload={load}
+                extraAction={m.key === 'convention' ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        await api(`/api/registrations/${reg.id}/send-convention`, { method: 'POST' });
+                        toast.success('📧 Convention renvoyée');
+                      } catch (e) {
+                        // Fallback: simple mail action
+                        setShowMailDialog(true);
+                      }
+                    }}
+                    className="h-7 px-2 text-[10px] gap-1"
+                  >
+                    <Mail className="w-3 h-3" /> Renvoyer
+                  </Button>
+                ) : null}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-      {/* ═══════════════════ SECTION 1 : IDENTITÉ ═══════════════════ */}
-      <CollapsibleSection icon={User} title="Identité" defaultOpen>
-        <EditableField label="Nom de la structure" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
-        <EditableField label="Nom du représentant" value={org.contact_name} placeholder="Prénom Nom" onSave={(v) => saveOrg({ contact_name: v })} />
-        <EditableField label="Fonction" value={org.position} placeholder="ex: Président, Directeur, Responsable…" onSave={(v) => saveOrg({ position: v })} />
-        <AdminDisciplineField value={org.discipline} onSave={(v) => saveOrg({ discipline: v })} />
-        <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
+      {/* ═══════════════════ 3. ACCORDÉON IDENTITÉ & CONTACT (closed) ═══════════════════ */}
+      <CollapsibleSection icon={User} title="Identité & Contact" defaultOpen={false}>
+        {/* Sous-section Structure */}
+        <div className="mb-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+            <Building2 className="w-3 h-3" /> Structure
+          </div>
+          <EditableField label="Nom de la structure" value={org.name} placeholder="Nom de la société ou association" onSave={(v) => saveOrg({ name: v })} />
+          <EditableField
+            label="Forme juridique"
+            type="select"
+            options={['Association', 'Entreprise', 'Société', 'SARL', 'SAS', 'EURL', 'EI (Entreprise individuelle)', 'Patente', 'GIE', 'Coopérative', 'Profession libérale', 'Autre']}
+            value={org.forme_juridique}
+            onSave={(v) => saveOrg({ forme_juridique: v })}
+          />
+          <AdminDisciplineField value={org.discipline} onSave={(v) => saveOrg({ discipline: v })} />
+          <EditableField label="Description stand" type="textarea" maxLength={150} value={org.description} placeholder="150 caractères max" onSave={(v) => saveOrg({ description: v })} />
+        </div>
+
+        {/* Sous-section Personnes */}
+        <div className="mb-2 pt-2 border-t border-slate-100">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+            <UsersIcon className="w-3 h-3" /> Personnes
+          </div>
+          <EditableField label="Président(e)" value={org.president_name} placeholder="Nom complet du président" onSave={(v) => saveOrg({ president_name: v })} />
+          <EditableField label="Référent / Représentant" value={org.contact_name} placeholder="Prénom Nom" onSave={(v) => saveOrg({ contact_name: v })} />
+          <EditableField label="Fonction" value={org.position} placeholder="ex: Président, Directeur, Responsable…" onSave={(v) => saveOrg({ position: v })} />
+        </div>
+
+        {/* Sous-section Contact */}
+        <div className="mb-2 pt-2 border-t border-slate-100">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+            <Phone className="w-3 h-3" /> Contact
+          </div>
+          <EditableField label="Email" type="email" value={org.main_email}
+            validate={(v) => v && !/.+@.+\..+/.test(v) ? 'Email invalide' : null}
+            onSave={(v) => saveOrg({ main_email: v })} />
+          <EditableField label="Téléphone" type="tel" value={org.main_phone} placeholder="+689 ..." onSave={(v) => saveOrg({ main_phone: v })} />
+          <EditableField label="Site web" type="url" value={org.website} placeholder="https://..." onSave={(v) => saveOrg({ website: v })} />
+          <EditableField label="Facebook" type="url" value={org.facebook} placeholder="https://facebook.com/..." onSave={(v) => saveOrg({ facebook: v })} />
+        </div>
+
+        {/* Sous-section Immatriculation */}
+        <div className="pt-2 border-t border-slate-100">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+            <FileText className="w-3 h-3" /> Immatriculation
+          </div>
+          <EditableField label="N° Tahiti" value={org.tahiti_number} placeholder="N° Tahiti (obligatoire en PF)" onSave={(v) => saveOrg({ tahiti_number: v })} />
+          <EditableField label="SIRET" value={org.siret} placeholder="14 chiffres" onSave={(v) => saveOrg({ siret: v })} />
+          <EditableField label="SIREN" value={org.siren} placeholder="9 chiffres" onSave={(v) => saveOrg({ siren: v })} />
+        </div>
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 2 : CONTACT ═══════════════════ */}
-      <CollapsibleSection icon={Phone} title="Contact" defaultOpen>
-        <EditableField
-          label="Email"
-          type="email"
-          value={org.main_email}
-          validate={(v) => v && !/.+@.+\..+/.test(v) ? 'Email invalide' : null}
-          onSave={(v) => saveOrg({ main_email: v })}
-        />
-        <EditableField label="Téléphone" type="tel" value={org.main_phone} placeholder="+689 ..." onSave={(v) => saveOrg({ main_phone: v })} />
-        <EditableField label="Site web" type="url" value={org.website} placeholder="https://..." onSave={(v) => saveOrg({ website: v })} />
-        <EditableField label="Facebook" type="url" value={org.facebook} placeholder="https://facebook.com/..." onSave={(v) => saveOrg({ facebook: v })} />
-      </CollapsibleSection>
+      {/* ═══════════════════ 4. ACCORDÉON STAND & SITE (closed) ═══════════════════ */}
+      <CollapsibleSection
+        icon={MapPin}
+        title="Stand & Site"
+        defaultOpen={false}
+        badge={<Badge variant="secondary" className="text-[10px] ml-1">{aggregatedSites.length} site{aggregatedSites.length > 1 ? 's' : ''}</Badge>}
+      >
+        {/* Carte par site avec bordure colorée selon statut */}
+        <div className="space-y-3">
+          {aggregatedSites.map((site) => {
+            const isCurrent = site.id === reg.id;
+            // Slots pour ce site (uniquement disponibles pour le site courant)
+            const siteSlots = isCurrent ? slots : [];
+            const visualStatus = computeSiteCardStatus(site, siteSlots);
+            const borderClass = visualStatus === 'valide' ? 'border-emerald-400 bg-emerald-50/30'
+              : visualStatus === 'pre_reserve' ? 'border-orange-400 bg-orange-50/30'
+              : 'border-slate-300 bg-slate-50/30';
+            const statusBadge = visualStatus === 'valide' ? { lbl: '✓ Validé', cls: 'bg-emerald-600 text-white border-emerald-700' }
+              : visualStatus === 'pre_reserve' ? { lbl: '🟧 Pré-réservé', cls: 'bg-orange-500 text-white border-orange-600' }
+              : { lbl: '⏳ Liste d\'attente', cls: 'bg-slate-400 text-white border-slate-500' };
+            const days = Array.isArray(site.attending_days) ? site.attending_days : [];
+            const hasStand = !!site.stand_code;
+            const hasDates = days.length > 0;
+            const animsByDay = days.map((d) => ({ day: d, slots: (siteSlots || []).filter((s) => s.date === d) }));
+            const minOneAnimPerDay = hasDates && animsByDay.every((g) => g.slots.length >= 1);
+            const cautionOk = !!(dep?.amount_xpf || reg.caution_received_date);
 
-      {/* ═══════════════════ SECTION 3 : IMMATRICULATION ═══════════════════ */}
-      <CollapsibleSection icon={FileText} title="Immatriculation">
-        <EditableField label="N° Tahiti" value={org.tahiti_number} placeholder="N° Tahiti (obligatoire en PF)" onSave={(v) => saveOrg({ tahiti_number: v })} />
-        <EditableField label="SIRET" value={org.siret} placeholder="14 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siret: v })} />
-        <EditableField label="SIREN" value={org.siren} placeholder="9 chiffres (laisser vide si non applicable)" onSave={(v) => saveOrg({ siren: v })} />
-        <EditableField
-          label="Forme juridique"
-          type="select"
-          options={[
-            'Association',
-            'Entreprise',
-            'Société',
-            'SARL',
-            'SAS',
-            'EURL',
-            'EI (Entreprise individuelle)',
-            'Patente',
-            'GIE',
-            'Coopérative',
-            'Profession libérale',
-            'Autre',
-          ]}
-          value={org.forme_juridique}
-          onSave={(v) => saveOrg({ forme_juridique: v })}
-        />
-      </CollapsibleSection>
-
-      {/* ═══════════════════ SECTION 4 : STAND & SITE ═══════════════════ */}
-      <CollapsibleSection icon={MapPin} title="Stand & Site" defaultOpen>
-        {/* 🆕 SESSION 43 — Gestion multi-sites depuis l'admin (réplique du portail exposant) */}
-        <AdminMultiSitesPanel
-          organizationId={org.id}
-          currentRegId={reg.id}
-          onReload={load}
-          onSwitchSite={(newRegId) => openExposantPanel(newRegId)}
-        />
-        <EditableField
-          label="Site principal"
-          type="select"
-          options={allVenues
-            .filter((v) => v.is_available_2026 !== false)
-            .map((v) => ({ value: v.id, label: `📍 ${v.name}${v.is_available_2026 === false ? ' (indisponible)' : ''}` }))
-          }
-          value={reg.venue_id || ''}
-          onSave={(newVenueId) => saveReg({ venue_id: newVenueId })}
-          format={(vid) => {
-            const v = allVenues.find((x) => x.id === vid);
-            return v ? `📍 ${v.name}` : (venue?.name || '—');
-          }}
-        />
-        {/* 🆕 SESSION 43-d — Sélecteur visuel de stands libres (réplique du portail exposant) */}
-        <AdminStandPicker
-          registrationId={reg.id}
-          venueId={reg.venue_id}
-          venueName={venue?.name}
-          currentStandCode={reg.stand_code}
-          isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme'}
-          onReload={load}
-        />
-        {/* 🆕 SESSION 43-g — Sites secondaires : multi-select connecté aux venues disponibles */}
-        <AdminSecondarySitesField
-          organizationId={org.id}
-          currentSites={Array.isArray(org.secondary_sites) ? org.secondary_sites : (org.secondary_sites ? [org.secondary_sites] : [])}
-          allVenues={allVenues}
-          primaryVenueId={reg.venue_id}
-          onSave={(arr) => saveOrg({ secondary_sites: arr })}
-        />
-        <EditableField
-          label="Jour(s) présence"
-          type="select"
-          options={[
-            { value: 'both', label: 'Ven. 14 + Sam. 15 août' },
-            { value: 'friday', label: 'Ven. 14 uniquement' },
-            { value: 'saturday', label: 'Sam. 15 uniquement' },
-          ]}
-          value={Array.isArray(reg.attending_days) ? (reg.attending_days.length === 2 ? 'both' : reg.attending_days[0] === '2026-08-14' ? 'friday' : 'saturday') : ''}
-          onSave={(v) => {
-            const days = v === 'both' ? ['2026-08-14', '2026-08-15']
-              : v === 'friday' ? ['2026-08-14']
-              : v === 'saturday' ? ['2026-08-15']
-              : [];
-            return saveReg({ attending_days: days });
-          }}
-          format={(v) => v === 'both' ? 'Ven. 14 + Sam. 15 août' : v === 'friday' ? 'Ven. 14' : v === 'saturday' ? 'Sam. 15' : '—'}
-        />
-      </CollapsibleSection>
-
-      {/* ═══════════════════ SECTION 5 : HISTORIQUE PRÉSENCE ═══════════════════ */}
-      <CollapsibleSection icon={History} title="Historique de présence">
-        <div className="grid grid-cols-4 gap-2 mb-2">
-          {[2023, 2024, 2025, 2026].map((year) => {
-            const histo = (org.participation_history || {})[year];
-            const status = year === 2026 ? 'en_cours' : (histo?.status || 'nc');
-            const colors = {
-              present: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-              absent: 'bg-red-100 text-red-800 border-red-300',
-              en_cours: 'bg-slate-100 text-slate-700 border-slate-300',
-              nc: 'bg-slate-50 text-slate-400 border-slate-200',
-            };
-            const labels = { present: 'Présent', absent: 'Absent', en_cours: 'En cours', nc: 'NC' };
             return (
-              <div key={year} className={`rounded-md border px-2 py-2 text-center ${colors[status]}`}>
-                <div className="text-[10px] font-bold">{year}</div>
-                <div className="text-[11px]">{labels[status]}</div>
+              <div key={site.id} className={`rounded-lg border-2 ${borderClass} p-3`}>
+                {/* Header de la carte site */}
+                <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-sm text-slate-900 truncate">📍 {site.venue?.name || '—'}</span>
+                      {site.stand_code && (
+                        <Badge variant="outline" className="text-[10px] font-mono font-bold border-slate-400">
+                          🎪 {site.stand_code}
+                        </Badge>
+                      )}
+                      {!isCurrent && (
+                        <button
+                          onClick={() => openExposantPanel(site.id)}
+                          className="text-[10px] text-blue-600 underline hover:text-blue-800"
+                        >
+                          (basculer)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {/* Bouton statut verrouillé */}
+                  <button
+                    disabled
+                    title="Statut géré par le workflow plateforme"
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold cursor-not-allowed opacity-90 ${statusBadge.cls}`}
+                  >
+                    <Lock className="w-2.5 h-2.5" /> {statusBadge.lbl}
+                  </button>
+                </div>
+
+                {/* 4 conditions avec icônes */}
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] mb-2">
+                  <ConditionRow ok={hasStand} label="Site & stand assigné" />
+                  <ConditionRow ok={hasDates} label="Date(s) renseignée(s)" />
+                  <ConditionRow ok={minOneAnimPerDay} label="Animation(s) planifiée(s)" partial={hasDates && !minOneAnimPerDay} />
+                  <ConditionRow ok={cautionOk} label="Caution remise" />
+                </div>
+
+                {/* Jours de présence */}
+                {hasDates && (
+                  <div className="text-[10px] text-slate-600 mb-2">
+                    <span className="font-semibold">Jours :</span> {days.map((d) => d === '2026-08-14' ? 'Ven. 14' : 'Sam. 15').join(' + ')}
+                  </div>
+                )}
+
+                {/* Boutons d'action (uniquement sur le site courant) */}
+                {isCurrent && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {!hasDates && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => saveReg({ attending_days: ['2026-08-14', '2026-08-15'] })}
+                        className="h-7 px-2 text-[10px] gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                      >
+                        <Plus className="w-3 h-3" /> Ajouter dates
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* Animations par jour (uniquement site courant) */}
+                {isCurrent && hasDates && (
+                  <div className="space-y-1.5 mt-2 pt-2 border-t border-slate-200">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Planning par jour</div>
+                    {animsByDay.map(({ day, slots: daySlots }) => {
+                      const dayLabel = day === '2026-08-14' ? 'Vendredi 14 août' : 'Samedi 15 août';
+                      return (
+                        <div key={day} className={`rounded-md border p-2 ${daySlots.length === 0 ? 'border-red-300 bg-red-50/50' : 'border-slate-200 bg-white'}`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-xs text-slate-800">📅 {dayLabel}</span>
+                            <Badge variant="outline" className="text-[9px]">{daySlots.length} anim.</Badge>
+                          </div>
+                          {daySlots.length === 0 ? (
+                            <div className="text-[10px] text-red-700 italic flex items-center gap-1 mt-1">
+                              <AlertTriangle className="w-3 h-3" /> Aucune animation — obligatoire pour ce jour de présence
+                            </div>
+                          ) : (
+                            <ul className="space-y-0.5">
+                              {daySlots.map((s) => (
+                                <li key={s.id} className="text-[10.5px] text-slate-700 flex items-center justify-between gap-1.5 py-0.5">
+                                  <span className="truncate">
+                                    <Badge className={`text-[9px] mr-1 ${s.location_type === 'zone_demo' ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-blue-100 text-blue-800 border-blue-300'}`}>
+                                      {s.location_type === 'zone_demo' ? 'Zone démo' : 'Sur stand'}
+                                    </Badge>
+                                    {s.start_time}–{s.end_time}
+                                    {s.title && <span className="italic text-slate-500"> · {s.title}</span>}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Panel animations admin (CRUD complet pour le site courant) */}
+                    <details className="mt-1">
+                      <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">⚙️ Gestion avancée des animations (CRUD)</summary>
+                      <div className="mt-2">
+                        <AdminAnimationsPanel
+                          registrationId={reg.id}
+                          venueId={reg.venue_id}
+                          venueName={venue?.name}
+                          attendingDays={days}
+                          slots={slots}
+                          isLocked={reg.is_locked || reg.candidature_locked}
+                          onReload={load}
+                        />
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {/* Stand picker / Swap (uniquement site courant) */}
+                {isCurrent && (
+                  <details className="mt-2 pt-2 border-t border-slate-200">
+                    <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">⚙️ Changer / Libérer le stand</summary>
+                    <div className="mt-2">
+                      <AdminStandPicker
+                        registrationId={reg.id}
+                        venueId={reg.venue_id}
+                        venueName={venue?.name}
+                        currentStandCode={reg.stand_code}
+                        isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme'}
+                        onReload={load}
+                      />
+                    </div>
+                  </details>
+                )}
               </div>
             );
           })}
         </div>
-        <EditableField label="Incident 2023" value={reg.incident_2023} type="textarea" onSave={(v) => saveReg({ incident_2023: v })} />
-        <EditableField label="Incident 2024" value={reg.incident_2024} type="textarea" onSave={(v) => saveReg({ incident_2024: v })} />
-        <EditableField label="Incident 2025" value={reg.incident_2025} type="textarea" onSave={(v) => saveReg({ incident_2025: v })} />
-      </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 11 : NOTES INTERNES (profil tab) ═══════════════════ */}
-      <CollapsibleSection icon={StickyNote} title="Notes internes ARACOM">
-        <EditableField label="Notes" type="textarea" value={reg.internal_notes} onSave={(v) => saveReg({ internal_notes: v })} />
-        <div className="text-[10px] italic text-slate-400 mt-1">🔒 Non visible par l&apos;exposant</div>
-      </CollapsibleSection>
-
-      {/* ═══════════════════ SECTION 6 : STATUT & DOSSIER ═══════════════════ */}
-      <CollapsibleSection icon={ListChecks} title="Statut & Dossier" defaultOpen>
-        <div className="text-xs text-slate-500 mb-1.5">Statut d&apos;inscription</div>
-        <div className="grid grid-cols-2 gap-2 mb-3">
-          {[
-            { key: 'a_confirmer', label: '⏱ À confirmer', cls: 'bg-amber-50 text-amber-900 border-amber-300', active: 'bg-amber-500 text-white border-amber-600' },
-            { key: 'confirme', label: '✓ Confirmé', cls: 'bg-emerald-50 text-emerald-900 border-emerald-300', active: 'bg-emerald-600 text-white border-emerald-700' },
-            { key: 'liste_attente', label: '⏳ Liste d\'attente', cls: 'bg-violet-50 text-violet-900 border-violet-300', active: 'bg-violet-600 text-white border-violet-700' },
-            { key: 'annule', label: '⛔ Annulé', cls: 'bg-red-50 text-red-900 border-red-300', active: 'bg-red-600 text-white border-red-700' },
-          ].map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setStatus(s.key)}
-              className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${reg.status === s.key ? s.active : s.cls + ' hover:bg-slate-50'}`}
-            >
-              {s.label}
-            </button>
-          ))}
+        {/* Multi-sites panel (ajout / suppression / priorité) */}
+        <div className="mt-3 pt-3 border-t border-slate-200">
+          <AdminMultiSitesPanel
+            organizationId={org.id}
+            currentRegId={reg.id}
+            onReload={load}
+            onSwitchSite={(newRegId) => openExposantPanel(newRegId)}
+          />
         </div>
-        <EditableField label="Convention" type="select" options={[{ value: 'non_signee', label: 'Non signée' }, { value: 'signee', label: 'Signée' }, { value: 'en_cours', label: 'En cours' }]} value={reg.convention_status} onSave={(v) => saveReg({ convention_status: v, is_convention_signed: v === 'signee' })} />
-        <EditableField label="Assurance" type="select" options={[{ value: 'manquante', label: 'Manquante' }, { value: 'recue', label: 'Reçue' }, { value: 'en_attente', label: 'En attente' }]} value={reg.assurance_status} onSave={(v) => saveReg({ assurance_status: v, is_insurance_uploaded: v === 'recue' })} />
-        <EditableField label="Dossier %" type="number" value={dossierPct} onSave={(v) => saveReg({ completion_percent: Number(v), dossier_pct: Number(v) })} />
-        <EditableField label="Mail envoyé" type="select" options={[{ value: 'non', label: 'Non' }, { value: 'oui', label: 'Oui' }, { value: 'attente_reponse', label: 'En attente réponse' }]} value={reg.mail_sent_status} onSave={(v) => saveReg({ mail_sent_status: v })} />
-        <EditableField label="Réponse reçue" type="select" options={[{ value: 'oui', label: 'Oui' }, { value: 'non', label: 'Non' }, { value: 'en_attente', label: 'En attente' }]} value={reg.reply_status} onSave={(v) => saveReg({ reply_status: v })} />
+
+        {/* Annulation (zone dangereuse) */}
+        <details className="mt-3 pt-3 border-t border-slate-200">
+          <summary className="text-[10px] text-red-600 cursor-pointer hover:text-red-800 font-semibold">⚠️ Annuler cette réservation (libère le stand)</summary>
+          <div className="mt-2">
+            <CancelReservationPanel reg={reg} org={org} venue={venue} slots={slots} onCancelled={load} />
+          </div>
+        </details>
       </CollapsibleSection>
 
-      {/* 🆕 SESSION 45 — ZONE DANGEREUSE : annulation totale avec cascade */}
-      <CancelReservationPanel reg={reg} org={org} venue={venue} slots={slots} onCancelled={load} />
+      {/* ═══════════════════ 5. ACCORDÉON CAUTION (closed) ═══════════════════ */}
+      <CollapsibleSection icon={Wallet} title="Caution" defaultOpen={false}>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Montant XPF</div>
+            <div className="font-bold text-sm text-slate-900">
+              {dep?.amount_xpf ? `${dep.amount_xpf.toLocaleString('fr')} XPF` : <span className="italic text-slate-400 font-normal">Non saisi</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Mode encaissement</div>
+            <div className="font-bold text-sm text-slate-900">
+              {reg.caution_mode || dep?.payment_method || <span className="italic text-slate-400 font-normal">Chèque</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Date encaissement</div>
+            <div className="font-bold text-sm text-slate-900">
+              {reg.caution_received_date ? fmtDate(reg.caution_received_date) : <span className="italic text-slate-400 font-normal">—</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Statut restitution</div>
+            <div className="font-bold text-sm text-slate-900 capitalize">
+              {reg.restitution_status?.replace(/_/g, ' ') || <span className="italic text-slate-400 font-normal">À traiter</span>}
+            </div>
+          </div>
+        </div>
 
-      {/* ═══════════════════ SECTION 7 : CAUTION ═══════════════════ */}
-      <CollapsibleSection icon={Wallet} title="Caution">
-        <EditableField label="Montant (XPF)" type="number" value={dep?.amount_xpf || reg.caution_amount_xpf} onSave={(v) => saveReg({ caution_amount_xpf: Number(v) })} />
-        <EditableField label="Mode encaissement" type="select" options={['Chèque']} value={reg.caution_mode || dep?.payment_method || 'Chèque'} onSave={(v) => saveReg({ caution_mode: v })} />
-        <EditableField label="Date encaissement" type="date" value={reg.caution_received_date} onSave={(v) => saveReg({ caution_received_date: v })} />
-        <EditableField label="RDV caution" type="datetime-local" value={reg.caution_appointment_at} onSave={(v) => saveReg({ caution_appointment_at: v })} />
-        <EditableField
-          label="Statut restitution"
-          type="select"
-          options={['a_restituer', 'restituee', 'retenue_partielle', 'retenue_totale', 'a_verifier']}
-          value={reg.restitution_status}
-          onSave={(v) => saveReg({ restitution_status: v })}
-        />
-        <EditableField label="Motif de retenue" type="textarea" value={reg.restitution_motif} onSave={(v) => saveReg({ restitution_motif: v })} />
-        <EditableField label="Date restit. prévue" type="date" value={reg.restitution_planned_date} onSave={(v) => saveReg({ restitution_planned_date: v })} />
-        <EditableField label="Date restit. effective" type="date" value={reg.restitution_actual_date} onSave={(v) => saveReg({ restitution_actual_date: v })} />
+        {/* Boutons d'action */}
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const v = prompt('Montant de la caution (XPF) :', String(dep?.amount_xpf || reg.caution_amount_xpf || 20000));
+              if (v && !isNaN(Number(v))) saveReg({ caution_amount_xpf: Number(v) });
+            }}
+            className="h-7 text-[10px] gap-1"
+          >
+            💰 Saisir montant
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const v = prompt('Date & heure RDV (YYYY-MM-DDTHH:MM) :', reg.caution_appointment_at || '');
+              if (v) saveReg({ caution_appointment_at: v });
+            }}
+            className="h-7 text-[10px] gap-1"
+          >
+            📅 Fixer RDV
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => {
+              try {
+                await api('/api/documents/generate', { method: 'POST', body: JSON.stringify({ registration_id: reg.id, doc_type: 'recu_caution' }) });
+                toast.success('✅ Reçu généré');
+                load();
+              } catch (e) { toast.error(e.message); }
+            }}
+            disabled={!dep?.amount_xpf && !reg.caution_received_date}
+            className="h-7 text-[10px] gap-1"
+          >
+            <Receipt className="w-3 h-3" /> Générer reçu
+          </Button>
+        </div>
+
+        {/* Champs détaillés (edition inline) */}
+        <details>
+          <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">⚙️ Édition détaillée (RDV, restitution, motif…)</summary>
+          <div className="mt-2 space-y-1">
+            <EditableField label="Montant (XPF)" type="number" value={dep?.amount_xpf || reg.caution_amount_xpf} onSave={(v) => saveReg({ caution_amount_xpf: Number(v) })} />
+            <EditableField label="Date encaissement" type="date" value={reg.caution_received_date} onSave={(v) => saveReg({ caution_received_date: v })} />
+            <EditableField label="RDV caution" type="datetime-local" value={reg.caution_appointment_at} onSave={(v) => saveReg({ caution_appointment_at: v })} />
+            <EditableField
+              label="Statut restitution"
+              type="select"
+              options={[{ value: 'a_restituer', label: 'À restituer' }, { value: 'restituee', label: 'Restituée' }, { value: 'retenue_partielle', label: 'Retenue partielle' }, { value: 'retenue_totale', label: 'Retenue totale' }, { value: 'a_verifier', label: 'À vérifier' }]}
+              value={reg.restitution_status}
+              onSave={(v) => saveReg({ restitution_status: v })}
+            />
+            <EditableField label="Motif retenue" type="textarea" value={reg.restitution_motif} onSave={(v) => saveReg({ restitution_motif: v })} />
+            <EditableField label="Date restit. prévue" type="date" value={reg.restitution_planned_date} onSave={(v) => saveReg({ restitution_planned_date: v })} />
+            <EditableField label="Date restit. effective" type="date" value={reg.restitution_actual_date} onSave={(v) => saveReg({ restitution_actual_date: v })} />
+          </div>
+        </details>
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 8 : DOCUMENTS ═══════════════════ */}
-      <CollapsibleSection icon={FileBox} title="Documents officiels">
-        <DocumentsTab
-          registration={reg}
-          organization={org}
-          deposit={dep}
-          documents={docs}
-          onReload={load}
-        />
+      {/* ═══════════════════ 6. ACCORDÉON DOCUMENTS AUTO-GÉNÉRÉS (closed) ═══════════════════ */}
+      <CollapsibleSection icon={FileBox} title="Documents auto-générés" defaultOpen={false}>
+        <div className="space-y-1.5">
+          <AutoDocCard
+            icon={Receipt}
+            iconBg="bg-amber-600"
+            title="Reçu de caution"
+            doc={recuCautionDoc}
+            regId={reg.id}
+            docType="recu_caution"
+            onReload={load}
+            disabled={!dep?.amount_xpf && !reg.caution_received_date}
+            disabledReason="Caution non encaissée"
+          />
+          <AutoDocCard
+            icon={RefreshCw}
+            iconBg="bg-violet-600"
+            title="Attestation de remboursement"
+            doc={attestRemboursDoc}
+            regId={reg.id}
+            docType="attestation_remboursement"
+            onReload={load}
+            disabled={reg.restitution_status !== 'restituee'}
+            disabledReason="Caution non restituée"
+          />
+          <AutoDocCard
+            icon={FileBadge}
+            iconBg="bg-emerald-600"
+            title="Badge exposant"
+            doc={badgeDoc}
+            regId={reg.id}
+            docType="badge_exposant"
+            onReload={load}
+          />
+          <AutoDocCard
+            icon={FileText}
+            iconBg="bg-orange-600"
+            title="Guide du participant"
+            doc={guideDoc}
+            regId={reg.id}
+            docType="guide_participant"
+            onReload={load}
+          />
+        </div>
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 9 : ANIMATIONS — CRUD ADMIN ═══════════════════ */}
-      <CollapsibleSection icon={Sparkles} title="Animations" badge={<Badge className="text-[10px] ml-1">{slots.length}</Badge>}>
-        <AdminAnimationsPanel
-          registrationId={reg.id}
-          venueId={reg.venue_id}
-          venueName={venue?.name}
-          attendingDays={Array.isArray(reg.attending_days) ? reg.attending_days : []}
-          slots={slots}
-          isLocked={reg.is_locked || reg.candidature_locked}
-          onReload={load}
-        />
+      {/* ═══════════════════ 7. ACCORDÉON PORTAIL & ACCÈS (closed) ═══════════════════ */}
+      <CollapsibleSection icon={ExternalLink} title="Portail & Accès" defaultOpen={false}>
+        {/* URL magic link en monospace */}
+        <div className="mb-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">URL d&apos;accès exposant</div>
+          <div className="font-mono text-[10.5px] text-slate-700 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 break-all">
+            {magicLink?.url || magicLink?.link || <span className="italic text-slate-400">Lien non disponible — Régénérez le token</span>}
+          </div>
+        </div>
+
+        {/* Boutons */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          <Button size="sm" variant="outline" onClick={copyMagicLink} disabled={!magicLink} className="h-7 text-[10px] gap-1">
+            <Copy className="w-3 h-3" /> Copier
+          </Button>
+          <Button size="sm" variant="outline" onClick={openMagicLink} disabled={!magicLink} className="h-7 text-[10px] gap-1">
+            <ExternalLink className="w-3 h-3" /> Ouvrir
+          </Button>
+          <Button size="sm" variant="outline" onClick={sendMagicLinkByMail} disabled={magicLinkBusy || !org.main_email} className="h-7 text-[10px] gap-1">
+            {magicLinkBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />} Envoyer par mail
+          </Button>
+          <Button size="sm" variant="outline" onClick={regenerateMagicLink} disabled={magicLinkBusy} className="h-7 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50">
+            {magicLinkBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Régénérer
+          </Button>
+        </div>
+
+        {/* Grille : Dernier accès / Validité token */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Dernier accès</div>
+            <div className="font-semibold text-xs text-slate-800">
+              {reg.last_portal_access_at ? fmtLastAccess(reg.last_portal_access_at) : <span className="italic text-slate-400 font-normal">Jamais</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Validité token</div>
+            <div className="font-semibold text-xs text-slate-800">
+              {magicLink?.expires_at ? fmtLastAccess(magicLink.expires_at)
+                : reg.portal_token ? <span className="text-emerald-700">Actif</span>
+                : <span className="italic text-slate-400 font-normal">—</span>}
+            </div>
+          </div>
+        </div>
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 10 : BILAN JOUR J ═══════════════════ */}
-      <CollapsibleSection icon={Activity} title="Bilan Jour J">
-        <EditableField label="Présence constatée" type="select" options={[{ value: 'present', label: 'Présent' }, { value: 'absent', label: 'Absent' }, { value: 'retard', label: 'Retard' }, { value: 'depart_anticipe', label: 'Départ anticipé' }]} value={reg.bilan_presence} onSave={(v) => saveReg({ bilan_presence: v })} />
-        <EditableField label="Arrivée réelle" type="time" value={reg.bilan_arrival_real} onSave={(v) => saveReg({ bilan_arrival_real: v })} />
-        <EditableField label="Départ réel" type="time" value={reg.bilan_departure_real} onSave={(v) => saveReg({ bilan_departure_real: v })} />
-        <EditableField label="Animation réalisée" type="select" options={[{ value: 'oui_conforme', label: 'Oui — conforme' }, { value: 'oui_partielle', label: 'Oui — partielle' }, { value: 'non', label: 'Non' }]} value={reg.bilan_animation_status} onSave={(v) => saveReg({ bilan_animation_status: v })} />
-        <EditableField label="État stand au départ" type="select" options={[{ value: 'bon_etat', label: 'Bon état' }, { value: 'degrade', label: 'Dégradé' }, { value: 'incident', label: 'Incident matériel' }]} value={reg.bilan_stand_status} onSave={(v) => saveReg({ bilan_stand_status: v })} />
-        <EditableField label="Anomalie / Incident" type="textarea" value={reg.bilan_anomaly} onSave={(v) => saveReg({ bilan_anomaly: v })} />
-        <EditableField label="Commentaire agent" type="textarea" value={reg.bilan_agent_comment} onSave={(v) => saveReg({ bilan_agent_comment: v })} />
-        <EditableField label="Reco caution" type="select" options={[{ value: 'integrale', label: 'Restitution intégrale' }, { value: 'partielle', label: 'Retenue partielle' }, { value: 'totale', label: 'Retenue totale' }, { value: 'a_verifier', label: 'À vérifier' }]} value={reg.bilan_caution_reco} onSave={(v) => saveReg({ bilan_caution_reco: v })} />
+      {/* ═══════════════════ 8. ACCORDÉON BILAN JOUR J (closed) ═══════════════════ */}
+      <CollapsibleSection icon={Activity} title="Bilan Jour J" defaultOpen={false}>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Présence constatée</div>
+            <div className="font-semibold text-xs text-slate-800 capitalize">
+              {reg.bilan_presence?.replace(/_/g, ' ') || <span className="italic text-slate-400 font-normal">Non renseigné</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Arrivée réelle</div>
+            <div className="font-semibold text-xs text-slate-800">
+              {reg.bilan_arrival_real || <span className="italic text-slate-400 font-normal">—</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Animation réalisée</div>
+            <div className="font-semibold text-xs text-slate-800 capitalize">
+              {reg.bilan_animation_status?.replace(/_/g, ' ') || <span className="italic text-slate-400 font-normal">Non renseigné</span>}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Reco caution</div>
+            <div className="font-semibold text-xs text-slate-800 capitalize">
+              {reg.bilan_caution_reco?.replace(/_/g, ' ') || <span className="italic text-slate-400 font-normal">À évaluer</span>}
+            </div>
+          </div>
+        </div>
+
+        <details>
+          <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">📝 Remplir / Modifier le bilan</summary>
+          <div className="mt-2 space-y-1">
+            <EditableField label="Présence" type="select" options={[{ value: 'present', label: 'Présent' }, { value: 'absent', label: 'Absent' }, { value: 'retard', label: 'Retard' }, { value: 'depart_anticipe', label: 'Départ anticipé' }]} value={reg.bilan_presence} onSave={(v) => saveReg({ bilan_presence: v })} />
+            <EditableField label="Arrivée réelle" type="time" value={reg.bilan_arrival_real} onSave={(v) => saveReg({ bilan_arrival_real: v })} />
+            <EditableField label="Départ réel" type="time" value={reg.bilan_departure_real} onSave={(v) => saveReg({ bilan_departure_real: v })} />
+            <EditableField label="Animation réalisée" type="select" options={[{ value: 'oui_conforme', label: 'Oui — conforme' }, { value: 'oui_partielle', label: 'Oui — partielle' }, { value: 'non', label: 'Non' }]} value={reg.bilan_animation_status} onSave={(v) => saveReg({ bilan_animation_status: v })} />
+            <EditableField label="État stand au départ" type="select" options={[{ value: 'bon_etat', label: 'Bon état' }, { value: 'degrade', label: 'Dégradé' }, { value: 'incident', label: 'Incident matériel' }]} value={reg.bilan_stand_status} onSave={(v) => saveReg({ bilan_stand_status: v })} />
+            <EditableField label="Anomalie / Incident" type="textarea" value={reg.bilan_anomaly} onSave={(v) => saveReg({ bilan_anomaly: v })} />
+            <EditableField label="Commentaire agent" type="textarea" value={reg.bilan_agent_comment} onSave={(v) => saveReg({ bilan_agent_comment: v })} />
+            <EditableField label="Reco caution" type="select" options={[{ value: 'integrale', label: 'Restitution intégrale' }, { value: 'partielle', label: 'Retenue partielle' }, { value: 'totale', label: 'Retenue totale' }, { value: 'a_verifier', label: 'À vérifier' }]} value={reg.bilan_caution_reco} onSave={(v) => saveReg({ bilan_caution_reco: v })} />
+          </div>
+        </details>
       </CollapsibleSection>
 
-      {/* ═══════════════════ SECTION 11 : PORTAIL EXPOSANT ═══════════════════ */}
-      <CollapsibleSection icon={ExternalLink} title="Portail exposant">
-        <PortalTab registration={reg} organization={org} documents={docs} />
-      </CollapsibleSection>
-
-      {/* ═══════════════════ SECTION 12 : FICHE RÉCAP & CONFIRMATION ═══════════════════ */}
-      <CollapsibleSection
-        icon={FileCheck2}
-        title="Fiche récap & Confirmation"
-        defaultOpen
-        badge={reg.confirmation_sent_at ? <Badge className="bg-emerald-600 text-white text-[10px] ml-1">Envoyé</Badge> : <Badge className="bg-amber-500 text-white text-[10px] ml-1">À envoyer</Badge>}
-      >
-        <FicheRecapBlock
-          registration={reg}
-          organization={org}
-          venue={venue}
-          onRefresh={load}
-        />
-      </CollapsibleSection>
-
-      </div>
-
-      {/* ═══════════════════ ZONE DE SUPPRESSION ═══════════════════ */}
+      {/* ═══════════════════ 9. ZONE SUPPRESSION (toujours visible, tout en bas) ═══════════════════ */}
       <div className="rounded-xl border-2 border-red-300 bg-red-50/50 p-3.5 mt-6">
         <div className="font-bold text-sm text-red-900 mb-1 flex items-center gap-2">
           <Trash2 className="w-4 h-4" /> Zone de suppression
@@ -766,6 +1282,7 @@ export default function FicheExposantV2({ id, onClose }) {
       )}
     </div>
   );
+
 }
 
 // =======================================================
