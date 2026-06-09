@@ -6159,6 +6159,88 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       invalidateMailConfigCache();
       return json({ ok: true, message: 'Simulation désactivée — redirection email coupée' });
     }
+    // 🆕 SESSION 52g — Cleanup ciblé des SIMULATIONS INCOMPLÈTES (orphelins)
+    // Supprime UNIQUEMENT les regs de simulation qui ne sont PAS en a_confirmer/confirme/verrouille,
+    // c.à.d. tous les brouillons abandonnés / waitlist orphelins / mid-flow échoués.
+    // Garde les simulations qui ont effectivement terminé le tunnel (pour tester l'admin sur des cas réels).
+    // POST /api/admin/simulation/cleanup-incomplete  body: { dry_run?: boolean }
+    if (route === 'admin/simulation/cleanup-incomplete') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const dryRun = !!body?.dry_run;
+      const COMPLETED = ['a_confirmer', 'confirme', 'verrouille'];
+      // 1. Toutes les regs de simulation NON terminées
+      const incomplete = await db.collection('registrations').find({
+        $and: [
+          { $or: [{ is_simulation: true }, { sim_session_id: { $exists: true, $ne: null } }] },
+          { status: { $nin: COMPLETED } },
+        ],
+      }).toArray();
+      const regIds = incomplete.map(r => r.id);
+      const orgIdSet = new Set(incomplete.map(r => r.organization_id).filter(Boolean));
+      const sample = incomplete.slice(0, 10).map(r => ({ id: r.id, status: r.status, is_waitlist: !!r.is_waitlist, org: r.organization_id, created_at: r.created_at }));
+
+      if (dryRun) {
+        return json({
+          ok: true,
+          dry_run: true,
+          would_delete: { registrations: regIds.length, organizations_candidate: orgIdSet.size },
+          sample,
+        });
+      }
+
+      // 2. Cascade delete sur enfants
+      const cascade = {};
+      const childCollections = [
+        'animation_slots', 'stand_assignments', 'validation_requests',
+        'modification_tokens', 'modification_requests', 'registration_documents',
+        'deposit_transactions', 'caution_appointments', 'attendance_sessions',
+        'attendance_events', 'registration_anomalies', 'field_comments',
+        'field_media', 'tasks_or_followups', 'email_messages',
+      ];
+      for (const c of childCollections) {
+        try {
+          const r = await db.collection(c).deleteMany({ registration_id: { $in: regIds } });
+          cascade[c] = r.deletedCount;
+        } catch { cascade[c] = 0; }
+      }
+      // 3. Delete registrations
+      const regDel = await db.collection('registrations').deleteMany({ id: { $in: regIds } });
+      // 4. Pour chaque org touchée, si elle est de simulation ET n'a plus de regs, on la supprime aussi
+      let orgsDeleted = 0;
+      let usersDeleted = 0;
+      for (const orgId of orgIdSet) {
+        const org = await db.collection('organizations').findOne({ id: orgId });
+        if (!org?.is_simulation) continue;
+        const remaining = await db.collection('registrations').countDocuments({ organization_id: orgId });
+        if (remaining === 0) {
+          await db.collection('organizations').deleteOne({ id: orgId });
+          orgsDeleted++;
+          const u = await db.collection('users').deleteMany({ organization_id: orgId, is_simulation: true });
+          usersDeleted += u.deletedCount;
+        }
+      }
+      // 5. Activity log
+      await db.collection('activity_logs').insertOne({
+        id: uuid(),
+        actor_user_id: ctx.userId || 'u-admin',
+        action: 'SIMULATION_CLEANUP_INCOMPLETE',
+        description: `Nettoyage simulations incomplètes : ${regDel.deletedCount} regs, ${orgsDeleted} orgs, ${usersDeleted} users`,
+        metadata: { cascade, regs_deleted: regDel.deletedCount, orgs_deleted: orgsDeleted, users_deleted: usersDeleted },
+        created_at: new Date(),
+      });
+      return json({
+        ok: true,
+        dry_run: false,
+        deleted: {
+          registrations: regDel.deletedCount,
+          organizations: orgsDeleted,
+          users: usersDeleted,
+          ...cascade,
+        },
+        message: `🧹 ${regDel.deletedCount} simulation·s incomplète·s supprimée·s (${orgsDeleted} orgs + ${usersDeleted} users en cascade)`,
+      });
+    }
+
     if (route === 'admin/simulation/cleanup') {
       if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
       // 1. Récupère tous les org_id et reg_id de simulation

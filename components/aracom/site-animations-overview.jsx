@@ -62,14 +62,30 @@ export default function SiteAnimationsOverview() {
     return m;
   }, [validations]);
 
-  // Index : registrations actives (hors annulé) par venue
+  // 🆕 SESSION 52g — Classification stricte des inscriptions par état métier
+  //   • CONFIRMED   = tunnel terminé, exposant validé (a_confirmer, confirme, verrouille)
+  //   • WAITLIST    = liste d'attente (is_waitlist OU status liste_attente)
+  //   • IN_PROGRESS = brouillon, tunnel non terminé (provisoire) — NE PAS compter comme exposant
+  //   On élimine aussi les annulés.
+  const STATUSES_CONFIRMED = ['a_confirmer', 'confirme', 'verrouille', 'rdv_fixe', 'en_attente'];
+  const STATUSES_WAITLIST = ['liste_attente'];
+  const STATUSES_CANCELLED = ['annule', 'cancelled', 'refused', 'refuse'];
+  const classifyReg = (r) => {
+    if (STATUSES_CANCELLED.includes(r.status)) return 'cancelled';
+    if (r.is_waitlist === true || STATUSES_WAITLIST.includes(r.status)) return 'waitlist';
+    if (STATUSES_CONFIRMED.includes(r.status)) return 'confirmed';
+    return 'in_progress';
+  };
+
+  // Index : registrations par venue ET par état (hors annulé)
   const regsByVenue = useMemo(() => {
     const m = new Map();
     for (const r of regs) {
       if (!r.venue_id) continue;
-      if (r.status === 'annule' || r.status === 'cancelled') continue;
-      if (!m.has(r.venue_id)) m.set(r.venue_id, []);
-      m.get(r.venue_id).push(r);
+      const cls = classifyReg(r);
+      if (cls === 'cancelled') continue;
+      if (!m.has(r.venue_id)) m.set(r.venue_id, { confirmed: [], waitlist: [], in_progress: [] });
+      m.get(r.venue_id)[cls].push(r);
     }
     return m;
   }, [regs]);
@@ -99,7 +115,8 @@ export default function SiteAnimationsOverview() {
   /** Stats agrégées par venue */
   const venueStats = useMemo(() => {
     return venues.map((v) => {
-      const venueRegs = regsByVenue.get(v.id) || [];
+      const buckets = regsByVenue.get(v.id) || { confirmed: [], waitlist: [], in_progress: [] };
+      const venueRegs = buckets.confirmed; // 🆕 SESSION 52g — Seuls les confirmés sont des "exposants"
       const venueAnims = animsByVenue.get(v.id) || [];
       const dayCount = (day) =>
         venueRegs.filter((r) => Array.isArray(r.attending_days) && (r.attending_days.includes(day) || r.attending_days.includes(day === 'vendredi' ? '2026-08-14' : '2026-08-15'))).length;
@@ -113,7 +130,8 @@ export default function SiteAnimationsOverview() {
       const standsTotal = v.capacity_stands || 0;
       const standsUsed = Math.min(standsTotal, v.stands_used || 0);
       const standsFree = Math.max(0, standsTotal - standsUsed);
-      // Exposants sans animation sur ce site
+      // 🆕 SESSION 52g — Sans animation = UNIQUEMENT exposants confirmés (tunnel terminé) sans animation
+      //   On exclut les brouillons (provisoire) et les waitlist : ils ne peuvent pas avoir d'anim normalement.
       const noAnim = venueRegs.filter((r) => !regsWithAnim.has(r.id));
       // 🆕 SESSION 45 — Demandes de validation par site, séparées en pré-validés (dans quota) / liste d'attente
       const valReqs = validationsByVenue.get(v.id) || [];
@@ -132,6 +150,9 @@ export default function SiteAnimationsOverview() {
         anims: { ven, sam, ven_stand, ven_demo, sam_stand, sam_demo, total: ven.length + sam.length },
         noAnim,
         regsList: venueRegs,
+        // 🆕 SESSION 52g — Comptage séparé pour transparence admin
+        inProgressCount: buckets.in_progress.length,
+        waitlistRegsCount: buckets.waitlist.length,
         valReqs,
         preValidated,
         waitlist,
@@ -155,9 +176,11 @@ export default function SiteAnimationsOverview() {
       acc.noAnim += s.noAnim.length;
       acc.preValidated += s.preValidated.length;
       acc.waitlist += s.waitlist.length;
+      acc.inProgress += s.inProgressCount || 0;
+      acc.waitlistRegs += s.waitlistRegsCount || 0;
       return acc;
     },
-    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0 }
+    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0, inProgress: 0, waitlistRegs: 0 }
   ), [venueStats]);
 
   if (loading) {
@@ -175,8 +198,13 @@ export default function SiteAnimationsOverview() {
           <span className="flex items-center gap-2">🗺️ Remplissage & animations par site</span>
           <Badge variant="secondary" className="text-[10px]">{venueStats.length} sites</Badge>
           {totals.noAnim > 0 && (
-            <Badge className="text-[10px] bg-amber-100 text-amber-800 border-amber-300 border">
-              ⚠ {totals.noAnim} exposant·s sans animation
+            <Badge className="text-[10px] bg-rose-100 text-rose-800 border-rose-300 border" title="Exposants confirmés (tunnel terminé) qui n'ont aucune animation programmée — c'est une anomalie">
+              🚨 {totals.noAnim} confirmé·s sans animation
+            </Badge>
+          )}
+          {totals.inProgress > 0 && (
+            <Badge className="text-[10px] bg-slate-100 text-slate-700 border-slate-300 border" title="Brouillons : tunnels d'inscription en cours, pas encore soumis">
+              ✏️ {totals.inProgress} en cours
             </Badge>
           )}
           <Button size="sm" variant="ghost" onClick={load} className="ml-auto h-7 text-xs">🔄</Button>
@@ -190,7 +218,7 @@ export default function SiteAnimationsOverview() {
               <TabsTrigger key={s.id} value={s.id} className="text-xs h-8">
                 {s.name}
                 {s.noAnim.length > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] bg-amber-200 text-amber-900 font-bold">
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] bg-rose-200 text-rose-900 font-bold" title="Exposants confirmés sans animation">
                     {s.noAnim.length}
                   </span>
                 )}
@@ -201,11 +229,12 @@ export default function SiteAnimationsOverview() {
           {/* ───────── OVERVIEW TAB ───────── */}
           <TabsContent value="overview" className="mt-4 space-y-3">
             {/* KPIs globaux */}
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
               <KpiMini label="Stands utilisés" value={`${totals.standsUsed} / ${totals.standsTotal}`} accent="blue" sub={`${totals.standsFree} libres`} />
-              <KpiMini label="Exposants actifs" value={totals.regsCount} accent="emerald" sub={`Ven: ${totals.regsVen} · Sam: ${totals.regsSam}`} />
+              <KpiMini label="Exposants confirmés" value={totals.regsCount} accent="emerald" sub={`Ven: ${totals.regsVen} · Sam: ${totals.regsSam}`} />
               <KpiMini label="Animations totales" value={totals.animVen + totals.animSam} accent="violet" sub={`Ven: ${totals.animVen} · Sam: ${totals.animSam}`} />
-              <KpiMini label="Sans animation" value={totals.noAnim} accent={totals.noAnim > 0 ? 'amber' : 'slate'} sub="à relancer" />
+              <KpiMini label="🚨 Anomalies anim." value={totals.noAnim} accent={totals.noAnim > 0 ? 'rose' : 'slate'} sub={totals.noAnim > 0 ? 'confirmés sans anim' : 'aucune'} />
+              <KpiMini label="En cours (brouillons)" value={totals.inProgress} accent={totals.inProgress > 0 ? 'slate' : 'slate'} sub="tunnel non terminé" />
               <KpiMini label="✓ Pré-validés" value={totals.preValidated} accent="emerald" sub="dans quota" />
               <KpiMini label="⏳ Liste d'attente" value={totals.waitlist} accent={totals.waitlist > 0 ? 'amber' : 'slate'} sub="quota dépassé" />
             </div>
@@ -220,7 +249,7 @@ export default function SiteAnimationsOverview() {
                     <th className="px-2 py-2 text-center">Exposants</th>
                     <th className="px-2 py-2 text-center" colSpan={2}>Vendredi 14/08</th>
                     <th className="px-2 py-2 text-center" colSpan={2}>Samedi 15/08</th>
-                    <th className="px-2 py-2 text-center">Sans anim.</th>
+                    <th className="px-2 py-2 text-center">🚨 Anomalies</th>
                   </tr>
                   <tr className="bg-slate-100 text-[9px] text-slate-500">
                     <th></th><th></th><th></th>
@@ -267,7 +296,7 @@ export default function SiteAnimationsOverview() {
                         </td>
                         <td className="px-2 py-1.5 text-center">
                           {s.noAnim.length > 0 ? (
-                            <Badge className="text-[10px] bg-amber-100 text-amber-800 border-amber-300 border">⚠ {s.noAnim.length}</Badge>
+                            <Badge className="text-[10px] bg-rose-100 text-rose-800 border-rose-300 border" title="Exposants confirmés sans animation">🚨 {s.noAnim.length}</Badge>
                           ) : (
                             <span className="text-emerald-600 text-[11px]">✓</span>
                           )}
@@ -292,14 +321,16 @@ export default function SiteAnimationsOverview() {
                     <td className="px-2 py-2 text-center text-orange-800">
                       {venueStats.reduce((a, s) => a + s.anims.sam_demo, 0)}
                     </td>
-                    <td className="px-2 py-2 text-center text-amber-700">{totals.noAnim}</td>
+                    <td className="px-2 py-2 text-center text-rose-700">{totals.noAnim > 0 ? `🚨 ${totals.noAnim}` : '✓'}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
             <div className="text-[10px] text-slate-500 leading-snug">
-              💡 <b>Animation obligatoire pour tous les exposants</b> — au moins 1 par jour de présence. Cliquez sur une ligne ou un onglet pour voir le détail d&apos;un site et identifier les exposants à relancer.
+              💡 Les <b>exposants confirmés</b> sont ceux qui ont terminé le tunnel (statut <code>a_confirmer</code>/<code>confirme</code>/<code>verrouille</code>).
+              Les brouillons (<code>provisoire</code>) et la liste d&apos;attente (<code>liste_attente</code>) sont comptés séparément.
+              L&apos;animation est <b>obligatoire</b> au moment de la soumission — si un exposant confirmé n&apos;a pas d&apos;animation, c&apos;est une <b className="text-rose-700">anomalie</b> à corriger manuellement.
             </div>
           </TabsContent>
 
@@ -321,6 +352,7 @@ function KpiMini({ label, value, sub, accent = 'blue' }) {
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
     violet: 'border-violet-200 bg-violet-50 text-violet-800',
     amber: 'border-amber-300 bg-amber-50 text-amber-900',
+    rose: 'border-rose-300 bg-rose-50 text-rose-900',
     slate: 'border-slate-200 bg-slate-50 text-slate-700',
   };
   return (
@@ -344,11 +376,12 @@ function SiteDetailPanel({ site }) {
       </div>
 
       {/* KPIs site */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
         <KpiMini label="Remplissage stand" value={`${s.standsUsed}/${s.standsTotal}`} accent={fillPct >= 90 ? 'amber' : fillPct >= 70 ? 'violet' : 'blue'} sub={`${fillPct}% · ${s.standsFree} libres`} />
-        <KpiMini label="Exposants" value={s.regsCount} accent="emerald" sub={`Ven: ${s.regsVen} · Sam: ${s.regsSam}`} />
+        <KpiMini label="Exposants confirmés" value={s.regsCount} accent="emerald" sub={`Ven: ${s.regsVen} · Sam: ${s.regsSam}`} />
         <KpiMini label="Animations" value={s.anims.total} accent="violet" sub={`Ven: ${s.anims.ven.length} · Sam: ${s.anims.sam.length}`} />
-        <KpiMini label="Sans animation" value={s.noAnim.length} accent={s.noAnim.length > 0 ? 'amber' : 'slate'} sub={s.noAnim.length > 0 ? 'à relancer' : 'tout est ok'} />
+        <KpiMini label="🚨 Anomalie anim." value={s.noAnim.length} accent={s.noAnim.length > 0 ? 'rose' : 'slate'} sub={s.noAnim.length > 0 ? 'confirmés sans anim' : 'tout est ok'} />
+        <KpiMini label="En cours" value={s.inProgressCount || 0} accent="slate" sub="brouillons tunnel" />
       </div>
 
       {/* 🆕 SESSION 45 — Demandes de validation : pré-validés (dans quota) vs liste d'attente */}
@@ -406,22 +439,22 @@ function SiteDetailPanel({ site }) {
 
       {/* Liste des exposants sans animation */}
       {s.noAnim.length > 0 && (
-        <div className="rounded-md border-2 border-amber-300 bg-amber-50 p-3">
+        <div className="rounded-md border-2 border-rose-300 bg-rose-50 p-3">
           <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="w-4 h-4 text-amber-700" />
-            <div className="text-xs font-bold text-amber-900">
-              {s.noAnim.length} exposant·s SANS animation sur {s.name}
+            <AlertTriangle className="w-4 h-4 text-rose-700" />
+            <div className="text-xs font-bold text-rose-900">
+              🚨 ANOMALIE — {s.noAnim.length} exposant·s confirmé·s sans animation sur {s.name}
             </div>
           </div>
-          <div className="text-[10px] text-amber-800 mb-2">
-            L&apos;animation est <b>obligatoire</b> pour le Forum 2026. Cliquez sur un nom pour ouvrir la fiche et attribuer une animation.
+          <div className="text-[10px] text-rose-800 mb-2">
+            Ces exposants ont <b>terminé le tunnel d&apos;inscription</b> mais n&apos;ont aucune animation enregistrée — ce qui ne devrait jamais arriver (le tunnel l&apos;impose). Cliquez sur un nom pour ouvrir la fiche et corriger.
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
             {s.noAnim.map((r) => (
               <ExposantLink
                 key={r.id}
                 exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization_name || '—' }}
-                className="text-xs text-slate-800 hover:text-amber-900 hover:bg-white rounded px-2 py-1 border border-amber-200 bg-white/70 transition flex items-center justify-between gap-2"
+                className="text-xs text-slate-800 hover:text-rose-900 hover:bg-white rounded px-2 py-1 border border-rose-200 bg-white/70 transition flex items-center justify-between gap-2"
               >
                 <span className="truncate">
                   <Users className="w-3 h-3 inline mr-1 text-slate-400" />

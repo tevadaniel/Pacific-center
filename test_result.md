@@ -3638,3 +3638,37 @@ backend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52g — Audit final demandé par utilisateur (frustré des régressions) : 17/17 tests passent. La simulation E2E charge maintenant uniquement les sites activés via /api/venues?only_active=1 (impossible de créer des candidatures sur Mahina/Moorea désactivés). Le testing agent a découvert et corrigé un bug additionnel sur dashboard/by-site et dashboard/jour-j-live qui n'appliquaient pas le filtre. Tous les workflows critiques (toggle availability, waitlist, swap, validation lock, set-attending-days avec validation stricte par jour, animation-slots, simulation cleanup) sont opérationnels. À redéployer en production."
+
+
+  - agent: "main"
+    message: "SESSION 52g.2 — Correction d'incohérences logiques détectées par l'utilisateur. (1) NOUVEL ENDPOINT BACKEND: POST /api/admin/simulation/cleanup-incomplete supprime UNIQUEMENT les regs de simulation incomplètes (status NOT IN [a_confirmer, confirme, verrouille]). Supporte dry_run pour preview. Cascade sur 15 collections enfants + suppression d'orgs sim orphelines + users sim orphelins. (2) FRONTEND - site-animations-overview.jsx: classification stricte des regs en 3 buckets (confirmed/waitlist/in_progress). Le compteur 'Exposants' compte UNIQUEMENT confirmed. 'Sans animation' (renommé '🚨 Anomalies anim.') ne s'applique QU'AUX confirmés sans animation. Nouveaux KPIs 'En cours' (brouillons) et badge en haut de Card pour visibilité. (3) FRONTEND - simulation-engine.js: cleanup AGRESSIF dès qu'une reg existe (step ≥ 0, plus step ≥ 2) + appel automatique à cleanup-incomplete à la fin de start(). (4) FRONTEND - simulation-modal.jsx: ajout d'un bouton 'Nettoyer les simulations incomplètes (orphelins)' avec dry-run + confirm. BUMP: package.json 1.0.18 → 1.0.19. À TESTER BACKEND: l'endpoint /api/admin/simulation/cleanup-incomplete (dry_run + apply), garantir qu'il ne supprime PAS les regs status='a_confirmer'/'confirme'/'verrouille', cascade correcte, sécurité aracom_admin only."
+
+
+  - task: "SESSION 52g.2 — Nouvel endpoint POST /api/admin/simulation/cleanup-incomplete"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (ligne 6166-6242)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 4/4 TESTS PASSÉS (100%). Endpoint POST /api/admin/simulation/cleanup-incomplete 100% fonctionnel selon spécifications SESSION 52g.2. TEST 1 (Auth required): POST sans x-user-role=aracom_admin → 403 'Réservé aux admins ARACOM' ✅. TEST 2 (Dry run mode): POST avec body {dry_run:true} → 200 avec {ok:true, dry_run:true, would_delete:{registrations:2, organizations_candidate:2}, sample:[...]} ✅. Sample contient les 10 premières regs candidates avec id/status/is_waitlist/org/created_at ✅. DB inchangée après dry_run (count avant=3, après=3) ✅. TEST 3 (Apply mode): Setup avec 3 regs simulation (1 provisoire, 1 liste_attente, 1 a_confirmer) → POST avec body {dry_run:false} → 200 avec {ok:true, dry_run:false, deleted:{registrations:2, organizations:2, users:2, animation_slots:1, stand_assignments:1, ...}, message:'🧹 2 simulation·s incomplète·s supprimée·s (2 orgs + 2 users en cascade)'} ✅. Vérification DB: seule la reg a_confirmer reste (reg-sim-test-cleanup-3) ✅, les 2 regs incomplètes supprimées (provisoire + liste_attente) ✅, les 2 orgs sim orphelines supprimées ✅, les 2 users sim supprimés ✅, cascade sur animation_slots et stand_assignments OK ✅, activity log SIMULATION_CLEANUP_INCOMPLETE créé ✅. TEST 4 (Non-régression full cleanup): POST /api/admin/simulation/cleanup (endpoint existant) → 200 avec {ok:true, deleted:{registrations, organizations, users, ...}} ✅. Supprime TOUTES les regs is_simulation:true (y compris les confirmées) ✅. Activity log SIMULATION_CLEANUP créé ✅. SÉLECTION CIBLE VÉRIFIÉE: L'endpoint supprime UNIQUEMENT les regs avec (is_simulation:true OU sim_session_id non null) ET status NOT IN ['a_confirmer', 'confirme', 'verrouille'] ✅. Les regs sim avec status a_confirmer/confirme/verrouille sont CONSERVÉES ✅. CASCADE COMPLÈTE: Supprime les enregistrements liés dans 15 collections (animation_slots, stand_assignments, validation_requests, modification_tokens, modification_requests, registration_documents, deposit_transactions, caution_appointments, attendance_sessions, attendance_events, registration_anomalies, field_comments, field_media, tasks_or_followups, email_messages) ✅. ORGS/USERS ORPHELINS: Pour chaque org sim qui n'a plus aucune reg, la supprime + supprime les users sim liés ✅. Endpoint 100% opérationnel et prêt pour utilisation automatique par simulation engine."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 2
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "SESSION 52g.2 — Nouvel endpoint POST /api/admin/simulation/cleanup-incomplete"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "testing"
+    message: "SESSION 52g.2 — BACKEND TEST COMPLETE. Nouvel endpoint POST /api/admin/simulation/cleanup-incomplete testé exhaustivement avec 4 scénarios (auth, dry_run, apply, non-régression). RÉSULTATS: 4/4 tests passés (100%). L'endpoint fonctionne parfaitement selon les spécifications: (1) Auth aracom_admin only (403 sans le rôle) ✅, (2) Dry-run retourne preview sans modifier DB ✅, (3) Apply supprime uniquement les regs incomplètes (status NOT IN [a_confirmer, confirme, verrouille]) avec cascade complète sur 15 collections + suppression orgs/users orphelins ✅, (4) Non-régression: endpoint full cleanup fonctionne toujours ✅. SÉLECTION CIBLE VALIDÉE: Les regs sim avec status a_confirmer/confirme/verrouille sont CONSERVÉES (test avec 3 regs: 2 supprimées, 1 conservée). CASCADE VALIDÉE: animation_slots, stand_assignments et autres collections enfants correctement supprimées. ACTIVITY LOG VALIDÉ: Log SIMULATION_CLEANUP_INCOMPLETE créé avec metadata complète. Endpoint 100% production-ready et peut être appelé automatiquement par simulation engine à la fin de chaque run. Main agent doit summarize et finish."

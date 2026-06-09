@@ -116,6 +116,33 @@ export default function SimulationModal({ open, onClose }) {
     finally { setCleaningUp(false); }
   };
 
+  // 🆕 SESSION 52g — Cleanup CIBLÉ : ne supprime que les simulations INCOMPLÈTES
+  // (orphelins en provisoire / liste d'attente / abandonnés). Garde les sims réussies.
+  const handleCleanupIncomplete = async () => {
+    // Dry-run d'abord pour montrer ce qui sera supprimé
+    setCleaningUp(true);
+    try {
+      const preview = await api('/api/admin/simulation/cleanup-incomplete', {
+        method: 'POST',
+        body: JSON.stringify({ dry_run: true }),
+      });
+      const count = preview?.would_delete?.registrations || 0;
+      const orgs = preview?.would_delete?.organizations_candidate || 0;
+      if (count === 0) {
+        toast.success('✨ Aucune simulation incomplète à nettoyer.');
+        return;
+      }
+      if (!confirm(`🧹 Supprimer ${count} simulation·s incomplète·s (brouillons / liste d'attente / abandons) ?\n\nLes simulations RÉUSSIES sont conservées.\nOrganisations candidates : ${orgs}`)) return;
+      const r = await api('/api/admin/simulation/cleanup-incomplete', {
+        method: 'POST',
+        body: JSON.stringify({ dry_run: false }),
+      });
+      toast.success(r.message || '✅ Nettoyage ciblé effectué');
+      await loadStatus();
+    } catch (e) { toast.error(e.message); }
+    finally { setCleaningUp(false); }
+  };
+
   const handleExport = () => {
     if (!summary) return;
     const payload = { summary, events, exported_at: new Date().toISOString() };
@@ -165,7 +192,7 @@ export default function SimulationModal({ open, onClose }) {
               <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4" /> Contrôles</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700">Nombre d'exposants : <b>{count}</b></label>
+                  <label className="text-xs font-medium text-slate-700">Nombre d&apos;exposants : <b>{count}</b></label>
                   <input type="range" min="5" max="100" step="5" value={count} disabled={isRunning || isPaused}
                     onChange={e => setCount(parseInt(e.target.value))}
                     className="w-full mt-1" />
@@ -274,9 +301,13 @@ export default function SimulationModal({ open, onClose }) {
                     )}
                   </div>
                 )}
+                <Button onClick={handleCleanupIncomplete} disabled={cleaningUp || isRunning} variant="outline" size="sm" className="w-full gap-1.5 border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900">
+                  {cleaningUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>🧹</span>}
+                  Nettoyer les simulations incomplètes (orphelins)
+                </Button>
                 <Button onClick={handleCleanup} disabled={cleaningUp || isRunning} variant="destructive" size="sm" className="w-full gap-1.5">
                   {cleaningUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  Supprimer les records de simulation
+                  Supprimer TOUS les records de simulation
                 </Button>
               </CardContent>
             </Card>
