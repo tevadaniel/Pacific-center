@@ -75,11 +75,16 @@ export default function ExposantPortal() {
   const [passwordStatus, setPasswordStatus] = useState({ has_password: false });
   const [simulationOpen, setSimulationOpen] = useState(false);
   const [allVenues, setAllVenues] = useState([]);
+  // 🆕 SESSION 48ai — Disponibilité réelle des sites (basée sur validation_requests + registrations)
+  //                  Aligné sur la vue ARACOM Validations & Attente.
+  const [venuesAvailability, setVenuesAvailability] = useState({});
 
   // 🆕 SESSION 47 — Charge la liste des venues pour le banner d'ajout multi-site
   // 🆕 SESSION 47.10 — only_active=1 : seuls les sites activés par ARACOM sont proposés
   useEffect(() => {
     api('/api/venues?only_active=1').then(setAllVenues).catch(() => setAllVenues([]));
+    // 🆕 SESSION 48ai — Charge la disponibilité réelle (cohérente avec le cockpit ARACOM)
+    api('/api/venues/availability').then(setVenuesAvailability).catch(() => setVenuesAvailability({}));
   }, []);
 
   // 🔐 Charge le statut du mot de passe (pour l'affichage du panneau de gestion)
@@ -295,10 +300,15 @@ export default function ExposantPortal() {
           allSites={data.allSites || []}
           availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false && vv.exposant_visible !== false).map(vv => ({ id: vv.id, name: vv.name }))}
           venuesAvailability={(allVenues || []).reduce((acc, vv) => {
-            const total = vv.capacity_stands || 0;
-            const used = vv.assigned_stands || 0;
-            const free = Math.max(0, total - used);
-            acc[vv.id] = { available_stands: free, total_stands: total, capacity_full: total > 0 && free === 0 };
+            // 🆕 SESSION 48ai — Utilise /api/venues/availability (cohérent avec cockpit ARACOM)
+            //                  available_stands = capacity - (validated + pre_reserved), capacity_full si is_full
+            const av = venuesAvailability[vv.id];
+            if (av) {
+              acc[vv.id] = { available_stands: av.available, total_stands: av.capacity, capacity_full: av.is_full };
+            } else {
+              // Fallback : tout libre si endpoint pas encore chargé
+              acc[vv.id] = { available_stands: vv.capacity_stands || 0, total_stands: vv.capacity_stands || 0, capacity_full: false };
+            }
             return acc;
           }, {})}
           onUpdateAttendingDays={async (newDays) => {
