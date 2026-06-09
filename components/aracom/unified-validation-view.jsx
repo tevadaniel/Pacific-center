@@ -73,21 +73,28 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         if (['prospect', 'cancelled', 'annule', 'refuse', 'refused'].includes(reg.status)) continue;
         const valReq = valByRegId[reg.id];
         if (valReq) {
-          // 🆕 SESSION 48ak — Quand on prend le validation_request, on PROPAGE EXPLICITEMENT
-          //                  les flags de swap depuis la registration (sinon le merge les écrasait).
-          //                  Et on FORCE le status à refléter le swap : si ex_pre_reserved, status=a_relancer ;
-          //                  si swap_promoted_at, status=a_confirmer (override le statut du valReq).
+          // 🆕 SESSION 48ak/al — Propagation des flags swap depuis la registration
+          //   On override le status SEULEMENT si valReq est dans la zone "en attente" (pas validé/refusé)
+          //   Sinon valReq.status (validated/confirme/refused) a TOUJOURS priorité.
+          const valStatusInFlight = ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer', 'waitlist'].includes(valReq.status);
           let effectiveStatus = valReq.status;
-          if (reg.ex_pre_reserved) effectiveStatus = 'a_relancer';
-          else if (reg.swap_promoted_at) effectiveStatus = 'a_confirmer';
+          if (valStatusInFlight) {
+            if (reg.ex_pre_reserved) effectiveStatus = 'a_relancer';
+            else if (reg.swap_promoted_at) effectiveStatus = 'a_confirmer';
+          }
+          // Si reg est explicitement validé/refusé/verrouille → prime sur tout
+          if (['confirme', 'verrouille', 'validated', 'locked', 'refuse', 'refused'].includes(reg.status)) {
+            effectiveStatus = reg.status;
+          }
           merged.push({
             ...valReq,
             status: effectiveStatus,
-            stand_code: reg.stand_code, // ← stand authoritative depuis la registration (peut être null)
+            stand_code: reg.stand_code,
             ex_pre_reserved: !!reg.ex_pre_reserved,
             ex_pre_reserved_at: reg.ex_pre_reserved_at || null,
             swap_promoted_at: reg.swap_promoted_at || null,
             swap_demoted_at: reg.swap_demoted_at || null,
+            locked_at: reg.locked_at || valReq.locked_at || null,
             _source: 'validation_request',
             registration: reg,
           });
