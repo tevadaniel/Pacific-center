@@ -3507,3 +3507,36 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "SESSION 52d — Simulation cleanup ajusté en cohérence avec la validation stricte. (1) Nouvel endpoint backend /admin/simulation/abandon-cleanup avec garde-fou anti-suppression de vraies données. (2) Engine de simulation appelle ce endpoint à CHAQUE path d'abandon (5 paths au total : no_slot, no_backup_pending, no_backup_conflict, no_slot_after_4_retries, et le catch centralisé pour ABANDON_STEP_X). Les prochaines simulations ne laisseront PLUS aucune candidature à moitié remplie. Tests E2E backend OK (3/3 cas). À redéployer en production."
+
+  - task: "🚨 FLOWS LISTE D'ATTENTE (WAITLIST) — Audit exhaustif SESSION 52c/d"
+    implemented: true
+    working: false
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 1
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "user"
+        comment: "🚨 SIGNALEMENT UTILISATEUR: Les bugs de liste d'attente RÉCURRENTS sont de retour. Demande d'audit EXHAUSTIF de tous les workflows waitlist / swap / auto-promotion. Contexte: Récentes modifications SESSION 52c/d (POST /api/registrations/:id/request-validation exige venue_id + stand_code + ≥1 jour + 1 animation/jour, GET /api/exposant/my-sites champ is_complete exige stand_code, nouvel endpoint POST /api/admin/simulation/abandon-cleanup). Inquiétude: ces changements pourraient avoir cassé les flows waitlist (un exposant en waitlist a stand_code=null par définition)."
+      - working: false
+        agent: "testing"
+        comment: "❌ AUDIT EXHAUSTIF TERMINÉ - 3 BUGS CRITIQUES DÉTECTÉS + 1 FONCTIONNALITÉ MANQUANTE. Tests effectués: 6 scénarios complets (ajout waitlist, swap, validation après swap, request-validation pour waitlist, GET endpoints, validation stricte SESSION 52c). RÉSULTATS: ❌ BUG #1 (CRITIQUE): POST /api/wizard/waitlist ne met PAS à jour le status de la registration à 'liste_attente'. L'endpoint retourne ok:true mais GET /api/registrations/:id montre status=None au lieu de 'liste_attente'. Code ligne 4732-4735 semble correct (updateOne avec $set status='liste_attente'), mais la mise à jour n'est pas persistée. ❌ BUG #2 (CRITIQUE): POST /api/admin/registrations/:id/swap ne transfère PAS le stand_code au promote (ex-waitlist). Après swap, le promote a stand_code=None au lieu du stand libéré par le demote. Code ligne 3941-3952 semble correct (updateOne avec $set stand_code=targetStandCode), mais la mise à jour n'est pas persistée. ❌ BUG #3 (CRITIQUE - BUG RÉCURRENT CONFIRMÉ): Validation après swap échoue avec 404 'Demande introuvable'. Après swap, GET /api/registrations/:id montre status=None et stand_code=None. POST /api/admin/validation/:id/validate retourne 404. Ceci CONFIRME le bug récurrent signalé par l'utilisateur. ⚠️ FONCTIONNALITÉ MANQUANTE: Aucun mécanisme d'auto-promotion automatique détecté dans le code. La promotion est MANUELLE via POST /api/admin/waitlist/:id/promote ou POST /api/admin/registrations/:id/swap. Si l'auto-promotion était attendue (quand un stand se libère, le #1 waitlist est automatiquement promu), elle n'existe PAS. ✅ TESTS RÉUSSIS: (1) POST /api/registrations/:id/request-validation refuse correctement les waitlist avec 400 'Pré-réservez un stand'. (2) GET /api/validation-requests?status=waitlist fonctionne. (3) GET /api/exposant/my-sites accessible. (4) Edge cases (reg_id inexistant, swap même ID) gérés correctement. (5) Validation stricte SESSION 52c fonctionne (refuse validation sans jours de présence). CAUSE PROBABLE DES BUGS: Les updateOne() MongoDB ne semblent pas persister les changements. Possible problème de transaction, de connexion DB, ou de cache. IMPACT BUSINESS: CRITIQUE - Les exposants en waitlist ne peuvent PAS être promus correctement, bloquant tout le workflow de gestion de la liste d'attente. RECOMMANDATION: (1) Investiguer pourquoi les updateOne() MongoDB ne persistent pas (vérifier logs MongoDB, transactions, connexions). (2) Implémenter l'auto-promotion si attendue. (3) Corriger le bug de validation après swap (404). Tests détaillés dans /app/backend_test_waitlist_v2.py."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "🚨 FLOWS LISTE D'ATTENTE (WAITLIST) — Audit exhaustif SESSION 52c/d"
+  stuck_tasks:
+    - "🚨 FLOWS LISTE D'ATTENTE (WAITLIST) — Audit exhaustif SESSION 52c/d"
+  test_all: false
+  test_priority: "critical_first"
+
+agent_communication:
+  - agent: "testing"
+    message: "🚨 AUDIT EXHAUSTIF WAITLIST TERMINÉ - 3 BUGS CRITIQUES DÉTECTÉS. BUG #1: POST /api/wizard/waitlist ne met pas à jour status='liste_attente' (updateOne ne persiste pas). BUG #2: POST /api/admin/registrations/:id/swap ne transfère pas le stand_code (updateOne ne persiste pas). BUG #3: Validation après swap échoue avec 404 (BUG RÉCURRENT CONFIRMÉ). FONCTIONNALITÉ MANQUANTE: Aucune auto-promotion automatique. CAUSE PROBABLE: updateOne() MongoDB ne persistent pas les changements. IMPACT: CRITIQUE - Workflow waitlist complètement bloqué. RECOMMANDATION: (1) Investiguer updateOne() MongoDB (logs, transactions, connexions). (2) Implémenter auto-promotion si attendue. (3) Corriger validation après swap. Tests détaillés: /app/backend_test_waitlist_v2.py. Main agent doit utiliser WEBSEARCH pour investiguer pourquoi updateOne() ne persiste pas."
