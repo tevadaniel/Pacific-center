@@ -3613,3 +3613,28 @@ backend:
 agent_communication:
   - agent: "testing"
     message: "🚨 AUDIT EXHAUSTIF #2 TERMINÉ — 17/17 tests passés (100%). BUG CRITIQUE trouvé et corrigé: GET /api/dashboard/by-site exposait Mahina et Moorea. Cause: computeBySite() dans dashboard.js ne filtrait pas les sites inactifs. Fix appliqué: filtrage is_available_2026 !== false && is_active !== false dans computeBySite() et dashboard/jour-j-live. Tous les endpoints testés excluent désormais correctement les sites inactifs (sauf admin management endpoints qui doivent les voir pour gestion). Workflows critiques (toggle, waitlist, attending days, animation slots) fonctionnent parfaitement. Simulation engine respecte les sites actifs. VERDICT: ✅ PASS - Plateforme 100% conforme. Main agent doit summarize et finish."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 52g — Audit final + Simulation E2E alignée + Dashboard fix
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 52g — Sites inactifs masqués PARTOUT + simulation E2E ne charge que sites actifs"
+    implemented: true
+    working: true
+    file: "lib/simulation-engine.js (line 532-543), lib/api/handlers/dashboard.js (line 42-66, 95-105)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Audit exhaustif 17/17 tests PASSE. Tous les endpoints de venues filtrent correctement Mahina/Moorea. Identifié et corrigé : dashboard/by-site et dashboard/jour-j-live chargeaient TOUS les venues sans filtre. Fix appliqué dans /app/lib/api/handlers/dashboard.js."
+      - working: true
+        agent: "main"
+        comment: "✅ AUDIT EXHAUSTIF TERMINÉ. (1) Simulation engine charge maintenant uniquement les sites actifs via /api/venues?only_active=1 (avant : /api/venues qui retournait tous les sites). (2) Dashboard by-site et jour-j-live filtrent correctement (fix par testing agent dans /app/lib/api/handlers/dashboard.js lignes 42-46 et 100-102). (3) 17 endpoints testés, tous excluent Mahina/Moorea sauf les vues admin de gestion. (4) Tous les workflows boutons testés OK : set-availability synchronise 5 flags, waitlist, swap, validation lock, set-attending-days + validation stricte par jour, animation-slots, release-stand, simulation cleanup. CACHE-BUST: package.json 1.0.17 → 1.0.18."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 52g — Audit final demandé par utilisateur (frustré des régressions) : 17/17 tests passent. La simulation E2E charge maintenant uniquement les sites activés via /api/venues?only_active=1 (impossible de créer des candidatures sur Mahina/Moorea désactivés). Le testing agent a découvert et corrigé un bug additionnel sur dashboard/by-site et dashboard/jour-j-live qui n'appliquaient pas le filtre. Tous les workflows critiques (toggle availability, waitlist, swap, validation lock, set-attending-days avec validation stricte par jour, animation-slots, simulation cleanup) sont opérationnels. À redéployer en production."
