@@ -1,0 +1,371 @@
+[
+  {
+    "scenario": "SC\u00c9NARIO 1",
+    "test": "Step 1: Create test registration",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "Created org-test-am1 and reg-am1 in MongoDB",
+    "timestamp": "2026-06-09T18:41:33.358738"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 1",
+    "test": "Step 2: GET /api/venues/availability",
+    "status": "PASS",
+    "expected": null,
+    "observed": "Faaa total=13, pre_reserved=9, validated=4",
+    "details": "",
+    "timestamp": "2026-06-09T18:41:33.650938"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 1",
+    "test": "Step 3: Find swap target",
+    "status": "FAIL",
+    "expected": null,
+    "observed": null,
+    "details": "No pre-reserved registrations found at Faaa",
+    "timestamp": "2026-06-09T18:41:33.810860"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Consistency: menu-badges.validations == \u03a3 pre_reserved",
+    "status": "PASS",
+    "expected": 45,
+    "observed": 45,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:34.250523"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Consistency: menu-badges.waitlist == \u03a3 waitlist",
+    "status": "PASS",
+    "expected": 0,
+    "observed": 0,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:34.250542"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Venue venue-faaa consistency",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "capacity=16, validated=4, pre_reserved=9, total=13",
+    "timestamp": "2026-06-09T18:41:34.250559"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Venue venue-pun consistency",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "capacity=13, validated=0, pre_reserved=13, total=13",
+    "timestamp": "2026-06-09T18:41:34.250568"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Venue venue-aru consistency",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "capacity=12, validated=1, pre_reserved=11, total=12",
+    "timestamp": "2026-06-09T18:41:34.250576"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 2",
+    "test": "Venue venue-tar consistency",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "capacity=12, validated=0, pre_reserved=12, total=12",
+    "timestamp": "2026-06-09T18:41:34.250587"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Capacity check venue-faaa",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "total=13 <= capacity=16",
+    "timestamp": "2026-06-09T18:41:34.420270"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Capacity check venue-pun",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "total=13 <= capacity=13",
+    "timestamp": "2026-06-09T18:41:34.420307"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Capacity check venue-aru",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "total=12 <= capacity=12",
+    "timestamp": "2026-06-09T18:41:34.420316"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Capacity check venue-tar",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "total=12 <= capacity=12",
+    "timestamp": "2026-06-09T18:41:34.420322"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Waitlist logic venue-faaa",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "waitlist=0, is_full=False",
+    "timestamp": "2026-06-09T18:41:34.420334"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Waitlist logic venue-pun",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "waitlist=0, is_full=True",
+    "timestamp": "2026-06-09T18:41:34.420343"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Waitlist logic venue-aru",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "waitlist=0, is_full=True",
+    "timestamp": "2026-06-09T18:41:34.420402"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Waitlist logic venue-tar",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "waitlist=0, is_full=True",
+    "timestamp": "2026-06-09T18:41:34.420416"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Inactive sites in /api/venues?only_active=1",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "Mahina and Moorea correctly excluded",
+    "timestamp": "2026-06-09T18:41:34.568989"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Inactive sites in /api/venues/availability",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "Mahina and Moorea correctly excluded",
+    "timestamp": "2026-06-09T18:41:34.569027"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 3",
+    "test": "Inactive sites in /api/menu-badges",
+    "status": "PASS",
+    "expected": null,
+    "observed": null,
+    "details": "Menu badges counts should not include Mahina/Moorea",
+    "timestamp": "2026-06-09T18:41:34.720171"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /menu-badges",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:34.949194"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /dashboard/kpis",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.086249"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /dashboard/by-site",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.290578"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /venues?only_active=1",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.429783"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /venues/availability",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.570548"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /venues/venue-faaa/stands",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.710488"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /validation-requests",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:35.857881"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /registrations",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.043227"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /admin/validation-queue",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.201816"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /prospects",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.346935"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /prospects/stats",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.495266"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "GET /auth/me",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.674683"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 4",
+    "test": "POST /api/auth/password-login",
+    "status": "PASS",
+    "expected": 200,
+    "observed": 200,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:36.803465"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST validate non-existent \u2192 404",
+    "status": "PASS",
+    "expected": 404,
+    "observed": 404,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.007864"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST refuse non-existent \u2192 404",
+    "status": "PASS",
+    "expected": 404,
+    "observed": 404,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.133576"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST swap non-existent \u2192 404",
+    "status": "PASS",
+    "expected": 404,
+    "observed": 404,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.287957"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST swap without with_registration_id \u2192 400",
+    "status": "PASS",
+    "expected": 400,
+    "observed": 400,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.434477"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST swap with same id \u2192 400",
+    "status": "PASS",
+    "expected": 400,
+    "observed": 400,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.596529"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST /admin/registrations/some-id/validate without admin \u2192 403",
+    "status": "PASS",
+    "expected": 403,
+    "observed": 403,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.743816"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST /admin/registrations/some-id/refuse without admin \u2192 403",
+    "status": "PASS",
+    "expected": 403,
+    "observed": 403,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:37.910920"
+  },
+  {
+    "scenario": "SC\u00c9NARIO 5",
+    "test": "POST /admin/registrations/some-id/swap without admin \u2192 403",
+    "status": "PASS",
+    "expected": 403,
+    "observed": 403,
+    "details": "",
+    "timestamp": "2026-06-09T18:41:38.040008"
+  }
+]
