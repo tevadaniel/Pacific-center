@@ -37,6 +37,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const [standsByVenue, setStandsByVenue] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeVenue, setActiveVenue] = useState('all');
+  // 🆕 SESSION 52g.5 — Filtre par jour de présence (Vendredi / Samedi / V+S)
+  const [dayFilter, setDayFilter] = useState('all'); // 'all' | 'vendredi' | 'samedi' | 'both'
 
   // Dialog states
   const [promote, setPromote] = useState(null); // { req, freeStands: [] }
@@ -153,6 +155,18 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
     for (const r of requests) {
       const v = r.venue_id;
       if (!out[v]) continue;
+      // 🆕 SESSION 52g.5 — Filtre par jour de présence + capture _attendingDays pour les badges
+      const daysAttended = Array.isArray(r.registration?.attending_days)
+        ? r.registration.attending_days
+        : (Array.isArray(r.attending_days) ? r.attending_days : []);
+      r._attendingDays = daysAttended;
+      const matchesDay = dayFilter === 'all'
+        ? true
+        : dayFilter === 'vendredi' ? daysAttended.includes('vendredi')
+        : dayFilter === 'samedi' ? daysAttended.includes('samedi')
+        : dayFilter === 'both' ? (daysAttended.includes('vendredi') && daysAttended.includes('samedi'))
+        : true;
+      if (!matchesDay) continue;
       // 🆕 SESSION 48z — Statuts élargis pour couvrir les deux sources (validation_requests + registrations)
       if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille') {
         out[v].validated.push(r);
@@ -204,7 +218,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       });
     }
     return out;
-  }, [venues, requests, standsByVenue]);
+  }, [venues, requests, standsByVenue, dayFilter]);
 
   const filtered = activeVenue === 'all' ? Object.values(grouped) : [grouped[activeVenue]].filter(Boolean);
   const totals = useMemo(() => {
@@ -214,6 +228,23 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       waitlist: acc.waitlist + g.waitlist.length,
     }), { validated: 0, preReserved: 0, waitlist: 0 });
   }, [grouped]);
+
+  // 🆕 SESSION 52g.5 — Compteurs par jour (sur tous les requests, ignorant le dayFilter actif)
+  const dayCounts = useMemo(() => {
+    const c = { ven: 0, sam: 0, both: 0, unknown: 0 };
+    for (const r of requests) {
+      const days = Array.isArray(r.registration?.attending_days)
+        ? r.registration.attending_days
+        : (Array.isArray(r.attending_days) ? r.attending_days : []);
+      const isVen = days.includes('vendredi');
+      const isSam = days.includes('samedi');
+      if (isVen && isSam) c.both++;
+      else if (isVen) c.ven++;
+      else if (isSam) c.sam++;
+      else c.unknown++;
+    }
+    return c;
+  }, [requests]);
 
   // ─── Actions ───
   const openPromote = (req, freeStands) => {
@@ -342,7 +373,17 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           <span className="inline-flex items-center gap-1"><Hourglass className="w-3 h-3 text-violet-600" /> <b className="text-violet-700">{totals.preReserved}</b> pré-réservés</span>
           <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3 text-amber-600" /> <b className="text-amber-700">{totals.waitlist}</b> en attente</span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* 🆕 SESSION 52g.5 — Filtre par jour Vendredi/Samedi */}
+          <Select value={dayFilter} onValueChange={setDayFilter}>
+            <SelectTrigger className="h-8 text-xs w-44" data-testid="unified-day-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">📅 Tous les jours ({dayCounts.ven + dayCounts.sam + dayCounts.both})</SelectItem>
+              <SelectItem value="vendredi">🟦 Vendredi 14/08 ({dayCounts.ven + dayCounts.both})</SelectItem>
+              <SelectItem value="samedi">🟪 Samedi 15/08 ({dayCounts.sam + dayCounts.both})</SelectItem>
+              <SelectItem value="both">✅ Vendredi + Samedi ({dayCounts.both})</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={activeVenue} onValueChange={setActiveVenue}>
             <SelectTrigger className="h-8 text-xs w-44"><SelectValue placeholder="Filtrer site…" /></SelectTrigger>
             <SelectContent>
@@ -712,18 +753,41 @@ function Empty({ label }) {
 }
 
 // 🆕 SESSION 48w — Nom d'exposant cliquable (ouvre le drawer/handler externe)
+// 🆕 SESSION 48w — Nom d'exposant cliquable (ouvre le drawer/handler externe)
 function ExposantName({ r, onClick }) {
   const name = r.organization?.name || '—';
+  // 🆕 SESSION 52g.5 — Badges des jours de présence
+  const days = Array.isArray(r._attendingDays) ? r._attendingDays
+    : Array.isArray(r.registration?.attending_days) ? r.registration.attending_days
+    : Array.isArray(r.attending_days) ? r.attending_days
+    : [];
+  const hasVen = days.includes('vendredi');
+  const hasSam = days.includes('samedi');
+  const dayBadges = (
+    <span className="inline-flex items-center gap-0.5 ml-1 shrink-0">
+      {hasVen && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] font-bold rounded bg-blue-100 text-blue-900 border border-blue-300" title="Présent vendredi">V</span>}
+      {hasSam && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] font-bold rounded bg-purple-100 text-purple-900 border border-purple-300" title="Présent samedi">S</span>}
+      {!hasVen && !hasSam && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] rounded bg-slate-100 text-slate-500 border border-slate-300" title="Jours non définis">?</span>}
+    </span>
+  );
   if (typeof onClick === 'function') {
     return (
-      <button
-        onClick={() => onClick(r)}
-        className="font-semibold text-sm truncate text-blue-700 hover:underline cursor-pointer text-left w-full"
-        title="Voir la fiche détaillée"
-      >
-        {name}
-      </button>
+      <div className="flex items-center gap-1 w-full">
+        <button
+          onClick={() => onClick(r)}
+          className="font-semibold text-sm truncate text-blue-700 hover:underline cursor-pointer text-left flex-1 min-w-0"
+          title="Voir la fiche détaillée"
+        >
+          {name}
+        </button>
+        {dayBadges}
+      </div>
     );
   }
-  return <div className="font-semibold text-sm truncate">{name}</div>;
+  return (
+    <div className="flex items-center gap-1 w-full">
+      <div className="font-semibold text-sm truncate flex-1 min-w-0">{name}</div>
+      {dayBadges}
+    </div>
+  );
 }

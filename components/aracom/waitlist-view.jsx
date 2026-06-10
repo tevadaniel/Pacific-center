@@ -27,6 +27,8 @@ export default function WaitlistView() {
   const [loading, setLoading] = useState(true);
   const [promoting, setPromoting] = useState(null); // { req, freeStands: [] }
   const [targetStand, setTargetStand] = useState('');
+  // 🆕 SESSION 52g.5 — Filtre par jour de présence
+  const [dayFilter, setDayFilter] = useState('all'); // 'all' | 'vendredi' | 'samedi' | 'both'
 
   const load = async () => {
     setLoading(true);
@@ -56,15 +58,33 @@ export default function WaitlistView() {
 
   useEffect(() => { load(); }, []);
 
-  // Regroupement par site (avec position FIFO calculée)
+  // Regroupement par site (avec position FIFO calculée) — filtre par jour appliqué
   const byVenue = useMemo(() => {
     const map = {};
-    for (const v of venues) map[v.id] = { venue: v, items: [], freeStands: [] };
+    for (const v of venues) map[v.id] = { venue: v, items: [], freeStands: [], counts: { ven: 0, sam: 0, both: 0, unknown: 0 } };
+    // 🆕 SESSION 52g.5 — Filtre par jour de présence
+    const matchesDay = (r) => {
+      const days = Array.isArray(r.attending_days) ? r.attending_days : [];
+      if (dayFilter === 'all') return true;
+      if (dayFilter === 'vendredi') return days.includes('vendredi');
+      if (dayFilter === 'samedi') return days.includes('samedi');
+      if (dayFilter === 'both') return days.includes('vendredi') && days.includes('samedi');
+      return true;
+    };
     // Sort items by created_at (FIFO)
     const sorted = [...items].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    sorted.forEach((r, idx) => {
+    sorted.forEach((r) => {
       const v = r.venue_id;
       if (!map[v]) return;
+      const days = Array.isArray(r.attending_days) ? r.attending_days : [];
+      // Comptage par jour (toujours, même si filtré)
+      const isVen = days.includes('vendredi');
+      const isSam = days.includes('samedi');
+      if (isVen && isSam) map[v].counts.both++;
+      else if (isVen) map[v].counts.ven++;
+      else if (isSam) map[v].counts.sam++;
+      else map[v].counts.unknown++;
+      if (!matchesDay(r)) return;
       map[v].items.push({ ...r, fifo_position: map[v].items.length + 1 });
     });
     // Calcule les stands libres par venue
@@ -77,11 +97,25 @@ export default function WaitlistView() {
         return isFree && !s.organization;
       });
     }
-    // Ne garde que les venues ayant au moins 1 waitlister
+    // Ne garde que les venues ayant au moins 1 waitlister (après filtre)
     return Object.values(map).filter(v => v.items.length > 0);
-  }, [items, venues, standsByVenue]);
+  }, [items, venues, standsByVenue, dayFilter]);
 
   const totalWaitlist = items.length;
+  // 🆕 SESSION 52g.5 — Compteurs globaux par jour
+  const globalCounts = useMemo(() => {
+    const c = { ven: 0, sam: 0, both: 0, unknown: 0 };
+    for (const r of items) {
+      const days = Array.isArray(r.attending_days) ? r.attending_days : [];
+      const isVen = days.includes('vendredi');
+      const isSam = days.includes('samedi');
+      if (isVen && isSam) c.both++;
+      else if (isVen) c.ven++;
+      else if (isSam) c.sam++;
+      else c.unknown++;
+    }
+    return c;
+  }, [items]);
 
   const openPromote = (req) => {
     const free = standsByVenue[req.venue_id]?.filter(s => {
@@ -122,14 +156,32 @@ export default function WaitlistView() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Hourglass className="w-5 h-5 text-amber-600" />
           <h2 className="text-lg font-semibold text-slate-900">Liste d&apos;attente — par site</h2>
           <Badge variant="secondary" className="text-[10px]">{totalWaitlist} exposant{totalWaitlist > 1 ? 's' : ''} en attente</Badge>
+          {/* 🆕 SESSION 52g.5 — Compteurs par jour de présence */}
+          <Badge className="text-[10px] bg-blue-100 text-blue-900 border-blue-300 border">📅 Ven : {globalCounts.ven + globalCounts.both}</Badge>
+          <Badge className="text-[10px] bg-purple-100 text-purple-900 border-purple-300 border">📅 Sam : {globalCounts.sam + globalCounts.both}</Badge>
+          {globalCounts.both > 0 && <Badge className="text-[10px] bg-emerald-100 text-emerald-900 border-emerald-300 border">V+S : {globalCounts.both}</Badge>}
+          {globalCounts.unknown > 0 && <Badge className="text-[10px] bg-slate-100 text-slate-700 border-slate-300 border" title="Inscriptions sans jour défini">? : {globalCounts.unknown}</Badge>}
         </div>
-        <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
-          <RefreshCw className="w-3.5 h-3.5" /> Actualiser
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={dayFilter} onValueChange={setDayFilter}>
+            <SelectTrigger className="h-9 w-44 text-xs" data-testid="waitlist-day-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">📅 Tous les jours</SelectItem>
+              <SelectItem value="vendredi">🟦 Vendredi 14/08</SelectItem>
+              <SelectItem value="samedi">🟪 Samedi 15/08</SelectItem>
+              <SelectItem value="both">✅ Vendredi + Samedi</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
+            <RefreshCw className="w-3.5 h-3.5" /> Actualiser
+          </Button>
+        </div>
       </div>
 
       {/* État vide */}
@@ -145,14 +197,17 @@ export default function WaitlistView() {
 
       {/* Listing par site */}
       <div className="space-y-4">
-        {byVenue.map(({ venue, items, freeStands }) => (
+        {byVenue.map(({ venue, items, freeStands, counts }) => (
           <Card key={venue.id} className="border-amber-200 bg-amber-50/30">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <MapPin className="w-4 h-4 text-blue-600" />
                   <CardTitle className="text-base">{venue.name}</CardTitle>
                   <Badge className="bg-amber-500 text-white text-[10px]">{items.length} en attente</Badge>
+                  {/* 🆕 SESSION 52g.5 — Compteurs par jour pour ce site */}
+                  <Badge className="text-[10px] bg-blue-50 text-blue-900 border-blue-200 border" title="Présents vendredi (V seul ou V+S)">📅 Ven {counts.ven + counts.both}</Badge>
+                  <Badge className="text-[10px] bg-purple-50 text-purple-900 border-purple-200 border" title="Présents samedi (S seul ou V+S)">📅 Sam {counts.sam + counts.both}</Badge>
                   {freeStands.length > 0 ? (
                     <Badge className="bg-emerald-500 text-white text-[10px]">{freeStands.length} stand{freeStands.length > 1 ? 's' : ''} libre{freeStands.length > 1 ? 's' : ''}</Badge>
                   ) : (
@@ -165,14 +220,21 @@ export default function WaitlistView() {
               <div className="space-y-1.5">
                 {items.map((r) => {
                   const canPromote = freeStands.length > 0;
+                  const days = Array.isArray(r.attending_days) ? r.attending_days : [];
+                  const hasVen = days.includes('vendredi');
+                  const hasSam = days.includes('samedi');
                   return (
                     <div key={r.id} className="bg-white rounded-md border border-amber-200 px-3 py-2 flex items-center gap-3 flex-wrap">
                       <div className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-900 text-xs font-bold shrink-0">
                         #{r.fifo_position}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-slate-900 truncate">
+                        <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
                           {r.organization?.name || '—'}
+                          {/* 🆕 SESSION 52g.5 — Badges de jours de présence */}
+                          {hasVen && <Badge className="text-[9px] bg-blue-100 text-blue-900 border-blue-300 border h-4 px-1">Ven</Badge>}
+                          {hasSam && <Badge className="text-[9px] bg-purple-100 text-purple-900 border-purple-300 border h-4 px-1">Sam</Badge>}
+                          {!hasVen && !hasSam && <Badge className="text-[9px] bg-slate-100 text-slate-600 border-slate-300 border h-4 px-1" title="Jours non définis">? jours</Badge>}
                         </div>
                         <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
                           <span className="inline-flex items-center gap-1">

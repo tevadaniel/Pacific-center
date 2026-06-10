@@ -2379,11 +2379,22 @@ export async function GET(request, { params }) {
       const venues = await db.collection('venues').find({ id: { $in: list.map(r => r.venue_id) } }).toArray();
       const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
       const vById = Object.fromEntries(venues.map(v => [v.id, v]));
-      return json(list.map(r => ({
-        ...r, _id: undefined,
-        organization: orgById[r.organization_id] ? { id: orgById[r.organization_id].id, name: orgById[r.organization_id].name, main_email: orgById[r.organization_id].main_email, main_phone: orgById[r.organization_id].main_phone, contact_name: orgById[r.organization_id].contact_name, discipline: orgById[r.organization_id].discipline } : null,
-        venue: vById[r.venue_id] ? { id: vById[r.venue_id].id, name: vById[r.venue_id].name, code: vById[r.venue_id].code } : null,
-      })));
+      // 🆕 SESSION 52g.5 — Joindre les attending_days depuis la registration liée
+      const regIds = [...new Set(list.map(r => r.registration_id).filter(Boolean))];
+      const regs = regIds.length
+        ? await db.collection('registrations').find({ id: { $in: regIds } }, { projection: { id: 1, attending_days: 1, organization_name: 1 } }).toArray()
+        : [];
+      const regById = Object.fromEntries(regs.map(r => [r.id, r]));
+      return json(list.map(r => {
+        const reg = regById[r.registration_id] || null;
+        const attendingDays = Array.isArray(reg?.attending_days) ? reg.attending_days : (Array.isArray(r.attending_days) ? r.attending_days : []);
+        return {
+          ...r, _id: undefined,
+          attending_days: attendingDays,
+          organization: orgById[r.organization_id] ? { id: orgById[r.organization_id].id, name: orgById[r.organization_id].name, main_email: orgById[r.organization_id].main_email, main_phone: orgById[r.organization_id].main_phone, contact_name: orgById[r.organization_id].contact_name, discipline: orgById[r.organization_id].discipline } : null,
+          venue: vById[r.venue_id] ? { id: vById[r.venue_id].id, name: vById[r.venue_id].name, code: vById[r.venue_id].code } : null,
+        };
+      }));
     }
 
     // ---- Mailing status (TEST MODE indicator for UI) ----

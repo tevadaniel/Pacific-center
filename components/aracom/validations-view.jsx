@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ExposantLink } from './exposant-panel-context';
 
 /**
@@ -30,6 +31,8 @@ export default function ValidationsView() {
   const [tab, setTab] = useState('en_attente');
   const [showRdv, setShowRdv] = useState(null);
   const [showLock, setShowLock] = useState(null);
+  // 🆕 SESSION 52g.5 — Filtre par jour de présence
+  const [dayFilter, setDayFilter] = useState('all'); // 'all' | 'vendredi' | 'samedi' | 'both'
 
   const load = async () => {
     setLoading(true);
@@ -49,19 +52,59 @@ export default function ValidationsView() {
     } catch (e) { toast.error(e.message); }
   };
 
-  const counts = {
-    en_attente: requests.filter(r => r.status === 'en_attente').length,
-    rdv_fixe: requests.filter(r => r.status === 'rdv_fixe').length,
-    verrouille: requests.filter(r => r.status === 'verrouille').length,
-    annulee: requests.filter(r => r.status === 'annulee').length,
+  // 🆕 SESSION 52g.5 — Helper de filtrage par jour
+  const matchesDay = (r) => {
+    const days = Array.isArray(r.attending_days) ? r.attending_days : [];
+    if (dayFilter === 'all') return true;
+    if (dayFilter === 'vendredi') return days.includes('vendredi');
+    if (dayFilter === 'samedi') return days.includes('samedi');
+    if (dayFilter === 'both') return days.includes('vendredi') && days.includes('samedi');
+    return true;
   };
 
-  const filtered = requests.filter(r => r.status === tab);
+  const counts = {
+    en_attente: requests.filter(r => r.status === 'en_attente' && matchesDay(r)).length,
+    rdv_fixe: requests.filter(r => r.status === 'rdv_fixe' && matchesDay(r)).length,
+    verrouille: requests.filter(r => r.status === 'verrouille' && matchesDay(r)).length,
+    annulee: requests.filter(r => r.status === 'annulee' && matchesDay(r)).length,
+  };
+
+  // 🆕 Compteurs par jour pour l'onglet actif
+  const tabRequests = requests.filter(r => r.status === tab);
+  const dayCounts = {
+    ven: tabRequests.filter(r => (r.attending_days || []).includes('vendredi') && !(r.attending_days || []).includes('samedi')).length,
+    sam: tabRequests.filter(r => (r.attending_days || []).includes('samedi') && !(r.attending_days || []).includes('vendredi')).length,
+    both: tabRequests.filter(r => (r.attending_days || []).includes('vendredi') && (r.attending_days || []).includes('samedi')).length,
+    unknown: tabRequests.filter(r => !(r.attending_days || []).length).length,
+  };
+
+  const filtered = requests.filter(r => r.status === tab && matchesDay(r));
 
   if (loading) return <div className="py-12 text-center text-slate-500">Chargement…</div>;
 
   return (
     <div className="space-y-4">
+      {/* 🆕 SESSION 52g.5 — Filtre par jour de présence + compteurs */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Calendar className="w-4 h-4 text-slate-600" />
+        <span className="text-sm font-semibold text-slate-700">Filtrer par jour :</span>
+        <Select value={dayFilter} onValueChange={setDayFilter}>
+          <SelectTrigger className="h-9 w-48 text-xs" data-testid="validations-day-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">📅 Tous les jours</SelectItem>
+            <SelectItem value="vendredi">🟦 Vendredi 14/08</SelectItem>
+            <SelectItem value="samedi">🟪 Samedi 15/08</SelectItem>
+            <SelectItem value="both">✅ Vendredi + Samedi</SelectItem>
+          </SelectContent>
+        </Select>
+        <Badge className="text-[10px] bg-blue-100 text-blue-900 border-blue-300 border" title="Sur l'onglet courant : présents vendredi seul">📅 Ven seul : {dayCounts.ven}</Badge>
+        <Badge className="text-[10px] bg-purple-100 text-purple-900 border-purple-300 border" title="Sur l'onglet courant : présents samedi seul">📅 Sam seul : {dayCounts.sam}</Badge>
+        <Badge className="text-[10px] bg-emerald-100 text-emerald-900 border-emerald-300 border" title="Sur l'onglet courant : présents les deux jours">V+S : {dayCounts.both}</Badge>
+        {dayCounts.unknown > 0 && <Badge className="text-[10px] bg-slate-100 text-slate-700 border-slate-300 border" title="Sur l'onglet courant : jours non définis">? : {dayCounts.unknown}</Badge>}
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="En attente" value={counts.en_attente} accent="amber" />
         <KpiCard label="RDV fixés" value={counts.rdv_fixe} accent="blue" />
@@ -109,16 +152,24 @@ function ValidationRequestCard({ req, onSetRdv, onLock, onCancel }) {
     : req.status === 'rdv_fixe' ? 'border-blue-300 bg-blue-50/40'
     : req.status === 'verrouille' ? 'border-emerald-300 bg-emerald-50/40'
     : 'border-slate-200 bg-slate-50/40';
+  // 🆕 SESSION 52g.5 — Badges des jours de présence
+  const days = Array.isArray(req.attending_days) ? req.attending_days : [];
+  const hasVen = days.includes('vendredi');
+  const hasSam = days.includes('samedi');
   return (
     <Card className={`border-2 ${accent}`}>
       <CardContent className="p-4">
         <div className="flex flex-wrap items-start gap-3 justify-between">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <Building2 className="w-4 h-4 text-slate-500" />
               <AiInsightTrigger registration={{ id: req.registration_id || req.id, ai_insight: req.ai_insight, ai_insight_vigilance: req.ai_insight_vigilance, ai_insight_generated_at: req.ai_insight_generated_at }} size="xs" />
               <ExposantLink id={req.registration_id || req.id} className="font-bold text-base">{req.organization?.name || '—'}</ExposantLink>
               <Badge variant="secondary" className="text-xs">{req.organization?.discipline || '—'}</Badge>
+              {/* 🆕 Badges jours de présence */}
+              {hasVen && <Badge className="text-[10px] bg-blue-100 text-blue-900 border-blue-300 border h-5">📅 Ven</Badge>}
+              {hasSam && <Badge className="text-[10px] bg-purple-100 text-purple-900 border-purple-300 border h-5">📅 Sam</Badge>}
+              {!hasVen && !hasSam && <Badge className="text-[10px] bg-slate-100 text-slate-600 border-slate-300 border h-5" title="Jours non définis">? jours</Badge>}
             </div>
             <div className="text-sm text-slate-600 grid md:grid-cols-3 gap-x-4 gap-y-1">
               <div><b>Site :</b> {req.venue?.name || '—'}</div>
