@@ -62,30 +62,36 @@ export default function SiteAnimationsOverview() {
     return m;
   }, [validations]);
 
-  // 🆕 SESSION 52g — Classification stricte des inscriptions par état métier
-  //   • CONFIRMED   = tunnel terminé, exposant validé (a_confirmer, confirme, verrouille)
+  // 🆕 SESSION 52g.4 — Classification stricte des inscriptions par état métier réel
+  //   • CONFIRMED   = exposant validé (tunnel terminé) — a_confirmer, confirme, verrouille…
   //   • WAITLIST    = liste d'attente (is_waitlist OU status liste_attente)
-  //   • IN_PROGRESS = brouillon, tunnel non terminé (provisoire) — NE PAS compter comme exposant
-  //   On élimine aussi les annulés.
+  //   • DRAFT       = tunnel en cours (provisoire UNIQUEMENT — vraie inscription en cours)
+  //   • PROSPECT    = prospects/relances CRM (prospect, a_relancer) — PAS un tunnel
+  //   • CANCELLED   = refusé/annulé — ignoré
   const STATUSES_CONFIRMED = ['a_confirmer', 'confirme', 'verrouille', 'rdv_fixe', 'en_attente'];
   const STATUSES_WAITLIST = ['liste_attente'];
   const STATUSES_CANCELLED = ['annule', 'cancelled', 'refused', 'refuse'];
+  const STATUSES_PROSPECT = ['prospect', 'a_relancer'];
+  const STATUSES_DRAFT = ['provisoire'];
   const classifyReg = (r) => {
     if (STATUSES_CANCELLED.includes(r.status)) return 'cancelled';
     if (r.is_waitlist === true || STATUSES_WAITLIST.includes(r.status)) return 'waitlist';
     if (STATUSES_CONFIRMED.includes(r.status)) return 'confirmed';
-    return 'in_progress';
+    if (STATUSES_PROSPECT.includes(r.status)) return 'prospect';
+    if (STATUSES_DRAFT.includes(r.status)) return 'draft';
+    return 'other';
   };
 
-  // Index : registrations par venue ET par état (hors annulé)
+  // Index : registrations par venue ET par état (hors annulé et prospects qui ne sont PAS dans le tunnel)
   const regsByVenue = useMemo(() => {
     const m = new Map();
     for (const r of regs) {
       if (!r.venue_id) continue;
       const cls = classifyReg(r);
-      if (cls === 'cancelled') continue;
-      if (!m.has(r.venue_id)) m.set(r.venue_id, { confirmed: [], waitlist: [], in_progress: [] });
-      m.get(r.venue_id)[cls].push(r);
+      if (cls === 'cancelled' || cls === 'prospect' || cls === 'other') continue;
+      if (!m.has(r.venue_id)) m.set(r.venue_id, { confirmed: [], waitlist: [], draft: [] });
+      const bucket = cls === 'draft' ? 'draft' : cls; // map in_progress→draft consistency
+      m.get(r.venue_id)[bucket].push(r);
     }
     return m;
   }, [regs]);
@@ -115,8 +121,8 @@ export default function SiteAnimationsOverview() {
   /** Stats agrégées par venue */
   const venueStats = useMemo(() => {
     return venues.map((v) => {
-      const buckets = regsByVenue.get(v.id) || { confirmed: [], waitlist: [], in_progress: [] };
-      const venueRegs = buckets.confirmed; // 🆕 SESSION 52g — Seuls les confirmés sont des "exposants"
+      const buckets = regsByVenue.get(v.id) || { confirmed: [], waitlist: [], draft: [] };
+      const venueRegs = buckets.confirmed; // 🆕 SESSION 52g.4 — Seuls les confirmés sont des "exposants"
       const venueAnims = animsByVenue.get(v.id) || [];
       const dayCount = (day) =>
         venueRegs.filter((r) => Array.isArray(r.attending_days) && (r.attending_days.includes(day) || r.attending_days.includes(day === 'vendredi' ? '2026-08-14' : '2026-08-15'))).length;
@@ -150,8 +156,8 @@ export default function SiteAnimationsOverview() {
         anims: { ven, sam, ven_stand, ven_demo, sam_stand, sam_demo, total: ven.length + sam.length },
         noAnim,
         regsList: venueRegs,
-        // 🆕 SESSION 52g — Comptage séparé pour transparence admin
-        inProgressCount: buckets.in_progress.length,
+        // 🆕 SESSION 52g.4 — Comptage séparé pour transparence admin
+        draftCount: buckets.draft.length,
         waitlistRegsCount: buckets.waitlist.length,
         valReqs,
         preValidated,
@@ -176,11 +182,11 @@ export default function SiteAnimationsOverview() {
       acc.noAnim += s.noAnim.length;
       acc.preValidated += s.preValidated.length;
       acc.waitlist += s.waitlist.length;
-      acc.inProgress += s.inProgressCount || 0;
+      acc.draft += s.draftCount || 0;
       acc.waitlistRegs += s.waitlistRegsCount || 0;
       return acc;
     },
-    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0, inProgress: 0, waitlistRegs: 0 }
+    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0, draft: 0, waitlistRegs: 0 }
   ), [venueStats]);
 
   if (loading) {
@@ -202,9 +208,9 @@ export default function SiteAnimationsOverview() {
               🚨 {totals.noAnim} confirmé·s sans animation
             </Badge>
           )}
-          {totals.inProgress > 0 && (
+          {totals.draft > 0 && (
             <Badge className="text-[10px] bg-slate-100 text-slate-700 border-slate-300 border" title="Brouillons : tunnels d'inscription en cours, pas encore soumis">
-              ✏️ {totals.inProgress} en cours
+              ✏️ {totals.draft} en cours
             </Badge>
           )}
           <Button size="sm" variant="ghost" onClick={load} className="ml-auto h-7 text-xs">🔄</Button>
@@ -234,7 +240,7 @@ export default function SiteAnimationsOverview() {
               <KpiMini label="Exposants confirmés" value={totals.regsCount} accent="emerald" sub={`Ven: ${totals.regsVen} · Sam: ${totals.regsSam}`} />
               <KpiMini label="Animations totales" value={totals.animVen + totals.animSam} accent="violet" sub={`Ven: ${totals.animVen} · Sam: ${totals.animSam}`} />
               <KpiMini label="🚨 Anomalies anim." value={totals.noAnim} accent={totals.noAnim > 0 ? 'rose' : 'slate'} sub={totals.noAnim > 0 ? 'confirmés sans anim' : 'aucune'} />
-              <KpiMini label="En cours (brouillons)" value={totals.inProgress} accent={totals.inProgress > 0 ? 'slate' : 'slate'} sub="tunnel non terminé" />
+              <KpiMini label="En cours (brouillons)" value={totals.draft} accent="slate" sub="tunnel non terminé" />
               <KpiMini label="✓ Pré-validés" value={totals.preValidated} accent="emerald" sub="dans quota" />
               <KpiMini label="⏳ Liste d'attente" value={totals.waitlist} accent={totals.waitlist > 0 ? 'amber' : 'slate'} sub="quota dépassé" />
             </div>
@@ -381,7 +387,7 @@ function SiteDetailPanel({ site }) {
         <KpiMini label="Exposants confirmés" value={s.regsCount} accent="emerald" sub={`Ven: ${s.regsVen} · Sam: ${s.regsSam}`} />
         <KpiMini label="Animations" value={s.anims.total} accent="violet" sub={`Ven: ${s.anims.ven.length} · Sam: ${s.anims.sam.length}`} />
         <KpiMini label="🚨 Anomalie anim." value={s.noAnim.length} accent={s.noAnim.length > 0 ? 'rose' : 'slate'} sub={s.noAnim.length > 0 ? 'confirmés sans anim' : 'tout est ok'} />
-        <KpiMini label="En cours" value={s.inProgressCount || 0} accent="slate" sub="brouillons tunnel" />
+        <KpiMini label="En cours" value={s.draftCount || 0} accent="slate" sub="brouillons tunnel" />
       </div>
 
       {/* 🆕 SESSION 45 — Demandes de validation : pré-validés (dans quota) vs liste d'attente */}
