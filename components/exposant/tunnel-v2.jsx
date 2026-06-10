@@ -533,19 +533,25 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
                       </ul>
                     )}
 
-                    {/* Bouton ouvrir picker */}
-                    {!isOpen && (
+                    {/* 🆕 SESSION 52g.10 — Si déjà 1 anim pour ce jour, on bloque l'ajout d'un 2ème
+                        créneau sur la plateforme. Note : libre d'animer son stand autant qu'il veut. */}
+                    {hasAny && !isOpen && (
+                      <div className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-[10px] text-emerald-800 leading-snug flex items-start gap-1.5">
+                        <Info className="w-3 h-3 mt-0.5 shrink-0 text-emerald-700" />
+                        <div>
+                          <b>1 créneau réservé suffit</b> pour ce jour. Animez librement votre stand
+                          autant que vous voulez en dehors de ce créneau, sans réservation.
+                        </div>
+                      </div>
+                    )}
+                    {!hasAny && !isOpen && (
                       <button
                         onClick={() => { setOpenDay(d); if (!grid && !loadingGrid) loadGrid(); }}
                         disabled={busy || !venueId}
-                        className={`w-full rounded-md border-2 px-2 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-1.5 ${
-                          hasAny
-                            ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700'
-                            : 'border-red-400 bg-white hover:bg-red-50 text-red-700'
-                        } disabled:opacity-50`}
+                        className="w-full rounded-md border-2 px-2 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-1.5 border-red-400 bg-white hover:bg-red-50 text-red-700 disabled:opacity-50"
                         title={!venueId ? 'Choisissez un site d\'abord' : 'Ouvrir le sélecteur'}
                       >
-                        <Plus className="w-3 h-3" /> {hasAny ? 'Ajouter une autre animation' : `Choisir un créneau pour ${dayLabel(d)}`}
+                        <Plus className="w-3 h-3" /> Choisir un créneau pour {dayLabel(d)}
                       </button>
                     )}
                   </div>

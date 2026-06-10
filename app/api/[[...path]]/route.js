@@ -7331,6 +7331,19 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
           return err(`Vous n'êtes pas inscrit le ${body.day_label}. Sélectionnez ce jour à l'étape 1.`, 400);
         }
       }
+      // 🆕 SESSION 52g.10 — RÈGLE STRICTE : 1 seule animation réservée par jour de présence
+      //   (l'exposant reste libre d'animer son stand autant qu'il veut en dehors, sans réservation).
+      const existingForDay = await db.collection('animation_slots').countDocuments({
+        registration_id: body.registration_id,
+        day_label: body.day_label,
+      });
+      if (existingForDay >= 1) {
+        return err(
+          `Vous avez déjà 1 créneau d'animation réservé pour ${body.day_label === 'vendredi' ? 'le vendredi' : 'le samedi'}. ` +
+          `Vous pouvez animer librement votre stand autant que vous voulez en plus de ce créneau, sans réservation.`,
+          400
+        );
+      }
       // Normalisation : valeurs canoniques sur_stand / zone_demo (anciennes valeurs remappées)
       const normLoc = (v) => {
         if (v === 'sur_stand' || v === 'stand') return 'sur_stand';
