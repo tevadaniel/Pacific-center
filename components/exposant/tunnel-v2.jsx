@@ -953,20 +953,31 @@ export default function TunnelV2({
 
   const checks = useMemo(() => {
     const list = [];
+    // 🆕 SESSION 52g.9 — Si l'exposant est en LISTE D'ATTENTE pour ce site, on adapte les checks.
+    //   Un stand ne peut pas être attribué tant qu'il n'est pas promu → on accepte "Inscrit en liste d'attente".
+    const isWaitlist = !!r.is_waitlist || r.status === 'liste_attente';
     // Bloc 1 — Site
     list.push({ kind: 'site', ok: !!r.venue_id, label: 'Site choisi' });
     // Bloc 2 — Jours
     list.push({ kind: 'days', ok: days.length > 0, label: 'Jours de présence' });
-    // Bloc 3 — Stand
-    list.push({ kind: 'stand', ok: !!r.stand_code, label: 'Stand réservé' });
-    // Bloc 4 — Animations par jour
+    // Bloc 3 — Stand OU Liste d'attente
+    if (isWaitlist) {
+      list.push({ kind: 'stand', ok: true, label: '⏳ Inscrit en liste d\'attente', isInfo: true });
+    } else {
+      list.push({ kind: 'stand', ok: !!r.stand_code, label: 'Stand réservé' });
+    }
+    // Bloc 4 — Animations par jour (toujours requis : ce sont les souhaits, même en waitlist)
     if (days.includes(DAY_FRI)) list.push({ kind: 'anim', ok: animVen.length >= 1, label: 'Animation du vendredi 14 août' });
     if (days.includes(DAY_SAT)) list.push({ kind: 'anim', ok: animSam.length >= 1, label: 'Animation du samedi 15 août' });
-    // Bloc 5 — Documents
-    const hasConv = !!r.is_convention_signed || (docs || []).some((d) => d.document_type === 'convention');
-    list.push({ kind: 'doc', ok: hasConv, label: 'Convention signée' });
-    const hasAss = (docs || []).some((d) => d.document_type === 'assurance') || !!r.is_insurance_uploaded;
-    list.push({ kind: 'doc', ok: hasAss, label: 'Attestation d\'assurance' });
+    // Bloc 5 — Documents (en waitlist, optionnels jusqu'à promotion)
+    if (!isWaitlist) {
+      const hasConv = !!r.is_convention_signed || (docs || []).some((d) => d.document_type === 'convention');
+      list.push({ kind: 'doc', ok: hasConv, label: 'Convention signée' });
+      const hasAss = (docs || []).some((d) => d.document_type === 'assurance') || !!r.is_insurance_uploaded;
+      list.push({ kind: 'doc', ok: hasAss, label: 'Attestation d\'assurance' });
+    } else {
+      list.push({ kind: 'doc', ok: true, label: '📄 Documents à fournir quand promu de la liste d\'attente', isInfo: true });
+    }
     return list;
   }, [r, days, slots, docs, animVen, animSam]);
 

@@ -9291,23 +9291,30 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
       if (!reg) return err('Inscription introuvable', 404);
       if (reg.status === 'confirme') return err('Inscription déjà confirmée', 400);
       if (!reg.venue_id) return err('Choisissez d\'abord un site dans Sites & plan', 400);
-      if (!reg.stand_code) return err('Pré-réservez un stand avant de demander la validation', 400);
+      // 🆕 SESSION 52g.9 — Mode "liste d'attente" : on accepte la soumission SANS stand_code.
+      //   La demande est créée avec status='waitlist' au lieu de 'en_attente'.
+      //   L'animation et les documents ne sont pas requis non plus (à compléter à la promotion).
+      const isWaitlistFlow = !!reg.is_waitlist || reg.status === 'liste_attente';
+      if (!isWaitlistFlow) {
+        if (!reg.stand_code) return err('Pré-réservez un stand avant de demander la validation', 400);
+      }
       // 🆕 SESSION 52c — Validation STRICTE : il faut TOUTES les conditions
       //   1) site (venue_id)        ✓ déjà checké
-      //   2) stand (stand_code)     ✓ déjà checké
+      //   2) stand (stand_code)     ✓ pour validation normale ; pas requis en waitlist
       //   3) au moins 1 jour de présence choisi
       //   4) 1 animation PAR jour de présence (pas juste 1 total !)
       const attendingDays = Array.isArray(reg.attending_days) ? reg.attending_days.filter(d => ['vendredi', 'samedi'].includes(d)) : [];
       if (attendingDays.length === 0) {
         return err('Indiquez d\'abord vos jours de présence (Vendredi et/ou Samedi)', 400);
       }
-      const slots = await db.collection('animation_slots').find({ registration_id: regId }).toArray();
-      if (slots.length === 0) return err('Choisissez au moins 1 créneau d\'animation avant de valider', 400);
-      // Vérification STRICTE : chaque jour de présence doit avoir au moins 1 animation
-      const daysWithoutAnim = attendingDays.filter(d => !slots.some(s => s.day_label === d));
-      if (daysWithoutAnim.length > 0) {
-        const labels = daysWithoutAnim.map(d => d === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août').join(' + ');
-        return err(`Animation manquante pour : ${labels}. Vous devez avoir 1 animation par jour de présence.`, 400);
+      if (!isWaitlistFlow) {
+        const slots = await db.collection('animation_slots').find({ registration_id: regId }).toArray();
+        if (slots.length === 0) return err('Choisissez au moins 1 créneau d\'animation avant de valider', 400);
+        const daysWithoutAnim = attendingDays.filter(d => !slots.some(s => s.day_label === d));
+        if (daysWithoutAnim.length > 0) {
+          const labels = daysWithoutAnim.map(d => d === 'vendredi' ? 'Vendredi 14 août' : 'Samedi 15 août').join(' + ');
+          return err(`Animation manquante pour : ${labels}. Vous devez avoir 1 animation par jour de présence.`, 400);
+        }
       }
 
       const { rdv_proposal = '', preferred_payment: _ignoredPayment = 'cheque', notes = '' } = body;
@@ -9315,7 +9322,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
       const preferred_payment = 'cheque';
       // Cancel any previous pending request
       await db.collection('validation_requests').updateMany(
-        { registration_id: regId, status: { $in: ['en_attente', 'rdv_fixe'] } },
+        { registration_id: regId, status: { $in: ['en_attente', 'rdv_fixe', 'waitlist'] } },
         { $set: { status: 'annulee', updated_at: new Date() } }
       );
       const reqId = uuid();
@@ -9324,9 +9331,9 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
         registration_id: regId,
         organization_id: reg.organization_id,
         venue_id: reg.venue_id,
-        stand_code: reg.stand_code,
-        status: 'en_attente', // en_attente -> rdv_fixe -> verrouille | annulee
-        preferred_payment: 'cheque', // 🆕 SESSION 48w — Caution = chèque uniquement (forcé en DB)
+        stand_code: reg.stand_code || null, // 🆕 SESSION 52g.9 — null si waitlist
+        status: isWaitlistFlow ? 'waitlist' : 'en_attente',
+        preferred_payment: 'cheque',
         rdv_proposal,
         notes,
         rdv_date: null,

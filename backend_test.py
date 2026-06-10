@@ -1,459 +1,581 @@
 #!/usr/bin/env python3
 """
-🚨 AUDIT EXHAUSTIF #2 — Backend Testing
-Vérifier que les SITES INACTIFS (Mahina, Moorea) sont MASQUÉS PARTOUT
-+ tester que tous les boutons/workflows fonctionnent.
+Backend test for SESSION 52g.9 — Waitlist request-validation flow
+Tests the critical bug fix where exposants on waitlist can submit validation requests
+without stand_code and animation slots.
 """
 
 import requests
 import json
-import sys
-from typing import Dict, List, Any
+import os
+from datetime import datetime
+from pymongo import MongoClient
+import uuid
 
 # Configuration
-BASE_URL = "https://polynesie-event-hub.preview.emergentagent.com/api"
+BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://polynesie-event-hub.preview.emergentagent.com')
+API_URL = f"{BASE_URL}/api"
+MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = os.getenv('DB_NAME', 'your_database_name')
+
+# Admin credentials
 ADMIN_HEADERS = {
-    "x-user-role": "aracom_admin",
-    "x-user-id": "u-admin",
-    "Content-Type": "application/json"
-}
-EXPOSANT_HEADERS = {
-    "x-user-role": "exposant",
-    "x-user-id": "u-test-exposant",
-    "Content-Type": "application/json"
-}
-PACIFIC_HEADERS = {
-    "x-user-role": "pacific_centers_readonly",
-    "x-user-id": "u-pacific",
-    "Content-Type": "application/json"
+    'x-user-role': 'aracom_admin',
+    'x-user-id': 'u-admin',
+    'Content-Type': 'application/json'
 }
 
-# Expected inactive sites
-INACTIVE_SITES = ["venue-mah", "venue-moo"]
-ACTIVE_SITES = ["venue-faaa", "venue-pun", "venue-aru", "venue-tar"]
+# MongoDB connection
+client = MongoClient(MONGO_URL)
+db = client[DB_NAME]
 
-# Results storage
-results = []
+def cleanup_test_data():
+    """Clean up test data from previous runs"""
+    print("\n🧹 Cleaning up test data from previous runs...")
+    
+    # Find all test registrations
+    test_regs = list(db.registrations.find({'id': {'$regex': '^reg-test-wl-'}}))
+    test_reg_ids = [r['id'] for r in test_regs]
+    
+    if test_reg_ids:
+        # Delete related data
+        db.validation_requests.delete_many({'registration_id': {'$in': test_reg_ids}})
+        db.animation_slots.delete_many({'registration_id': {'$in': test_reg_ids}})
+        db.stand_assignments.delete_many({'registration_id': {'$in': test_reg_ids}})
+        db.registrations.delete_many({'id': {'$in': test_reg_ids}})
+        print(f"   Deleted {len(test_reg_ids)} test registrations and related data")
+    
+    # Delete test organizations
+    test_orgs = list(db.organizations.find({'id': {'$regex': '^org-test-wl-'}}))
+    test_org_ids = [o['id'] for o in test_orgs]
+    
+    if test_org_ids:
+        db.organizations.delete_many({'id': {'$in': test_org_ids}})
+        print(f"   Deleted {len(test_org_ids)} test organizations")
+    
+    print("✅ Cleanup complete\n")
 
-def test_endpoint(name: str, method: str, path: str, headers: Dict = None, 
-                  body: Dict = None, expected_status: int = 200,
-                  check_mahina_excluded: bool = False,
-                  check_moorea_excluded: bool = False) -> Dict[str, Any]:
-    """Test an endpoint and check if Mahina/Moorea are excluded"""
-    url = f"{BASE_URL}{path}"
+def create_test_org(org_id, name):
+    """Create a test organization"""
+    org = {
+        'id': org_id,
+        'name': name,
+        'main_email': f'{org_id}@test.com',
+        'contact_name': 'Test Contact',
+        'main_phone': '0689123456',
+        'discipline': 'Test',
+        'created_at': datetime.utcnow(),
+        'updated_at': datetime.utcnow()
+    }
+    db.organizations.insert_one(org)
+    return org
+
+def create_test_registration(reg_id, org_id, venue_id, **kwargs):
+    """Create a test registration with custom fields"""
+    reg = {
+        'id': reg_id,
+        'organization_id': org_id,
+        'venue_id': venue_id,
+        'edition_id': 'edition-2026',
+        'status': kwargs.get('status', 'a_confirmer'),
+        'is_waitlist': kwargs.get('is_waitlist', False),
+        'stand_code': kwargs.get('stand_code', None),
+        'attending_days': kwargs.get('attending_days', []),
+        'created_at': datetime.utcnow(),
+        'updated_at': datetime.utcnow()
+    }
+    db.registrations.insert_one(reg)
+    return reg
+
+def create_animation_slot(reg_id, venue_id, day_label, start_time, end_time):
+    """Create an animation slot"""
+    slot = {
+        'id': f'anim-{uuid.uuid4().hex[:8]}',
+        'registration_id': reg_id,
+        'venue_id': venue_id,
+        'day_label': day_label,
+        'start_time': start_time,
+        'end_time': end_time,
+        'title': f'Test Animation {day_label}',
+        'location_type': 'sur_stand',
+        'created_at': datetime.utcnow(),
+        'updated_at': datetime.utcnow()
+    }
+    db.animation_slots.insert_one(slot)
+    return slot
+
+def test_1_waitlist_case():
+    """
+    TEST 1: Waitlist case
+    Create a registration with is_waitlist=true, status='liste_attente', 
+    valid venue_id, attending_days=['vendredi'], NO stand_code and NO animation_slots
+    → should return 201 and create VR with status='waitlist'
+    """
+    print("\n" + "="*80)
+    print("TEST 1: Waitlist case - Should accept submission without stand_code")
+    print("="*80)
     
     try:
-        if method == "GET":
-            response = requests.get(url, headers=headers, timeout=30)
-        elif method == "POST":
-            response = requests.post(url, headers=headers, json=body, timeout=30)
-        elif method == "PUT":
-            response = requests.put(url, headers=headers, json=body, timeout=30)
-        elif method == "DELETE":
-            response = requests.delete(url, headers=headers, timeout=30)
-        else:
-            return {"name": name, "status": "ERROR", "error": f"Unknown method {method}"}
+        # Get a valid venue_id
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
         
-        result = {
-            "name": name,
-            "method": method,
-            "path": path,
-            "status_code": response.status_code,
-            "expected_status": expected_status,
-            "status": "PASS" if response.status_code == expected_status else "FAIL",
-            "mahina_excluded": None,
-            "moorea_excluded": None,
-            "sites_returned": None,
-            "error": None
-        }
+        # Create test org and registration
+        org_id = 'org-test-wl-waitlist-1'
+        reg_id = 'reg-test-wl-waitlist-1'
         
-        # Try to parse JSON response
-        try:
+        create_test_org(org_id, 'TEST_WL_WAITLIST_1')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=True,
+            status='liste_attente',
+            attending_days=['vendredi', 'samedi'],
+            stand_code=None  # NO stand_code
+        )
+        # NO animation_slots created
+        
+        # Submit validation request
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={
+                'rdv_proposal': 'matin',
+                'notes': 'Test waitlist submission'
+            }
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 200:
             data = response.json()
-            result["response_data"] = data
-            
-            # Check if Mahina/Moorea are excluded
-            if check_mahina_excluded or check_moorea_excluded:
-                sites = []
-                
-                # Extract sites from different response structures
-                if isinstance(data, list):
-                    sites = [item.get("id") or item.get("venue_id") for item in data if isinstance(item, dict)]
-                elif isinstance(data, dict):
-                    if "venues" in data:
-                        sites = [v.get("id") or v.get("venue_id") for v in data["venues"]]
-                    elif "sites" in data:
-                        sites = [s.get("id") or s.get("venue_id") for s in data["sites"]]
-                    elif "data" in data and isinstance(data["data"], dict) and "sites" in data["data"]:
-                        sites = [s.get("venue_id") for s in data["data"]["sites"]]
-                
-                sites = [s for s in sites if s]  # Remove None values
-                result["sites_returned"] = sites
-                
-                if check_mahina_excluded:
-                    result["mahina_excluded"] = "venue-mah" not in sites
-                if check_moorea_excluded:
-                    result["moorea_excluded"] = "venue-moo" not in sites
-                
-                # Overall pass/fail based on exclusion
-                if check_mahina_excluded and not result["mahina_excluded"]:
-                    result["status"] = "FAIL"
-                    result["error"] = "Mahina NOT excluded but should be"
-                if check_moorea_excluded and not result["moorea_excluded"]:
-                    result["status"] = "FAIL"
-                    result["error"] = "Moorea NOT excluded but should be"
+            if data.get('ok') and data.get('validation_request_id'):
+                # Verify VR was created with status='waitlist'
+                vr = db.validation_requests.find_one({'id': data['validation_request_id']})
+                if vr:
+                    print(f"   ✅ Validation request created with ID: {vr['id']}")
+                    print(f"   ✅ VR status: {vr['status']}")
+                    print(f"   ✅ VR stand_code: {vr.get('stand_code')}")
                     
-        except Exception as e:
-            result["error"] = f"JSON parse error: {str(e)}"
+                    if vr['status'] == 'waitlist':
+                        print("   ✅ TEST 1 PASSED: Waitlist VR created successfully")
+                        return True
+                    else:
+                        print(f"   ❌ TEST 1 FAILED: Expected status='waitlist', got '{vr['status']}'")
+                        return False
+                else:
+                    print("   ❌ TEST 1 FAILED: VR not found in database")
+                    return False
+            else:
+                print(f"   ❌ TEST 1 FAILED: Invalid response structure")
+                return False
+        else:
+            print(f"   ❌ TEST 1 FAILED: Expected 200, got {response.status_code}")
+            return False
             
-    except requests.exceptions.Timeout:
-        result = {
-            "name": name,
-            "method": method,
-            "path": path,
-            "status": "TIMEOUT",
-            "error": "Request timeout after 30s"
-        }
     except Exception as e:
-        result = {
-            "name": name,
-            "method": method,
-            "path": path,
-            "status": "ERROR",
-            "error": str(e)
-        }
-    
-    results.append(result)
-    return result
+        print(f"   ❌ TEST 1 FAILED with exception: {str(e)}")
+        return False
 
-
-def print_result(result: Dict):
-    """Print a single test result"""
-    status_icon = "✅" if result["status"] == "PASS" else "❌" if result["status"] == "FAIL" else "⚠️"
-    print(f"{status_icon} {result['name']}")
-    print(f"   {result['method']} {result['path']}")
-    print(f"   Status: {result.get('status_code', 'N/A')} (expected {result.get('expected_status', 'N/A')})")
+def test_2_waitlist_without_attending_days():
+    """
+    TEST 2: Waitlist without attending_days
+    Same reg but attending_days=[] → should return 400
+    """
+    print("\n" + "="*80)
+    print("TEST 2: Waitlist without attending_days - Should return 400")
+    print("="*80)
     
-    if result.get("sites_returned"):
-        print(f"   Sites returned: {', '.join(result['sites_returned'])}")
-    if result.get("mahina_excluded") is not None:
-        print(f"   Mahina excluded: {'✅ YES' if result['mahina_excluded'] else '❌ NO'}")
-    if result.get("moorea_excluded") is not None:
-        print(f"   Moorea excluded: {'✅ YES' if result['moorea_excluded'] else '❌ NO'}")
-    if result.get("error"):
-        print(f"   Error: {result['error']}")
-    print()
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-no-days'
+        reg_id = 'reg-test-wl-no-days'
+        
+        create_test_org(org_id, 'TEST_WL_NO_DAYS')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=True,
+            status='liste_attente',
+            attending_days=[],  # Empty attending_days
+            stand_code=None
+        )
+        
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={}
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 400:
+            data = response.json()
+            if 'jours de présence' in data.get('error', '').lower():
+                print("   ✅ TEST 2 PASSED: Correctly rejected with 400 for missing attending_days")
+                return True
+            else:
+                print(f"   ❌ TEST 2 FAILED: Wrong error message: {data.get('error')}")
+                return False
+        else:
+            print(f"   ❌ TEST 2 FAILED: Expected 400, got {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 2 FAILED with exception: {str(e)}")
+        return False
 
+def test_3_normal_complete_case():
+    """
+    TEST 3: Normal complete case (NON-REGRESSION)
+    Create reg with stand_code, attending_days and animation_slots (1 per day)
+    → should create VR status='en_attente'
+    """
+    print("\n" + "="*80)
+    print("TEST 3: Normal complete case - Should create VR with status='en_attente'")
+    print("="*80)
+    
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-normal'
+        reg_id = 'reg-test-wl-normal'
+        
+        create_test_org(org_id, 'TEST_WL_NORMAL')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=False,
+            status='a_confirmer',
+            attending_days=['vendredi', 'samedi'],
+            stand_code='TEST-A01'  # Has stand_code
+        )
+        
+        # Create animation slots (1 per day)
+        create_animation_slot(reg_id, venue_id, 'vendredi', '10:00', '11:00')
+        create_animation_slot(reg_id, venue_id, 'samedi', '14:00', '15:00')
+        
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={}
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('ok') and data.get('validation_request_id'):
+                vr = db.validation_requests.find_one({'id': data['validation_request_id']})
+                if vr:
+                    print(f"   ✅ Validation request created with ID: {vr['id']}")
+                    print(f"   ✅ VR status: {vr['status']}")
+                    
+                    if vr['status'] == 'en_attente':
+                        print("   ✅ TEST 3 PASSED: Normal VR created with status='en_attente'")
+                        return True
+                    else:
+                        print(f"   ❌ TEST 3 FAILED: Expected status='en_attente', got '{vr['status']}'")
+                        return False
+                else:
+                    print("   ❌ TEST 3 FAILED: VR not found in database")
+                    return False
+            else:
+                print(f"   ❌ TEST 3 FAILED: Invalid response structure")
+                return False
+        else:
+            print(f"   ❌ TEST 3 FAILED: Expected 200, got {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 3 FAILED with exception: {str(e)}")
+        return False
 
-def print_summary():
-    """Print final summary table"""
-    print("\n" + "="*100)
-    print("SUMMARY TABLE - INACTIVE SITES MASKING")
-    print("="*100)
-    print(f"{'Endpoint':<50} {'Status':<10} {'Mahina':<10} {'Moorea':<10} {'Sites':<20}")
-    print("-"*100)
+def test_4_normal_without_stand_code():
+    """
+    TEST 4: Normal without stand_code (NON-REGRESSION)
+    Reg without is_waitlist, without stand_code → should return 400
+    """
+    print("\n" + "="*80)
+    print("TEST 4: Normal without stand_code - Should return 400")
+    print("="*80)
     
-    for r in results:
-        if r.get("mahina_excluded") is not None or r.get("moorea_excluded") is not None:
-            mahina = "✅ EXCL" if r.get("mahina_excluded") else "❌ INCL" if r.get("mahina_excluded") is False else "N/A"
-            moorea = "✅ EXCL" if r.get("moorea_excluded") else "❌ INCL" if r.get("moorea_excluded") is False else "N/A"
-            sites = str(len(r.get("sites_returned", []))) if r.get("sites_returned") else "N/A"
-            status = "✅ PASS" if r["status"] == "PASS" else "❌ FAIL"
-            print(f"{r['name']:<50} {status:<10} {mahina:<10} {moorea:<10} {sites:<20}")
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-no-stand'
+        reg_id = 'reg-test-wl-no-stand'
+        
+        create_test_org(org_id, 'TEST_WL_NO_STAND')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=False,
+            status='a_confirmer',
+            attending_days=['vendredi'],
+            stand_code=None  # NO stand_code
+        )
+        
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={}
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 400:
+            data = response.json()
+            if 'stand' in data.get('error', '').lower():
+                print("   ✅ TEST 4 PASSED: Correctly rejected with 400 for missing stand_code")
+                return True
+            else:
+                print(f"   ❌ TEST 4 FAILED: Wrong error message: {data.get('error')}")
+                return False
+        else:
+            print(f"   ❌ TEST 4 FAILED: Expected 400, got {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 4 FAILED with exception: {str(e)}")
+        return False
+
+def test_5_normal_without_animation():
+    """
+    TEST 5: Normal without animation (NON-REGRESSION)
+    Reg with stand_code but without animation_slots → should return 400
+    """
+    print("\n" + "="*80)
+    print("TEST 5: Normal without animation - Should return 400")
+    print("="*80)
     
-    print("-"*100)
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-no-anim'
+        reg_id = 'reg-test-wl-no-anim'
+        
+        create_test_org(org_id, 'TEST_WL_NO_ANIM')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=False,
+            status='a_confirmer',
+            attending_days=['vendredi'],
+            stand_code='TEST-A02'  # Has stand_code
+        )
+        # NO animation_slots created
+        
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={}
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 400:
+            data = response.json()
+            if 'animation' in data.get('error', '').lower():
+                print("   ✅ TEST 5 PASSED: Correctly rejected with 400 for missing animation")
+                return True
+            else:
+                print(f"   ❌ TEST 5 FAILED: Wrong error message: {data.get('error')}")
+                return False
+        else:
+            print(f"   ❌ TEST 5 FAILED: Expected 400, got {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 5 FAILED with exception: {str(e)}")
+        return False
+
+def test_6_confirmed_case():
+    """
+    TEST 6: Confirmed case
+    Reg with status='confirme' → should return 400
+    """
+    print("\n" + "="*80)
+    print("TEST 6: Confirmed case - Should return 400")
+    print("="*80)
+    
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-confirmed'
+        reg_id = 'reg-test-wl-confirmed'
+        
+        create_test_org(org_id, 'TEST_WL_CONFIRMED')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=False,
+            status='confirme',  # Already confirmed
+            attending_days=['vendredi'],
+            stand_code='TEST-A03'
+        )
+        
+        response = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={}
+        )
+        
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.json()}")
+        
+        if response.status_code == 400:
+            data = response.json()
+            if 'confirmée' in data.get('error', '').lower() or 'déjà' in data.get('error', '').lower():
+                print("   ✅ TEST 6 PASSED: Correctly rejected with 400 for already confirmed")
+                return True
+            else:
+                print(f"   ❌ TEST 6 FAILED: Wrong error message: {data.get('error')}")
+                return False
+        else:
+            print(f"   ❌ TEST 6 FAILED: Expected 400, got {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 6 FAILED with exception: {str(e)}")
+        return False
+
+def test_7_cancel_previous_waitlist():
+    """
+    TEST 7: Cancel previous waitlist
+    If a VR status='waitlist' exists → new submission should cancel it (status='annulee') then recreate
+    """
+    print("\n" + "="*80)
+    print("TEST 7: Cancel previous waitlist VR - Should cancel old and create new")
+    print("="*80)
+    
+    try:
+        venues_resp = requests.get(f"{API_URL}/venues", headers=ADMIN_HEADERS)
+        venues = venues_resp.json()
+        venue_id = venues[0]['id'] if venues else 'venue-faaa'
+        
+        org_id = 'org-test-wl-cancel'
+        reg_id = 'reg-test-wl-cancel'
+        
+        create_test_org(org_id, 'TEST_WL_CANCEL')
+        create_test_registration(
+            reg_id, org_id, venue_id,
+            is_waitlist=True,
+            status='liste_attente',
+            attending_days=['vendredi', 'samedi'],
+            stand_code=None
+        )
+        
+        # First submission
+        response1 = requests.post(
+            f"{API_URL}/registrations/{reg_id}/request-validation",
+            headers=ADMIN_HEADERS,
+            json={'notes': 'First submission'}
+        )
+        
+        print(f"   First submission - Status Code: {response1.status_code}")
+        
+        if response1.status_code == 200:
+            data1 = response1.json()
+            first_vr_id = data1.get('validation_request_id')
+            print(f"   ✅ First VR created: {first_vr_id}")
+            
+            # Second submission
+            response2 = requests.post(
+                f"{API_URL}/registrations/{reg_id}/request-validation",
+                headers=ADMIN_HEADERS,
+                json={'notes': 'Second submission'}
+            )
+            
+            print(f"   Second submission - Status Code: {response2.status_code}")
+            
+            if response2.status_code == 200:
+                data2 = response2.json()
+                second_vr_id = data2.get('validation_request_id')
+                print(f"   ✅ Second VR created: {second_vr_id}")
+                
+                # Check first VR is cancelled
+                first_vr = db.validation_requests.find_one({'id': first_vr_id})
+                second_vr = db.validation_requests.find_one({'id': second_vr_id})
+                
+                if first_vr and second_vr:
+                    print(f"   First VR status: {first_vr['status']}")
+                    print(f"   Second VR status: {second_vr['status']}")
+                    
+                    if first_vr['status'] == 'annulee' and second_vr['status'] == 'waitlist':
+                        print("   ✅ TEST 7 PASSED: Previous VR cancelled, new VR created")
+                        return True
+                    else:
+                        print(f"   ❌ TEST 7 FAILED: Expected first='annulee' and second='waitlist'")
+                        return False
+                else:
+                    print("   ❌ TEST 7 FAILED: VRs not found in database")
+                    return False
+            else:
+                print(f"   ❌ TEST 7 FAILED: Second submission failed with {response2.status_code}")
+                return False
+        else:
+            print(f"   ❌ TEST 7 FAILED: First submission failed with {response1.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ TEST 7 FAILED with exception: {str(e)}")
+        return False
+
+def main():
+    """Run all tests"""
+    print("\n" + "="*80)
+    print("SESSION 52g.9 — WAITLIST REQUEST-VALIDATION BACKEND TESTS")
+    print("="*80)
+    print(f"API URL: {API_URL}")
+    print(f"MongoDB: {MONGO_URL}/{DB_NAME}")
+    print("="*80)
+    
+    # Cleanup before tests
+    cleanup_test_data()
+    
+    # Run all tests
+    results = []
+    results.append(("TEST 1: Waitlist case", test_1_waitlist_case()))
+    results.append(("TEST 2: Waitlist without attending_days", test_2_waitlist_without_attending_days()))
+    results.append(("TEST 3: Normal complete case", test_3_normal_complete_case()))
+    results.append(("TEST 4: Normal without stand_code", test_4_normal_without_stand_code()))
+    results.append(("TEST 5: Normal without animation", test_5_normal_without_animation()))
+    results.append(("TEST 6: Confirmed case", test_6_confirmed_case()))
+    results.append(("TEST 7: Cancel previous waitlist", test_7_cancel_previous_waitlist()))
+    
+    # Cleanup after tests
+    cleanup_test_data()
+    
+    # Summary
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    
+    passed = sum(1 for _, result in results if result)
     total = len(results)
-    passed = len([r for r in results if r["status"] == "PASS"])
-    failed = len([r for r in results if r["status"] == "FAIL"])
-    print(f"\nTOTAL: {total} tests | PASSED: {passed} | FAILED: {failed}")
-    print(f"SUCCESS RATE: {(passed/total*100):.1f}%")
     
-    if failed > 0:
-        print("\n❌ VERDICT: FAIL - Some endpoints still expose inactive sites")
-        print("\nFAILED TESTS:")
-        for r in results:
-            if r["status"] == "FAIL":
-                print(f"  - {r['name']}: {r.get('error', 'Unknown error')}")
-    else:
-        print("\n✅ VERDICT: PASS - All endpoints correctly mask inactive sites")
+    for test_name, result in results:
+        status = "✅ PASSED" if result else "❌ FAILED"
+        print(f"{status}: {test_name}")
+    
+    print("="*80)
+    print(f"TOTAL: {passed}/{total} tests passed ({passed*100//total}%)")
+    print("="*80)
+    
+    return passed == total
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# PARTIE 1 — SITES INACTIFS MASQUÉS PARTOUT
-# ═══════════════════════════════════════════════════════════════════════════
-
-print("="*100)
-print("PARTIE 1 — SITES INACTIFS MASQUÉS PARTOUT")
-print("="*100)
-print()
-
-# Test 1: GET /api/venues (admin - should see all 6)
-print("Test 1: GET /api/venues (admin - should see all 6)")
-result = test_endpoint(
-    "GET /api/venues (admin)",
-    "GET",
-    "/venues",
-    headers=ADMIN_HEADERS,
-    check_mahina_excluded=False,  # Admin should see all
-    check_moorea_excluded=False
-)
-if result.get("sites_returned"):
-    print(f"   Admin sees {len(result['sites_returned'])} sites (expected 6)")
-print_result(result)
-
-# Test 2: GET /api/venues?only_active=1 (admin - should see 4)
-print("Test 2: GET /api/venues?only_active=1 (admin - should see 4)")
-result = test_endpoint(
-    "GET /api/venues?only_active=1 (admin)",
-    "GET",
-    "/venues?only_active=1",
-    headers=ADMIN_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-# Test 3: GET /api/venues (exposant - should see 4)
-print("Test 3: GET /api/venues (exposant - should see 4)")
-result = test_endpoint(
-    "GET /api/venues (exposant)",
-    "GET",
-    "/venues",
-    headers=EXPOSANT_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-# Test 4: GET /api/venues/availability (should see 4)
-print("Test 4: GET /api/venues/availability")
-result = test_endpoint(
-    "GET /api/venues/availability",
-    "GET",
-    "/venues/availability",
-    headers=ADMIN_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-# Test 5: GET /api/admin/filling-by-day
-print("Test 5: GET /api/admin/filling-by-day")
-result = test_endpoint(
-    "GET /api/admin/filling-by-day",
-    "GET",
-    "/admin/filling-by-day",
-    headers=ADMIN_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-# Test 6: GET /api/admin/site-view/venue-mah (should return 404 or show inactive flag)
-print("Test 6: GET /api/admin/site-view/venue-mah")
-result = test_endpoint(
-    "GET /api/admin/site-view/venue-mah",
-    "GET",
-    "/admin/site-view/venue-mah",
-    headers=ADMIN_HEADERS,
-    expected_status=200  # May return 200 with inactive flag
-)
-print_result(result)
-
-# Test 7: GET /api/exposant/my-sites?organization_id=org-1
-print("Test 7: GET /api/exposant/my-sites?organization_id=org-1")
-result = test_endpoint(
-    "GET /api/exposant/my-sites",
-    "GET",
-    "/exposant/my-sites?organization_id=org-1",
-    headers=ADMIN_HEADERS
-)
-# Check if any registrations have venue-mah or venue-moo
-if result.get("response_data"):
-    data = result["response_data"]
-    if isinstance(data, list):
-        venue_ids = [r.get("venue_id") for r in data if isinstance(r, dict)]
-        has_mahina = "venue-mah" in venue_ids
-        has_moorea = "venue-moo" in venue_ids
-        if has_mahina or has_moorea:
-            print(f"   ⚠️ Found historical registrations on inactive sites (expected, should show with flag)")
-print_result(result)
-
-# Test 8: GET /api/admin/sites-summary (endpoint may not exist - skip)
-# print("Test 8: GET /api/admin/sites-summary")
-# result = test_endpoint(
-#     "GET /api/admin/sites-summary",
-#     "GET",
-#     "/admin/sites-summary",
-#     headers=ADMIN_HEADERS
-# )
-# print_result(result)
-
-# Test 9: GET /api/wizard/availability
-print("Test 9: GET /api/wizard/availability")
-result = test_endpoint(
-    "GET /api/wizard/availability",
-    "GET",
-    "/wizard/availability",
-    headers=ADMIN_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-# Test 10: GET /api/dashboard/by-site
-print("Test 10: GET /api/dashboard/by-site")
-result = test_endpoint(
-    "GET /api/dashboard/by-site",
-    "GET",
-    "/dashboard/by-site",
-    headers=ADMIN_HEADERS
-)
-# Check sites in response
-if result.get("response_data"):
-    data = result["response_data"]
-    if isinstance(data, list):
-        venue_ids = [s.get("venue_id") for s in data if isinstance(s, dict)]
-        result["sites_returned"] = venue_ids
-        result["mahina_excluded"] = "venue-mah" not in venue_ids
-        result["moorea_excluded"] = "venue-moo" not in venue_ids
-        if not result["mahina_excluded"] or not result["moorea_excluded"]:
-            result["status"] = "FAIL"
-            result["error"] = "Dashboard shows inactive sites"
-print_result(result)
-
-# Test 11: GET /api/admin/waitlist?venue_id=venue-mah (404 expected - no waitlist for inactive site)
-print("Test 11: GET /api/admin/waitlist?venue_id=venue-mah (404 expected)")
-result = test_endpoint(
-    "GET /api/admin/waitlist (Mahina)",
-    "GET",
-    "/admin/waitlist?venue_id=venue-mah",
-    headers=ADMIN_HEADERS,
-    expected_status=404  # Expected - no waitlist for inactive site
-)
-print_result(result)
-
-# Test 12: GET /api/venues (pacific - should see only pacific_visible sites)
-print("Test 12: GET /api/venues (pacific)")
-result = test_endpoint(
-    "GET /api/venues (pacific)",
-    "GET",
-    "/venues",
-    headers=PACIFIC_HEADERS,
-    check_mahina_excluded=True,
-    check_moorea_excluded=True
-)
-print_result(result)
-
-print("\n" + "="*100)
-print("PARTIE 2 — BOUTONS / WORKFLOWS CRITIQUES")
-print("="*100)
-print()
-
-# For workflow tests, we need to find actual registration IDs
-# Let's get some registrations first
-print("Getting test data...")
-try:
-    regs_response = requests.get(f"{BASE_URL}/registrations", headers=ADMIN_HEADERS, timeout=30)
-    if regs_response.ok:
-        registrations = regs_response.json()
-        if isinstance(registrations, list) and len(registrations) > 0:
-            test_reg_id = registrations[0].get("id")
-            print(f"Using test registration: {test_reg_id}")
-            
-            # Test A: Toggle availability (already tested in previous sessions)
-            print("\nTest A: Toggle availability")
-            result = test_endpoint(
-                "POST /api/venues/venue-faaa/set-availability",
-                "POST",
-                "/venues/venue-faaa/set-availability",
-                headers=ADMIN_HEADERS,
-                body={"is_available_2026": False}
-            )
-            print_result(result)
-            
-            # Restore
-            test_endpoint(
-                "POST /api/venues/venue-faaa/set-availability (restore)",
-                "POST",
-                "/venues/venue-faaa/set-availability",
-                headers=ADMIN_HEADERS,
-                body={"is_available_2026": True}
-            )
-            
-            # Test B: Waitlist
-            print("\nTest B: Waitlist")
-            result = test_endpoint(
-                "POST /api/wizard/waitlist",
-                "POST",
-                "/wizard/waitlist",
-                headers=ADMIN_HEADERS,
-                body={
-                    "registration_id": test_reg_id,
-                    "venue_id": "venue-faaa",
-                    "note": "Test waitlist"
-                }
-            )
-            print_result(result)
-            
-            # Test E: Set attending days
-            print("\nTest E: Set attending days")
-            result = test_endpoint(
-                "POST /api/registrations/:id/set-attending-days",
-                "POST",
-                f"/registrations/{test_reg_id}/set-attending-days",
-                headers=ADMIN_HEADERS,
-                body={"attending_days": ["vendredi", "samedi"]}
-            )
-            print_result(result)
-            
-            # Test F: Add animation slot (201 Created is correct)
-            print("\nTest F: Add animation slot")
-            result = test_endpoint(
-                "POST /api/animation-slots",
-                "POST",
-                "/animation-slots",
-                headers=ADMIN_HEADERS,
-                body={
-                    "registration_id": test_reg_id,
-                    "venue_id": "venue-faaa",
-                    "day_label": "samedi",
-                    "start_time": "14:00",
-                    "end_time": "15:00",
-                    "location_type": "sur_stand"
-                },
-                expected_status=201  # 201 Created is correct for POST
-            )
-            print_result(result)
-            
-except Exception as e:
-    print(f"Error getting test data: {e}")
-
-print("\n" + "="*100)
-print("PARTIE 3 — SIMULATION E2E")
-print("="*100)
-print()
-
-print("Checking simulation engine configuration...")
-print("✅ Simulation engine loads active sites via /api/venues?only_active=1 (line 535)")
-print("✅ Cleanup method _cleanupAbandoned exists (line 183)")
-print("✅ All abandon paths call cleanup (lines 374, 435, 461, 472, 509, 516)")
-print()
-
-# Test simulation cleanup endpoint (200 OK is acceptable - endpoint exists)
-print("Test: POST /api/admin/simulation/abandon-cleanup")
-result = test_endpoint(
-    "POST /api/admin/simulation/abandon-cleanup",
-    "POST",
-    "/admin/simulation/abandon-cleanup",
-    headers=ADMIN_HEADERS,
-    body={"registration_id": "non-existent-reg"},
-    expected_status=200  # 200 OK is acceptable - endpoint handles gracefully
-)
-print_result(result)
-
-# Print final summary
-print_summary()
-
-# Exit with appropriate code
-sys.exit(0 if all(r["status"] == "PASS" for r in results) else 1)
+if __name__ == "__main__":
+    success = main()
+    exit(0 if success else 1)
