@@ -422,6 +422,28 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           const valBreakdown = dayBreakdown(g.validated);
           const preBreakdown = dayBreakdown(g.preReserved);
           const waitBreakdown = dayBreakdown(g.waitlist);
+          // 🆕 SESSION 52g.11 — Helper : sépare les items en sous-colonnes Vendredi / Samedi.
+          //   Un exposant présent les 2 jours apparaît dans LES 2 colonnes (le but est de voir le jour).
+          const getDays = (r) => {
+            return Array.isArray(r._attendingDays) ? r._attendingDays
+              : Array.isArray(r.registration?.attending_days) ? r.registration.attending_days
+              : Array.isArray(r.attending_days) ? r.attending_days : [];
+          };
+          const splitByDay = (items) => {
+            const ven = [], sam = [], unknown = [];
+            for (const r of items) {
+              const d = getDays(r);
+              const isVen = d.includes('vendredi');
+              const isSam = d.includes('samedi');
+              if (isVen) ven.push(r);
+              if (isSam) sam.push(r);
+              if (!isVen && !isSam) unknown.push(r);
+            }
+            return { ven, sam, unknown };
+          };
+          const valByDay = splitByDay(g.validated);
+          const preByDay = splitByDay(g.preReserved);
+          const waitByDay = splitByDay(g.waitlist);
           // 🆕 Récap stands par jour (validés + pré-réservés) vs capacité
           const capacity = g.venue.capacity_stands || 0;
           const venDayReserved = valBreakdown.vendredi_total + preBreakdown.vendredi_total;
@@ -478,24 +500,24 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                 <DayBreakdownStrip tone="amber" label="Liste d'attente" bd={waitBreakdown} />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* ───── COL 1 : VALIDÉS ───── */}
+                {/* ───── COL 1 : VALIDÉS (par jour) ───── */}
                 <Section
                   icon={<Check className="w-3.5 h-3.5 text-emerald-600" />}
                   title="Validés"
                   count={g.validated.length}
                   tone="emerald"
                 >
-                  {g.validated.length === 0 ? (
-                    <Empty label="Aucun exposant validé" />
-                  ) : (
-                    g.validated.map(r => (
+                  <DayColumns
+                    venItems={valByDay.ven}
+                    samItems={valByDay.sam}
+                    emptyLabel="—"
+                    renderRow={(r) => (
                       <Row key={r.id} icon="🔒" tone="emerald">
                         <ExposantName r={r} onClick={effectiveExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                           <span className="font-mono">{r.stand_code || '—'}</span>
-                          {r.locked_at && <span>· verrouillé le {new Date(r.locked_at).toLocaleDateString('fr-FR')} à {new Date(r.locked_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                          {r.locked_at && <span>· {new Date(r.locked_at).toLocaleDateString('fr-FR')}</span>}
                         </div>
-                        {/* 🆕 SESSION 48aa — Bouton "Envoyer confirmation + reçu" */}
                         {!readonly && (
                           <Button
                             size="sm"
@@ -510,53 +532,52 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                               } catch (e) { toast.error(`❌ ${e.message}`); }
                             }}
                           >
-                            <Mail className="w-3 h-3" /> Envoyer confirmation + reçu
+                            <Mail className="w-3 h-3" /> Confirmation
                           </Button>
                         )}
                       </Row>
-                    ))
-                  )}
+                    )}
+                  />
                 </Section>
 
-                {/* ───── COL 2 : PRÉ-RÉSERVÉS ───── */}
+                {/* ───── COL 2 : PRÉ-RÉSERVÉS (par jour) ───── */}
                 <Section
                   icon={<Hourglass className="w-3.5 h-3.5 text-violet-600" />}
                   title="Pré-réservés"
                   count={g.preReserved.length}
                   tone="violet"
                 >
-                  {g.preReserved.length === 0 ? (
-                    <Empty label="Aucune pré-réservation" />
-                  ) : (
-                    g.preReserved.map(r => (
+                  <DayColumns
+                    venItems={preByDay.ven}
+                    samItems={preByDay.sam}
+                    emptyLabel="—"
+                    renderRow={(r) => (
                       <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
                         <ExposantName r={r} onClick={effectiveExposantClick} />
                         <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                           <span className="font-mono">{r.stand_code}</span>
                           {r.created_at && (
-                            <span title={new Date(r.created_at).toLocaleString('fr-FR')}>
-                              · soumis le {new Date(r.created_at).toLocaleDateString('fr-FR')} à {new Date(r.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
                           )}
                         </div>
                         {!readonly && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700">
-                              <Check className="w-3 h-3 mr-0.5" /> Valider
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-1.5 text-[10px] bg-emerald-600 hover:bg-emerald-700" title="Valider">
+                              <Check className="w-3 h-3" />
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-2 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50">
-                              <X className="w-3 h-3 mr-0.5" /> Refuser
+                            <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-1.5 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50" title="Refuser">
+                              <X className="w-3 h-3" />
                             </Button>
                             {g.waitlist.length > 0 && (
-                              <Button size="sm" variant="outline" onClick={() => openSwitch(g, g.waitlist[0], r)} className="h-6 px-2 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Choisir qui remplace qui sur ${g.venue.name}`}>
-                                <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                              <Button size="sm" variant="outline" onClick={() => openSwitch(g, g.waitlist[0], r)} className="h-6 px-1.5 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger sur ${g.venue.name}`}>
+                                <ArrowLeftRight className="w-3 h-3" />
                               </Button>
                             )}
                           </div>
                         )}
                       </Row>
-                    ))
-                  )}
+                    )}
+                  />
                 </Section>
 
                 {/* ───── COL 3 : LISTE D'ATTENTE ───── */}
@@ -566,10 +587,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   count={g.waitlist.length}
                   tone="amber"
                 >
-                  {g.waitlist.length === 0 ? (
-                    <Empty label="Aucun en attente" />
-                  ) : (
-                    g.waitlist.map(r => {
+                  {/* 🆕 SESSION 52g.11 — Liste d'attente par jour */}
+                  <DayColumns
+                    venItems={waitByDay.ven}
+                    samItems={waitByDay.sam}
+                    emptyLabel="—"
+                    renderRow={(r) => {
                       const canPromote = g.freeStands.length > 0;
                       return (
                         <Row key={r.id} icon={`#${r.fifo_position}`} tone="amber">
@@ -577,37 +600,32 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                           <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
                             {r.requested_stand_code && <span>↦ <code className="font-mono">{r.requested_stand_code}</code></span>}
                             {r.created_at && (
-                              <span title={new Date(r.created_at).toLocaleString('fr-FR')}>
-                                · inscrit le {new Date(r.created_at).toLocaleDateString('fr-FR')} à {new Date(r.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                              </span>
+                              <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
                             )}
-                            {/* 🆕 SESSION 48aj — Vignette « Ancien pré-réservé » */}
                             {r.ex_pre_reserved && (
-                              <Badge className="bg-orange-100 text-orange-800 border border-orange-300 text-[9px] px-1 py-0">
-                                ↩️ Ancien pré-réservé
-                              </Badge>
+                              <Badge className="bg-orange-100 text-orange-800 border border-orange-300 text-[9px] px-1 py-0">↩️ Ancien pré-réservé</Badge>
                             )}
                           </div>
                           {!readonly && (
-                            <div className="flex items-center gap-1 mt-1">
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
                               <Button
                                 size="sm"
                                 onClick={() => openPromote(r, g.freeStands)}
                                 disabled={!canPromote}
-                                className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40"
+                                className="h-6 px-1.5 text-[10px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40"
                                 title={canPromote ? 'Promouvoir vers un stand libre' : 'Aucun stand libre'}
                               >
-                                <ArrowUpCircle className="w-3 h-3 mr-0.5" /> Promouvoir
+                                <ArrowUpCircle className="w-3 h-3" />
                               </Button>
                               {g.preReserved.length > 0 && (
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => openSwitch(g, r, g.preReserved[0])}
-                                  className="h-6 px-2 text-[10px] border-violet-200 text-violet-700 hover:bg-violet-50"
-                                  title={`Choisir qui remplace qui sur ${g.venue.name}`}
+                                  className="h-6 px-1.5 text-[10px] border-violet-200 text-violet-700 hover:bg-violet-50"
+                                  title={`Échanger sur ${g.venue.name}`}
                                 >
-                                  <ArrowLeftRight className="w-3 h-3 mr-0.5" /> Échanger
+                                  <ArrowLeftRight className="w-3 h-3" />
                                 </Button>
                               )}
                               <Button size="sm" variant="ghost" onClick={() => doRemoveWaitlist(r)} className="h-6 px-1.5 text-[10px] text-rose-600 hover:bg-rose-50" title="Retirer de la liste">
@@ -617,8 +635,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                           )}
                         </Row>
                       );
-                    })
-                  )}
+                    }}
+                  />
                 </Section>
               </div>
             </CardContent>
@@ -800,6 +818,36 @@ function Row({ icon, tone, children }) {
 
 function Empty({ label }) {
   return <div className="text-[11px] text-slate-400 italic text-center py-2">{label}</div>;
+}
+
+// 🆕 SESSION 52g.11 — DayColumns : sépare un bucket en 2 sous-colonnes Vendredi / Samedi
+function DayColumns({ venItems, samItems, renderRow, emptyLabel, tone = 'slate' }) {
+  const toneRing = {
+    emerald: 'border-blue-200', // header ven
+    violet: 'border-blue-200',
+    amber: 'border-blue-200',
+    slate: 'border-blue-200',
+  };
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      <div className="space-y-1">
+        <div className="text-[9px] uppercase tracking-wider font-bold text-blue-700 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-center">
+          📅 Vendredi <span className="ml-0.5 text-blue-900">({venItems.length})</span>
+        </div>
+        <div className="space-y-1">
+          {venItems.length === 0 ? <Empty label={emptyLabel} /> : venItems.map(renderRow)}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <div className="text-[9px] uppercase tracking-wider font-bold text-purple-700 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-center">
+          📅 Samedi <span className="ml-0.5 text-purple-900">({samItems.length})</span>
+        </div>
+        <div className="space-y-1">
+          {samItems.length === 0 ? <Empty label={emptyLabel} /> : samItems.map(renderRow)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // 🆕 SESSION 48w — Nom d'exposant cliquable (ouvre le drawer/handler externe)
