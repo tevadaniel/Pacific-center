@@ -395,6 +395,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         </div>
       </div>
 
+      {/* 🆕 SESSION 52g.12 — Tableau global de remplissage par jour + statistiques */}
+      <GlobalFillingDashboard venues={venues} requests={requests} />
+
       {/* Cards par site */}
       <div className="space-y-3">
         {filtered.map(g => {
@@ -854,7 +857,7 @@ function DayColumns({ venItems, samItems, renderRow, emptyLabel, tone = 'slate' 
 // 🆕 SESSION 48w — Nom d'exposant cliquable (ouvre le drawer/handler externe)
 function ExposantName({ r, onClick }) {
   const name = r.organization?.name || '—';
-  // 🆕 SESSION 52g.5 — Badges des jours de présence
+  // 🆕 SESSION 52g.12 — Affichage Vendredi/Samedi ✅/❌ très visible
   const days = Array.isArray(r._attendingDays) ? r._attendingDays
     : Array.isArray(r.registration?.attending_days) ? r.registration.attending_days
     : Array.isArray(r.attending_days) ? r.attending_days
@@ -862,10 +865,19 @@ function ExposantName({ r, onClick }) {
   const hasVen = days.includes('vendredi');
   const hasSam = days.includes('samedi');
   const dayBadges = (
-    <span className="inline-flex items-center gap-0.5 ml-1 shrink-0">
-      {hasVen && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] font-bold rounded bg-blue-100 text-blue-900 border border-blue-300" title="Présent vendredi">V</span>}
-      {hasSam && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] font-bold rounded bg-purple-100 text-purple-900 border border-purple-300" title="Présent samedi">S</span>}
-      {!hasVen && !hasSam && <span className="inline-flex items-center justify-center h-3.5 px-1 text-[8px] rounded bg-slate-100 text-slate-500 border border-slate-300" title="Jours non définis">?</span>}
+    <span className="inline-flex items-center gap-1 ml-1 shrink-0 text-[10px]">
+      <span
+        className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded border font-semibold ${hasVen ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-700'}`}
+        title={hasVen ? 'Inscrit le vendredi 14/08' : 'Pas inscrit le vendredi'}
+      >
+        Ven {hasVen ? '✅' : '❌'}
+      </span>
+      <span
+        className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded border font-semibold ${hasSam ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-700'}`}
+        title={hasSam ? 'Inscrit le samedi 15/08' : 'Pas inscrit le samedi'}
+      >
+        Sam {hasSam ? '✅' : '❌'}
+      </span>
     </span>
   );
   if (typeof onClick === 'function') {
@@ -934,3 +946,114 @@ function DayBreakdownStrip({ tone = 'slate', label, bd }) {
   );
 }
 
+
+
+// 🆕 SESSION 52g.12 — Tableau global de remplissage par jour + statistiques rapides
+function GlobalFillingDashboard({ venues, requests }) {
+  // Capacité totale = somme des capacity_stands de TOUS les sites visibles
+  const totalCapacity = (venues || []).reduce((sum, v) => sum + (v.capacity_stands || 0), 0);
+  // Pour chaque jour, on compte les exposants validés + pré-réservés (= "réservant un stand pour ce jour")
+  const ACTIVE_STATUSES = ['validated', 'confirme', 'locked', 'verrouille', 'en_attente', 'pending', 'rdv_fixe', 'a_confirmer'];
+  let venReserved = 0, samReserved = 0;
+  let venOnly = 0, samOnly = 0, both = 0;
+  for (const r of (requests || [])) {
+    if (!ACTIVE_STATUSES.includes(r.status)) continue; // exclut waitlist + annulé
+    const days = Array.isArray(r._attendingDays) ? r._attendingDays
+      : Array.isArray(r.registration?.attending_days) ? r.registration.attending_days
+      : Array.isArray(r.attending_days) ? r.attending_days : [];
+    const isVen = days.includes('vendredi');
+    const isSam = days.includes('samedi');
+    if (isVen) venReserved++;
+    if (isSam) samReserved++;
+    if (isVen && isSam) both++;
+    else if (isVen) venOnly++;
+    else if (isSam) samOnly++;
+  }
+  const venPct = totalCapacity > 0 ? Math.round((venReserved / totalCapacity) * 100) : 0;
+  const samPct = totalCapacity > 0 ? Math.round((samReserved / totalCapacity) * 100) : 0;
+  const venRem = Math.max(0, totalCapacity - venReserved);
+  const samRem = Math.max(0, totalCapacity - samReserved);
+  // 🎨 Couleurs : rouge < 50%, orange 50-80%, vert > 80%
+  const colorForPct = (pct) => {
+    if (pct < 50) return { bar: 'bg-rose-500', text: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' };
+    if (pct < 80) return { bar: 'bg-orange-500', text: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' };
+    return { bar: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' };
+  };
+  const venColors = colorForPct(venPct);
+  const samColors = colorForPct(samPct);
+
+  if (totalCapacity === 0) return null;
+
+  return (
+    <Card className="border-2 border-slate-200">
+      <CardContent className="p-4 space-y-4">
+        <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          📊 <span>Remplissage global du Forum</span>
+          <Badge variant="secondary" className="text-[10px]">{venues?.length || 0} sites · {totalCapacity} stands au total</Badge>
+        </div>
+
+        {/* Jauges Ven & Sam */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* VENDREDI */}
+          <div className={`rounded-lg border-2 ${venColors.border} ${venColors.bg} p-3`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-bold text-sm text-blue-900">📅 Vendredi 14/08</div>
+              <div className={`font-mono text-sm font-bold ${venColors.text}`}>
+                {venReserved} / {totalCapacity} <span className="text-xs">({venPct}%)</span>
+              </div>
+            </div>
+            <div className="h-4 w-full rounded-full bg-white border border-slate-200 overflow-hidden">
+              <div
+                className={`h-full ${venColors.bar} transition-all duration-500`}
+                style={{ width: `${Math.min(100, venPct)}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-slate-700 flex items-center justify-between">
+              <span>Places restantes :</span>
+              <b className={venColors.text}>{venRem}</b>
+            </div>
+          </div>
+
+          {/* SAMEDI */}
+          <div className={`rounded-lg border-2 ${samColors.border} ${samColors.bg} p-3`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-bold text-sm text-purple-900">📅 Samedi 15/08</div>
+              <div className={`font-mono text-sm font-bold ${samColors.text}`}>
+                {samReserved} / {totalCapacity} <span className="text-xs">({samPct}%)</span>
+              </div>
+            </div>
+            <div className="h-4 w-full rounded-full bg-white border border-slate-200 overflow-hidden">
+              <div
+                className={`h-full ${samColors.bar} transition-all duration-500`}
+                style={{ width: `${Math.min(100, samPct)}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-slate-700 flex items-center justify-between">
+              <span>Places restantes :</span>
+              <b className={samColors.text}>{samRem}</b>
+            </div>
+          </div>
+        </div>
+
+        {/* Statistiques */}
+        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-200">
+          <div className="rounded-md border border-blue-200 bg-blue-50 p-2 text-center">
+            <div className="text-[10px] uppercase tracking-wide font-bold text-blue-700">Vendredi uniquement</div>
+            <div className="text-2xl font-bold text-blue-900 mt-0.5">{venOnly}</div>
+            <div className="text-[9px] text-blue-600">exposants</div>
+          </div>
+          <div className="rounded-md border border-purple-200 bg-purple-50 p-2 text-center">
+            <div className="text-[10px] uppercase tracking-wide font-bold text-purple-700">Samedi uniquement</div>
+            <div className="text-2xl font-bold text-purple-900 mt-0.5">{samOnly}</div>
+            <div className="text-[9px] text-purple-600">exposants</div>
+          </div>
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-center">
+            <div className="text-[10px] uppercase tracking-wide font-bold text-emerald-700">Week-end complet</div>
+            <div className="text-2xl font-bold text-emerald-900 mt-0.5">{both}</div>
+            <div className="text-[9px] text-emerald-600">exposants V + S</div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
