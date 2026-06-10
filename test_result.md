@@ -3664,7 +3664,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "SESSION 52g.2 — Nouvel endpoint POST /api/admin/simulation/cleanup-incomplete"
+    - "SESSION 52g.3 — Vérification cohérence simulation (1 animation par jour)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -3672,3 +3672,18 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: "SESSION 52g.2 — BACKEND TEST COMPLETE. Nouvel endpoint POST /api/admin/simulation/cleanup-incomplete testé exhaustivement avec 4 scénarios (auth, dry_run, apply, non-régression). RÉSULTATS: 4/4 tests passés (100%). L'endpoint fonctionne parfaitement selon les spécifications: (1) Auth aracom_admin only (403 sans le rôle) ✅, (2) Dry-run retourne preview sans modifier DB ✅, (3) Apply supprime uniquement les regs incomplètes (status NOT IN [a_confirmer, confirme, verrouille]) avec cascade complète sur 15 collections + suppression orgs/users orphelins ✅, (4) Non-régression: endpoint full cleanup fonctionne toujours ✅. SÉLECTION CIBLE VALIDÉE: Les regs sim avec status a_confirmer/confirme/verrouille sont CONSERVÉES (test avec 3 regs: 2 supprimées, 1 conservée). CASCADE VALIDÉE: animation_slots, stand_assignments et autres collections enfants correctement supprimées. ACTIVITY LOG VALIDÉ: Log SIMULATION_CLEANUP_INCOMPLETE créé avec metadata complète. Endpoint 100% production-ready et peut être appelé automatiquement par simulation engine à la fin de chaque run. Main agent doit summarize et finish."
+  - agent: "testing"
+    message: "SESSION 52g.3 — SIMULATION COHERENCE TEST COMPLETE. ❌ CRITICAL BUG FOUND: Simulation creates INCOHERENT exposants. Test scenario: 10 exposants simulation launched, 3 succeeded, 7 abandoned (cleaned up correctly). BLOCKING ISSUES FOUND: (1) ❌ CRITERION 3 FAILED: Only 3/10 exposants succeeded (7 abandoned at Stand step - likely site full). (2) ❌ CRITERION 4 FAILED: Could not verify '🚨 Anomalies anim.' KPI (dashboard component not found or not rendering). (3) ❌ CRITERION 5 FAILED: Could not verify 'En cours (brouillons)' KPI. (4) 🚨 CRITICAL INCOHERENCE: Registration reg-pub-4df20c29-397 has attending_days=['vendredi'] (only 1 day) and only 1 animation (vendredi 10:00-10:30), MISSING samedi animation. This violates the tunnel requirement of 1 animation per day. The other 2 successful regs have 2 animations each (vendredi + samedi) ✅. PASSED CRITERIA: (1) ✅ CRITERION 1: waitlisted = 0 ✅. (2) ✅ API Check: No simulation regs with status='provisoire' ✅. ROOT CAUSE: Simulation engine allows exposants to proceed to finalize step with only 1 day selected (attending_days=['vendredi']) instead of enforcing both days. RECOMMENDATION: Main agent must fix simulation engine to enforce attending_days=['vendredi', 'samedi'] AND verify 1 animation per day before allowing finalize step."
+
+frontend:
+  - task: "SESSION 52g.3 — Simulation E2E coherence (1 animation par jour obligatoire)"
+    implemented: true
+    working: false
+    file: "lib/simulation-engine.js, components/aracom/simulation-modal.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "❌ CRITICAL BUG — Simulation creates INCOHERENT exposants. Test E2E avec 10 exposants: 3 réussis, 7 abandonnés (cleanup OK). PROBLÈME CRITIQUE: 1/3 exposants réussis (reg-pub-4df20c29-397) a attending_days=['vendredi'] (1 seul jour) et 1 seule animation (vendredi 10:00-10:30), MANQUE animation samedi. Viole l'exigence tunnel '1 animation par jour'. Les 2 autres regs ont 2 animations (vendredi + samedi) ✅. CRITÈRES TESTÉS: (1) ✅ CRITERION 1: waitlisted = 0 ✅. (2) ℹ️ CRITERION 2: abandoned = 7 (sites pleins, normal). (3) ❌ CRITERION 3: success(3) + abandoned(7) + failed(0) = 10 ✅ mais seulement 3/10 réussis. (4) ❌ CRITERION 4: Impossible de vérifier '🚨 Anomalies anim.' (composant dashboard non trouvé). (5) ❌ CRITERION 5: Impossible de vérifier 'En cours (brouillons)'. (6) ✅ API Check: Aucune reg simulation avec status='provisoire' ✅. CAUSE RACINE: simulation-engine.js permet finalize avec attending_days incomplet (1 jour au lieu de 2) + ne vérifie pas 1 animation par jour. FIX REQUIS: (1) Forcer attending_days=['vendredi', 'samedi'] dans simulation engine. (2) Vérifier 1 animation par jour avant finalize. (3) Abandonner + cleanup si impossible de créer 2 animations."
