@@ -45,6 +45,13 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, venuesAvailability
   const occupiedIds = new Set(sorted.map((s) => s.venue_id));
   const remaining = (availableVenues || []).filter((v) => !occupiedIds.has(v.id));
   const canAddMore = sorted.length < 3 && remaining.length > 0;
+  // 🆕 SESSION 52g.6 — Fallback : retrouver le nom du site via availableVenues si site.venue manque
+  const venueNameById = (vid) => {
+    if (!vid) return null;
+    const fromAvail = (availableVenues || []).find(v => v.id === vid);
+    if (fromAvail?.name) return fromAvail.name;
+    return null;
+  };
 
   const moveUp = (idx) => {
     if (idx <= 0) return;
@@ -119,7 +126,9 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, venuesAvailability
                 >
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-semibold text-sm text-slate-900 truncate">{site.venue?.name || '—'}</span>
+                    <span className="font-semibold text-sm text-slate-900 truncate">
+                      {site.venue?.name || venueNameById(site.venue_id) || '—'}
+                    </span>
                     {isActive && <Badge className="text-[9px] bg-aracom-orange text-white border-aracom-orange shrink-0">Site actif</Badge>}
                   </div>
                   <div className="text-[10.5px] text-slate-500">
@@ -336,20 +345,117 @@ function Bloc3Stand({ registration, venue, venueAvailability, onPickStand, onRel
 }
 
 // =======================================================
-// BLOC 4 — Animations par jour
+// BLOC 4 — Animations par jour (PICKER INLINE FONCTIONNEL)
 // =======================================================
-function Bloc4Animations({ days, slots, onOpenAnimationPicker, onDeleteSlot, busy }) {
+function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots, onRefresh, busy }) {
+  const [openDay, setOpenDay] = useState(null); // 'vendredi' | 'samedi' | null
+  const [grid, setGrid] = useState(null); // animation_grid de /api/wizard/availability
+  const [loadingGrid, setLoadingGrid] = useState(false);
+  const [locationType, setLocationType] = useState('sur_stand'); // 'sur_stand' | 'zone_demo'
+  const [saving, setSaving] = useState(false);
+
+  const loadGrid = async () => {
+    if (!venueId) return;
+    setLoadingGrid(true);
+    try {
+      const data = await api('/api/wizard/availability');
+      // 🆕 SESSION 52g.6 — Réponse réelle : { venues: [...], config: {...} } ou directement array
+      const list = Array.isArray(data) ? data : Array.isArray(data?.venues) ? data.venues : [];
+      const v = list.find(x => x.id === venueId);
+      setGrid(v?.animation_grid || null);
+    } catch { setGrid(null); }
+    finally { setLoadingGrid(false); }
+  };
+
+  // 🆕 SESSION 52g.6 — On déclenche loadGrid directement dans le handler de bouton
+  // (pas de useEffect → évite le warning react-hooks/set-state-in-effect)
+
+  // Helper : convertit HH:MM en minutes
+  const toMin = (hhmm) => {
+    if (!hhmm) return null;
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + (m || 0);
+  };
+
+  // Filtre les slots disponibles pour le jour ouvert, en intersectant
+  // la fenêtre du SITE (animation_grid.window_*) avec celle de l'EXPOSANT (attending_day_times).
+  const availableSlots = useMemo(() => {
+    if (!openDay || !grid) return [];
+    const dayGrid = grid[openDay];
+    if (!dayGrid) return [];
+    const baseSlots = locationType === 'zone_demo' ? (dayGrid.slots_demo || []) : (dayGrid.slots_stand || []);
+    // Fenêtre exposant pour ce jour (s'il a saisi des horaires différents)
+    const expWindow = attendingDayTimes?.[openDay] || null;
+    const expStart = toMin(expWindow?.start);
+    const expEnd = toMin(expWindow?.end);
+    return baseSlots
+      .filter(s => {
+        // Filtre par fenêtre de l'exposant (l'animation doit tenir dans ses horaires)
+        if (expStart != null && expEnd != null) {
+          const sStart = toMin(s.start);
+          const sEnd = toMin(s.end);
+          if (sStart < expStart || sEnd > expEnd) return false;
+        }
+        return true;
+      });
+  }, [openDay, grid, locationType, attendingDayTimes]);
+
+  const saveSlot = async (slot) => {
+    if (!registration?.id || !openDay) return;
+    setSaving(true);
+    try {
+      // Construction du payload : une animation = jour + horaire + lieu (sur_stand ou zone_demo)
+      const animation = {
+        day_label: openDay,
+        start_time: slot.start,
+        end_time: slot.end,
+        location_type: locationType,
+        slot_type: locationType, // compat avec ancien champ
+      };
+      await api('/api/wizard/animation', {
+        method: 'POST',
+        body: JSON.stringify({ registration_id: registration.id, animations: [animation] }),
+      });
+      toast.success(`✅ Animation enregistrée — ${dayLabel(openDay)} ${slot.start}-${slot.end}`);
+      setOpenDay(null);
+      setGrid(null);
+      onRefresh?.();
+    } catch (e) {
+      toast.error(`Erreur : ${e.message}`);
+    } finally { setSaving(false); }
+  };
+
+  const deleteSlot = async (slotId) => {
+    if (!slotId) return;
+    if (!confirm('Supprimer cette animation ?')) return;
+    try {
+      await api(`/api/animation-slots/${slotId}`, { method: 'DELETE' });
+      toast.success('Animation supprimée');
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+  };
+
   return (
     <Card data-section="planning" className="border-yellow-300">
       <CardContent className="p-3 md:p-4">
         <header className="flex items-center gap-2 mb-2">
           <span className="w-7 h-7 rounded-full bg-yellow-500 text-white flex items-center justify-center text-xs font-bold">4</span>
-          <h3 className="font-bold text-base text-slate-900">Mes animations (1 par jour de présence)</h3>
+          <h3 className="font-bold text-base text-slate-900">Mes animations <span className="text-xs font-normal text-slate-500">(1 créneau réservé par jour de présence)</span></h3>
         </header>
+
+        {/* 🆕 SESSION 52g.6 — Note explicative */}
+        <div className="rounded-md bg-blue-50 border border-blue-200 px-2.5 py-2 mb-3 text-[11px] text-blue-900 leading-snug flex items-start gap-2">
+          <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-700" />
+          <div>
+            <b>1 créneau réservé suffit par jour</b> — il sera publié dans le programme officiel ARACOM.
+            Vous restez <b>libre d&apos;animer votre propre stand</b> autant que vous le souhaitez en dehors de ce créneau,
+            sans réservation supplémentaire.
+          </div>
+        </div>
 
         {(!days || days.length === 0) && (
           <div className="rounded-md border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-[11px] text-slate-500 italic">
-            Sélectionnez d&apos;abord vos jours de présence au Bloc 2.
+            Sélectionnez d&apos;abord vos jours de présence au Bloc 2. <b>Pas de jour → pas d&apos;animation.</b>
           </div>
         )}
 
@@ -358,67 +464,159 @@ function Bloc4Animations({ days, slots, onOpenAnimationPicker, onDeleteSlot, bus
             {days.map((d) => {
               const daySlots = (slots || []).filter((s) => s.day_label === d);
               const hasAny = daySlots.length > 0;
+              const isOpen = openDay === d;
+              const expWindow = attendingDayTimes?.[d];
               return (
                 <div
                   key={d}
-                  className={`rounded-lg border-2 p-2.5 ${hasAny ? 'border-emerald-300 bg-emerald-50/40' : 'border-red-300 bg-red-50/40'}`}
+                  className={`rounded-lg border-2 ${hasAny ? 'border-emerald-300 bg-emerald-50/40' : (isOpen ? 'border-yellow-400 bg-yellow-50/50' : 'border-red-300 bg-red-50/40')}`}
                 >
-                  <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                    <div className="font-semibold text-sm text-slate-900 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5" /> {dayLabel(d)}
+                  <div className="p-2.5">
+                    <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                      <div className="font-semibold text-sm text-slate-900 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5" /> {dayLabel(d)}
+                        {expWindow?.start && expWindow?.end && (
+                          <span className="text-[10px] text-slate-500 font-normal">
+                            (vos horaires : {expWindow.start}–{expWindow.end})
+                          </span>
+                        )}
+                      </div>
+                      {!hasAny && !isOpen && (
+                        <Badge className="bg-red-500 text-white border-red-600 text-[9px]">⚠ Aucune animation</Badge>
+                      )}
+                      {hasAny && (
+                        <Badge className="bg-emerald-600 text-white border-emerald-700 text-[9px]">✓ {daySlots.length} créneau{daySlots.length > 1 ? 'x' : ''}</Badge>
+                      )}
                     </div>
-                    {!hasAny && (
-                      <Badge className="bg-red-500 text-white border-red-600 text-[9px]">
-                        ⚠ Aucune animation
-                      </Badge>
+
+                    {/* Liste des animations déjà choisies */}
+                    {hasAny && (
+                      <ul className="space-y-1 mb-2">
+                        {daySlots.map((s) => (
+                          <li key={s.id} className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {(s.location_type === 'zone_demo' || s.slot_type === 'zone_demo') ? (
+                                <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 text-[9px] shrink-0">🟡 Zone démo</Badge>
+                              ) : (
+                                <Badge className="bg-blue-100 text-blue-800 border-blue-300 text-[9px] shrink-0">🔵 Sur stand</Badge>
+                              )}
+                              <span className="text-slate-700 truncate">
+                                {s.start_time}–{s.end_time}
+                                {s.title ? ` · ${s.title}` : ''}
+                              </span>
+                              <span className="text-emerald-600 font-bold">✅</span>
+                            </div>
+                            <button
+                              onClick={() => deleteSlot(s.id)}
+                              disabled={busy || saving}
+                              className="text-[10px] text-slate-400 hover:text-red-600 shrink-0"
+                              title="Supprimer cette animation"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {/* Bouton ouvrir picker (si pas encore d'animation ce jour) */}
+                    {!hasAny && !isOpen && (
+                      <button
+                        onClick={() => { setOpenDay(d); if (!grid && !loadingGrid) loadGrid(); }}
+                        disabled={busy || !venueId}
+                        className="w-full rounded-md border-2 px-2 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-1.5 border-red-400 bg-white hover:bg-red-50 text-red-700 disabled:opacity-50"
+                        title={!venueId ? 'Choisissez un site d\'abord' : 'Ouvrir le sélecteur de créneau'}
+                      >
+                        <Plus className="w-3 h-3" /> Choisir un créneau pour {dayLabel(d)}
+                      </button>
                     )}
                   </div>
 
-                  {/* Liste des animations du jour */}
-                  {hasAny && (
-                    <ul className="space-y-1 mb-2">
-                      {daySlots.map((s) => (
-                        <li
-                          key={s.id}
-                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] flex items-center justify-between gap-2"
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {s.location_type === 'zone_demo' ? (
-                              <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 text-[9px] shrink-0">🟡 Zone démo</Badge>
-                            ) : (
-                              <Badge className="bg-blue-100 text-blue-800 border-blue-300 text-[9px] shrink-0">🔵 Sur stand</Badge>
-                            )}
-                            <span className="text-slate-700 truncate">
-                              {dayLabel(d)} — {s.start_time}–{s.end_time}
-                              {s.title ? ` · ${s.title}` : ''}
-                            </span>
-                            <span className="text-emerald-600 font-bold">✅</span>
-                          </div>
-                          <button
-                            onClick={() => onDeleteSlot(s.id)}
-                            disabled={busy}
-                            className="text-[10px] text-slate-400 hover:text-red-600 shrink-0"
-                            title="Supprimer cette animation"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* PICKER INLINE expandable */}
+                  {isOpen && (
+                    <div className="border-t-2 border-yellow-300 bg-white p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-semibold text-slate-700">Choisir un créneau d&apos;animation pour <b>{dayLabel(d)}</b></div>
+                        <button
+                          onClick={() => { setOpenDay(null); setGrid(null); }}
+                          className="text-[10px] text-slate-500 hover:text-slate-900 underline"
+                        >Annuler</button>
+                      </div>
 
-                  {/* Bouton choisir/ajouter */}
-                  <button
-                    onClick={() => onOpenAnimationPicker(d)}
-                    disabled={busy}
-                    className={`w-full rounded-md border px-2 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-1.5 ${
-                      hasAny
-                        ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700'
-                        : 'border-red-400 bg-white hover:bg-red-50 text-red-700'
-                    }`}
-                  >
-                    <Plus className="w-3 h-3" /> {hasAny ? 'Ajouter une autre animation' : 'Choisir une animation pour ce jour'}
-                  </button>
+                      {/* Toggle lieu */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setLocationType('sur_stand')}
+                          className={`flex-1 rounded-md border-2 px-2.5 py-2 text-[11px] font-semibold transition ${
+                            locationType === 'sur_stand'
+                              ? 'border-blue-500 bg-blue-50 text-blue-900'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'
+                          }`}
+                        >
+                          🔵 Sur mon stand
+                          <div className="text-[9px] font-normal opacity-70 mt-0.5">Animation à côté de votre stand</div>
+                        </button>
+                        <button
+                          onClick={() => setLocationType('zone_demo')}
+                          className={`flex-1 rounded-md border-2 px-2.5 py-2 text-[11px] font-semibold transition ${
+                            locationType === 'zone_demo'
+                              ? 'border-yellow-500 bg-yellow-50 text-yellow-900'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-yellow-300'
+                          }`}
+                        >
+                          🟡 Zone démo (scène)
+                          <div className="text-[9px] font-normal opacity-70 mt-0.5">Espace public dédié</div>
+                        </button>
+                      </div>
+
+                      {/* Grille des créneaux */}
+                      {loadingGrid && (
+                        <div className="text-center text-xs text-slate-500 py-4">
+                          <Loader2 className="w-4 h-4 animate-spin inline-block mr-1.5" /> Chargement des créneaux…
+                        </div>
+                      )}
+                      {!loadingGrid && grid && (
+                        <>
+                          {availableSlots.length === 0 ? (
+                            <div className="text-center text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md py-3 px-2">
+                              ⚠ Aucun créneau {locationType === 'zone_demo' ? 'en zone démo' : 'sur stand'} disponible
+                              {expWindow ? ` dans votre plage horaire (${expWindow.start}–${expWindow.end})` : ''}
+                              {locationType === 'zone_demo' ? '. Essayez "Sur mon stand".' : '.'}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
+                              {availableSlots.map((s) => {
+                                const isOccupied = !!s.occupied || (locationType === 'zone_demo' && s.occupants?.length > 0);
+                                return (
+                                  <button
+                                    key={`${s.start}-${s.end}`}
+                                    onClick={() => !isOccupied && saveSlot(s)}
+                                    disabled={isOccupied || saving}
+                                    className={`rounded-md border-2 px-2 py-1.5 text-[11px] font-semibold transition ${
+                                      isOccupied
+                                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed line-through'
+                                        : locationType === 'zone_demo'
+                                          ? 'border-yellow-300 bg-yellow-50 hover:bg-yellow-100 hover:border-yellow-500 text-yellow-900'
+                                          : 'border-blue-300 bg-blue-50 hover:bg-blue-100 hover:border-blue-500 text-blue-900'
+                                    }`}
+                                    title={isOccupied ? 'Créneau déjà pris' : 'Cliquer pour réserver'}
+                                  >
+                                    {s.start}–{s.end}
+                                    {isOccupied && <div className="text-[8px] font-normal opacity-70">pris</div>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {saving && (
+                        <div className="text-center text-xs text-slate-500 py-1">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin inline-block mr-1.5" /> Enregistrement…
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -706,10 +904,12 @@ export default function TunnelV2({
         busy={busy}
       />
       <Bloc4Animations
+        registration={r}
+        venueId={r.venue_id}
         days={days}
+        attendingDayTimes={r.attending_day_times || {}}
         slots={slots}
-        onOpenAnimationPicker={onOpenAnimationPicker}
-        onDeleteSlot={deleteSlot}
+        onRefresh={onRefresh}
         busy={busy}
       />
       <Bloc5Submit
