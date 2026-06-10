@@ -147,6 +147,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   useEffect(() => { load(); }, []);
 
   // Group requests by venue + status
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   const grouped = useMemo(() => {
     const out = {};
     for (const v of venues) {
@@ -155,11 +156,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
     for (const r of requests) {
       const v = r.venue_id;
       if (!out[v]) continue;
-      // 🆕 SESSION 52g.5 — Filtre par jour de présence + capture _attendingDays pour les badges
+      // 🆕 SESSION 52g.5 — Filtre par jour de présence (lit attending_days depuis registration ou validation_request)
       const daysAttended = Array.isArray(r.registration?.attending_days)
         ? r.registration.attending_days
         : (Array.isArray(r.attending_days) ? r.attending_days : []);
-      r._attendingDays = daysAttended;
       const matchesDay = dayFilter === 'all'
         ? true
         : dayFilter === 'vendredi' ? daysAttended.includes('vendredi')
@@ -397,18 +397,48 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
 
       {/* Cards par site */}
       <div className="space-y-3">
-        {filtered.map(g => (
+        {filtered.map(g => {
+          // 🆕 SESSION 52g.7 — Comptages par jour pour chaque bucket
+          const dayBreakdown = (items) => {
+            const c = { ven: 0, sam: 0, both: 0, unknown: 0 };
+            for (const r of items) {
+              const days = Array.isArray(r._attendingDays) ? r._attendingDays
+                : Array.isArray(r.registration?.attending_days) ? r.registration.attending_days
+                : Array.isArray(r.attending_days) ? r.attending_days : [];
+              const isVen = days.includes('vendredi');
+              const isSam = days.includes('samedi');
+              if (isVen && isSam) c.both++;
+              else if (isVen) c.ven++;
+              else if (isSam) c.sam++;
+              else c.unknown++;
+            }
+            // Présents le jour = "ven seul" + "V+S" pour vendredi, "sam seul" + "V+S" pour samedi
+            return {
+              ...c,
+              vendredi_total: c.ven + c.both,
+              samedi_total: c.sam + c.both,
+            };
+          };
+          const valBreakdown = dayBreakdown(g.validated);
+          const preBreakdown = dayBreakdown(g.preReserved);
+          const waitBreakdown = dayBreakdown(g.waitlist);
+          // 🆕 Récap stands par jour (validés + pré-réservés) vs capacité
+          const capacity = g.venue.capacity_stands || 0;
+          const venDayReserved = valBreakdown.vendredi_total + preBreakdown.vendredi_total;
+          const samDayReserved = valBreakdown.samedi_total + preBreakdown.samedi_total;
+          const venFull = capacity > 0 && venDayReserved >= capacity;
+          const samFull = capacity > 0 && samDayReserved >= capacity;
+          return (
           <Card key={g.venue.id} className="overflow-hidden">
             <CardHeader className="pb-2 bg-slate-50">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <MapPin className="w-4 h-4 text-blue-600" />
                   <CardTitle className="text-base">{g.venue.name}</CardTitle>
                   <Badge variant="secondary" className="text-[10px]">{g.venue.capacity_stands || 0} stands</Badge>
                   {(() => {
                     // 🆕 SESSION 48x — Site complet si (validés + pré-réservés) ≥ capacité
                     //                  même si certains stands sont encore "libres" physiquement.
-                    const capacity = g.venue.capacity_stands || 0;
                     const totalReserved = g.validated.length + g.preReserved.length;
                     const remainingQuota = Math.max(0, capacity - totalReserved);
                     const isComplete = capacity > 0 && totalReserved >= capacity;
@@ -421,6 +451,19 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                       </Badge>
                     );
                   })()}
+                  {/* 🆕 SESSION 52g.7 — Récap remplissage par jour */}
+                  <Badge
+                    className={`text-[10px] border ${venFull ? 'bg-rose-100 text-rose-900 border-rose-300' : 'bg-blue-100 text-blue-900 border-blue-300'}`}
+                    title={`Vendredi 14/08 : ${venDayReserved} exposants sur ${capacity} stands (validés + pré-réservés)`}
+                  >
+                    📅 Ven 14/08 : <b className="ml-0.5">{venDayReserved}/{capacity}</b>{venFull ? ' · complet' : ''}
+                  </Badge>
+                  <Badge
+                    className={`text-[10px] border ${samFull ? 'bg-rose-100 text-rose-900 border-rose-300' : 'bg-purple-100 text-purple-900 border-purple-300'}`}
+                    title={`Samedi 15/08 : ${samDayReserved} exposants sur ${capacity} stands (validés + pré-réservés)`}
+                  >
+                    📅 Sam 15/08 : <b className="ml-0.5">{samDayReserved}/{capacity}</b>{samFull ? ' · complet' : ''}
+                  </Badge>
                 </div>
                 <div className="text-[11px] text-slate-500">
                   <b className="text-emerald-700">{g.validated.length}</b>v · <b className="text-violet-700">{g.preReserved.length}</b>p · <b className="text-amber-700">{g.waitlist.length}</b>a
@@ -428,6 +471,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               </div>
             </CardHeader>
             <CardContent className="p-3">
+              {/* 🆕 SESSION 52g.7 — Sous-en-tête : récap par bucket et par jour */}
+              <div className="grid grid-cols-3 gap-3 mb-2 text-[10px]">
+                <DayBreakdownStrip tone="emerald" label="Validés" bd={valBreakdown} />
+                <DayBreakdownStrip tone="violet" label="Pré-réservés" bd={preBreakdown} />
+                <DayBreakdownStrip tone="amber" label="Liste d'attente" bd={waitBreakdown} />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* ───── COL 1 : VALIDÉS ───── */}
                 <Section
@@ -574,7 +623,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               </div>
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       {/* Dialog Promouvoir */}
@@ -791,3 +841,48 @@ function ExposantName({ r, onClick }) {
     </div>
   );
 }
+
+// 🆕 SESSION 52g.7 — Strip récap d'un bucket (validés / pré-réservés / liste d'attente) par jour
+function DayBreakdownStrip({ tone = 'slate', label, bd }) {
+  const tones = {
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-900', accent: 'text-emerald-700' },
+    violet: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-900', accent: 'text-violet-700' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900', accent: 'text-amber-700' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-900', accent: 'text-slate-700' },
+  };
+  const t = tones[tone] || tones.slate;
+  const total = bd.ven + bd.sam + bd.both + bd.unknown;
+  return (
+    <div className={`rounded-md border ${t.border} ${t.bg} px-2 py-1.5 flex items-center justify-between gap-2`}>
+      <div className={`font-semibold ${t.text} text-[10px] truncate`}>{label}</div>
+      <div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+        <span className="inline-flex items-center gap-0.5" title={`Vendredi 14/08 : ${bd.vendredi_total} exposant(s)`}>
+          <span className="font-bold text-blue-800">V</span><span className={`font-mono ${t.accent}`}>{bd.vendredi_total}</span>
+        </span>
+        <span className="text-slate-300">·</span>
+        <span className="inline-flex items-center gap-0.5" title={`Samedi 15/08 : ${bd.samedi_total} exposant(s)`}>
+          <span className="font-bold text-purple-800">S</span><span className={`font-mono ${t.accent}`}>{bd.samedi_total}</span>
+        </span>
+        {bd.both > 0 && (
+          <>
+            <span className="text-slate-300">·</span>
+            <span className="inline-flex items-center gap-0.5" title="Exposants présents les 2 jours">
+              <span className="font-bold text-emerald-800">V+S</span><span className={`font-mono ${t.accent}`}>{bd.both}</span>
+            </span>
+          </>
+        )}
+        {bd.unknown > 0 && (
+          <>
+            <span className="text-slate-300">·</span>
+            <span className="inline-flex items-center gap-0.5" title="Jours non définis">
+              <span className="font-bold text-slate-500">?</span><span className={`font-mono ${t.accent}`}>{bd.unknown}</span>
+            </span>
+          </>
+        )}
+        <span className="text-slate-300">·</span>
+        <span className={`font-mono ${t.accent}`} title="Total dans ce bucket">total {total}</span>
+      </div>
+    </div>
+  );
+}
+
