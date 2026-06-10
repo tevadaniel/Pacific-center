@@ -353,7 +353,7 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
   const [loadingGrid, setLoadingGrid] = useState(false);
   const [locationType, setLocationType] = useState('sur_stand');
   const [pickedSlot, setPickedSlot] = useState(null); // { start, end } — slot choisi, en attente de détails
-  const [form, setForm] = useState({ title: '', description: '', target_audience: 'tous_publics' });
+  const [form, setForm] = useState({ title: '', description: '', target_audience: 'tous_publics', material_needs: '' });
   const [saving, setSaving] = useState(false);
 
   const loadGrid = async () => {
@@ -372,7 +372,7 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
     setOpenDay(null);
     setGrid(null);
     setPickedSlot(null);
-    setForm({ title: '', description: '', target_audience: 'tous_publics' });
+    setForm({ title: '', description: '', target_audience: 'tous_publics', material_needs: '' });
   };
 
   const toMin = (hhmm) => {
@@ -521,6 +521,12 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
                             </div>
                             {s.description && (
                               <div className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{s.description}</div>
+                            )}
+                            {s.material_needs && (
+                              <div className="text-[10px] text-amber-700 mt-0.5 flex items-start gap-1">
+                                <span className="font-semibold shrink-0">🛠 Matériel :</span>
+                                <span className="line-clamp-2">{s.material_needs}</span>
+                              </div>
                             )}
                           </li>
                         ))}
@@ -688,6 +694,20 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
                                 </button>
                               ))}
                             </div>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                              Matériel utilisé <span className="font-normal text-slate-400">(si nécessaire)</span>
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={form.material_needs}
+                              onChange={(e) => setForm({ ...form, material_needs: e.target.value })}
+                              placeholder="Ex: 2 tables, 1 sono avec micro, 1 écran projection, accès électrique 220V, tapis de sol…"
+                              maxLength={400}
+                              className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:border-aracom-orange focus:outline-none focus:ring-1 focus:ring-aracom-orange resize-none"
+                            />
+                            <div className="text-[9px] text-slate-400 text-right mt-0.5">{form.material_needs.length}/400</div>
                           </div>
 
                           <div className="flex justify-end gap-2 pt-1">
