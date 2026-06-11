@@ -39,15 +39,17 @@ function dayLabel(d) {
 // =======================================================
 // BLOC 1 — Sites priorisés
 // =======================================================
-function Bloc1Sites({ allSites, activeRegId, availableVenues, venuesAvailability, onAddSite, onRemoveSite, onSwapPriority, onSwitchSite, busy }) {
+function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesAvailability, onAddSite, onRemoveSite, onSwapPriority, onSwitchSite, busy }) {
   // Trier par site_priority
   const sorted = [...(allSites || [])].sort((a, b) => (a.site_priority || 99) - (b.site_priority || 99));
   const occupiedIds = new Set(sorted.map((s) => s.venue_id));
   const remaining = (availableVenues || []).filter((v) => !occupiedIds.has(v.id));
   const canAddMore = sorted.length < 3 && remaining.length > 0;
-  // 🆕 SESSION 52g.6 — Fallback : retrouver le nom du site via availableVenues si site.venue manque
+  // 🆕 SESSION 52g.13 — Fallback robuste : cherche dans allVenues (TOUTES, même inactives) puis availableVenues
   const venueNameById = (vid) => {
     if (!vid) return null;
+    const fromAll = (allVenues || []).find(v => v.id === vid);
+    if (fromAll?.name) return fromAll.name;
     const fromAvail = (availableVenues || []).find(v => v.id === vid);
     if (fromAvail?.name) return fromAvail.name;
     return null;
@@ -842,6 +844,7 @@ export default function TunnelV2({
   deposit = null,
   allSites = [],
   availableVenues = [],
+  allVenues = [],
   venuesAvailability = {},
   validationRequest = null,
   isLocked = false,
@@ -1009,6 +1012,7 @@ export default function TunnelV2({
         allSites={allSites}
         activeRegId={r.id}
         availableVenues={availableVenues}
+        allVenues={allVenues}
         venuesAvailability={venuesAvailability}
         onAddSite={addSite}
         onRemoveSite={removeSite}

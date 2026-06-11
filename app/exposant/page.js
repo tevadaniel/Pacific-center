@@ -429,12 +429,14 @@ export default function ExposantPortal() {
               rappel: 'parcours',
             };
             const targetTab = SECTION_TAB_MAP[target];
-            if (targetTab && targetTab !== activeTab) {
+            const willChangeTab = targetTab && targetTab !== activeTab;
+            if (willChangeTab) {
               handleTabChange(targetTab);
             }
-            // Scroll vers data-section après un court délai pour laisser le DOM se monter
+            // 🆕 SESSION 52g.13 — Scroll robuste avec retry : essaie plusieurs fois si la cible n'est pas
+            //   encore dans le DOM (utile après changement de tab où le rendu prend qq frames)
             if (typeof window !== 'undefined') {
-              setTimeout(() => {
+              const tryScroll = (attempt = 0) => {
                 const el = document.querySelector(`[data-section="${target}"]`);
                 if (el) {
                   const rect = el.getBoundingClientRect();
@@ -443,10 +445,15 @@ export default function ExposantPortal() {
                   // Effet flash pour bien situer la section
                   el.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2', 'transition-all');
                   setTimeout(() => el.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+                } else if (attempt < 5) {
+                  // Retry après un délai progressif (100ms, 200ms, 400ms, 800ms, 1600ms)
+                  setTimeout(() => tryScroll(attempt + 1), 100 * Math.pow(2, attempt));
                 } else {
+                  // Fallback ultime
                   window.scrollTo({ top: 240, behavior: 'smooth' });
                 }
-              }, targetTab !== activeTab ? 250 : 60);
+              };
+              setTimeout(tryScroll, willChangeTab ? 200 : 50);
             }
           }}
         />
@@ -771,6 +778,7 @@ export default function ExposantPortal() {
               allSites={data.allSites || []}
               currentRegId={r.id}
               organizationId={o.id}
+              allVenues={allVenues || []}
               onRefresh={load}
             />
 
@@ -783,6 +791,7 @@ export default function ExposantPortal() {
               docs={docs}
               deposit={d}
               allSites={data.allSites || []}
+              allVenues={allVenues || []}
               availableVenues={(allVenues || []).filter(vv => vv.is_available_2026 !== false && vv.is_active_2026 !== false && vv.exposant_visible !== false)}
               venuesAvailability={(allVenues || []).reduce((acc, vv) => {
                 const av = venuesAvailability[vv.id];
@@ -995,7 +1004,7 @@ export default function ExposantPortal() {
 // 🎯 PARCOURS WIZARD — Les 3 étapes structurantes (Dates / Animations / Validation)
 // =====================================================================
 // 🆕 MULTI-SITES — Panneau de gestion des sites de l'exposant
-function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) {
+function MultiSitesPanel({ allSites, currentRegId, organizationId, allVenues = [], onRefresh }) {
   const [venues, setVenues] = useState([]);
   const [venueOccupancy, setVenueOccupancy] = useState({}); // venue_id -> { used, total, isFull }
   const [maxSites, setMaxSites] = useState(3);
@@ -1169,7 +1178,7 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, onRefresh }) 
                   </span>
                   <div className="flex-1">
                     <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
-                      <span className="text-slate-900">{s.venue?.name || '— site à choisir —'}</span>
+                      <span className="text-slate-900">{s.venue?.name || (s.venue_id ? ((allVenues || []).find(av => av.id === s.venue_id)?.name || '— site introuvable —') : '— site à choisir —')}</span>
                       {isUserDesignatedPriority && <Badge className="bg-amber-500 text-white text-[10px]">★ Site prioritaire</Badge>}
                       {isActive && <Badge className="bg-blue-600 text-white text-[10px]">Actif</Badge>}
                       {isLocked && <Badge className="bg-emerald-600 text-white text-[10px]">🔒 Verrouillé</Badge>}
