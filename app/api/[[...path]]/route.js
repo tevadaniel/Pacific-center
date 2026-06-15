@@ -1505,8 +1505,62 @@ export async function GET(request, { params }) {
               new_values_json: { organization_id: candidateOrgId, org_name: foundOrg.name },
               created_at: new Date(),
             });
-          } catch {}
+          } catch { /* ignore */ }
         }
+      }
+
+      // 🆕 SESSION 52g.18 — FILET DE SÉCURITÉ FINAL : si exposant SANS org après auto-heal,
+      //   on lui CRÉE une organisation vide automatiquement (= sa propre org).
+      //   Cas typique : compte créé manuellement sans link, ou compte legacy.
+      if (!organization && (user.role_code === 'exposant' || user.role_code === 'pacific_center')) {
+        const newOrgId = `org-auto-${(user.id || '').replace(/[^a-z0-9]/gi, '').slice(-8) || uuid().slice(0, 8)}`;
+        const exists = await db.collection('organizations').findOne({ id: newOrgId });
+        if (!exists) {
+          await db.collection('organizations').insertOne({
+            id: newOrgId,
+            name: user.full_name || (user.email || '').split('@')[0] || 'Mon organisation',
+            discipline: '',
+            priority_level: 'prospect',
+            main_email: user.email || null,
+            main_phone: user.phone || null,
+            contact_name: user.full_name || null,
+            notes: 'Organisation créée automatiquement à la connexion (filet de sécurité)',
+            source_origin: 'auto_heal_auth_me',
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+        await db.collection('users').updateOne(
+          { id: user.id },
+          { $set: { organization_id: newOrgId, auto_org_created_at: new Date(), updated_at: new Date() } }
+        );
+        // Et on crée aussi une registration prospect vide pour qu'il puisse démarrer le tunnel
+        const newRegId = `reg-${newOrgId}`;
+        const existsReg = await db.collection('registrations').findOne({ id: newRegId });
+        if (!existsReg) {
+          await db.collection('registrations').insertOne({
+            id: newRegId,
+            edition_id: EDITION_ID,
+            organization_id: newOrgId,
+            venue_id: null,
+            stand_code: null,
+            status: 'prospect',
+            completion_percent: 5,
+            wizard_step: 1,
+            source: 'auto_heal_auth_me',
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+        user.organization_id = newOrgId;
+        organization = await db.collection('organizations').findOne({ id: newOrgId });
+        try {
+          await db.collection('activity_logs').insertOne({
+            id: uuid(), user_id: user.id, entity_type: 'user', entity_id: user.id,
+            action_type: 'auto_create_org', old_values_json: { organization_id: null },
+            new_values_json: { organization_id: newOrgId }, created_at: new Date(),
+          });
+        } catch { /* ignore */ }
       }
 
       delete user.password; delete user._id;

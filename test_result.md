@@ -3746,3 +3746,41 @@ frontend:
 agent_communication:
   - agent: "testing"
     message: "SESSION 52g.9 — BACKEND TEST COMPLETE. Endpoint POST /api/registrations/:id/request-validation avec gestion waitlist testé exhaustivement avec 7 scénarios. RÉSULTATS: 7/7 tests passés (100%). L'endpoint fonctionne parfaitement selon les spécifications: (1) Waitlist case: accepte soumission sans stand_code ni animations, crée VR avec status='waitlist' ✅, (2) Waitlist sans attending_days: rejette avec 400 ✅, (3) Normal complete case: crée VR avec status='en_attente' (non-régression) ✅, (4) Normal sans stand_code: rejette avec 400 (non-régression) ✅, (5) Normal sans animation: rejette avec 400 (non-régression) ✅, (6) Confirmed case: rejette avec 400 ✅, (7) Cancel previous waitlist: annule ancienne VR et recrée nouvelle ✅. LOGIQUE VALIDÉE: Le flag isWaitlistFlow = !!reg.is_waitlist || reg.status === 'liste_attente' détermine correctement le flow. Les validations strictes (stand_code + animations) sont skippées pour waitlist mais maintenues pour normal flow. Les exposants en liste d'attente peuvent maintenant soumettre leur demande de validation sans être bloqués par l'absence de stand. Bug critique résolu. Feature 100% production-ready. Main agent doit summarize et finish."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 53 — Vérification AUTO-HEAL Organization (auth/me + filet sécurité)
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 53 — Auto-heal organization on auth/me + auto-org creation safety net for orphan exposants"
+    implemented: true
+    working: "NA"
+    file: "app/api/[[...path]]/route.js (lignes 1448-1568)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Auto-heal & auto-create organization mechanism added in GET /api/auth/me. Logic: (1) If user.organization_id is missing OR organization not found AND user.id starts with 'u-exp-', try to derive orgId from the user id pattern and auto-link in DB (idempotent). Trace in activity_logs as 'auto_heal_link_org'. (2) FILET DE SÉCURITÉ FINAL: If exposant/pacific_center still has no organization after auto-heal step, automatically CREATE a new empty organization (id=`org-auto-{userId tail}`), link the user, AND create a prospect registration (id=`reg-{orgId}`, status='prospect', completion_percent=5, wizard_step=1). Trace in activity_logs as 'auto_create_org'. Idempotent: pas de doublon si déjà existant. BUMP package.json 1.0.37 → 1.0.38. À TESTER: (A) admin@aracom.pf login → /auth/me retourne user admin, organization=null (admins n'ont pas d'org, c'est attendu). (B) Créer un nouvel utilisateur exposant orphelin (sans organization_id) puis appeler /auth/me avec ses headers → vérifier qu'une org auto-créée apparaît + une registration prospect existe + activity_logs contient 'auto_create_org'. (C) Idempotence: rappeler /auth/me → ne doit PAS créer une 2e org/reg. (D) Aucune régression sur les exposants existants (swimua.tahiti@gmail.com, etc.) — leur org existante doit être retournée."
+
+agent_communication:
+  - agent: "main"
+    message: "SESSION 53 — Tests backend requis sur la logique auto-heal / auto-create organization dans GET /api/auth/me. Code stable depuis fin de session 52, jamais testé end-to-end. Scénarios à couvrir: (1) Admin login normal (pas d'org créée), (2) Exposant orphelin SANS organization_id → org + reg prospect auto-créées + activity_logs traces, (3) Idempotence: 2e appel ne duplique pas, (4) Non-régression sur exposants existants avec org valide. Ne pas tester de scénarios de simulation/waitlist/etc — focus uniquement sur ce mécanisme."
+
+  - task: "SESSION 53 — Auto-heal / Auto-creation d'organisation dans GET /api/auth/me"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (lignes 1448-1568)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 5/5 TESTS PASSÉS (100%). SESSION 53 mécanisme d'auto-heal / auto-creation d'organisation testé avec succès. TEST 1 (Admin non-régression): Login admin@aracom.pf / Projetaracom12 → 200 OK, GET /api/auth/me retourne user.role_code=aracom_admin, organization=null (attendu pour admin) ✅. Aucune org 'org-auto-*' créée pour admin ✅. Aucun log auto_create_org pour admin ✅. TEST 2 (Exposant existant non-régression): Exposant swimua.tahiti@gmail.com avec organization_id=org-1 → GET /api/auth/me retourne organization valide (I Mua Papeete), organization_id inchangé ✅. Aucun log auto_create_org créé ✅. TEST 3 (Auto-link orphan exposant): User test créé avec id='u-exp-test-orphan-link-XYZ' SANS organization_id + org test créée avec id='test-orphan-link-XYZ' → GET /api/auth/me déclenche auto-link ✅. Organization retournée = 'Test Orphan Link Organization' ✅. User.organization_id mis à jour en DB = 'test-orphan-link-XYZ' ✅. User.auto_healed_at défini ✅. Activity_log créé avec action_type='auto_heal_link_org' ✅. TEST 4 (HAPPY PATH FILET DE SÉCURITÉ): User test créé avec id='u-exp-test-noorg-ABC123' SANS org existante → GET /api/auth/me déclenche auto-create ✅. Organization retournée non-null avec name='Test NoOrg Exposant' ✅. Nouvelle org créée en DB avec id='org-auto-rgABC123', source_origin='auto_heal_auth_me' ✅. User.organization_id défini = 'org-auto-rgABC123' ✅. Registration prospect créée avec id='reg-org-auto-rgABC123', status='prospect', completion_percent=5, wizard_step=1, source='auto_heal_auth_me' ✅. Activity_log créé avec action_type='auto_create_org' ✅. TEST 5 (Idempotence): Second appel GET /api/auth/me avec mêmes headers → MÊME organization retournée (org-auto-rgABC123) ✅. Aucune nouvelle org créée (count=1) ✅. Aucune nouvelle registration créée (count=1) ✅. CONCLUSION: Mécanisme d'auto-heal 100% fonctionnel. (1) Auto-link fonctionne pour pattern u-exp-{orgId}. (2) Filet de sécurité crée org + registration pour exposants orphelins. (3) Idempotent (pas de doublons). (4) Admins non affectés. Feature production-ready."
+
+
+  - agent: "testing"
+    message: "SESSION 53 — AUTO-HEAL MECHANISM TEST COMPLETE. Mécanisme d'auto-heal / auto-creation d'organisation dans GET /api/auth/me (lignes 1448-1568) testé exhaustivement. RÉSULTATS: 5/5 tests passés (100%). L'endpoint fonctionne parfaitement selon les spécifications: (1) TEST 1 - Admin non-régression: Admin login OK, organization=null (attendu), aucune org auto-créée ✅. (2) TEST 2 - Exposant existant non-régression: Organization_id reste inchangé, aucun log auto_create_org ✅. (3) TEST 3 - Auto-link orphan exposant: Pattern u-exp-{orgId} détecté, user auto-lié à org existante, activity_log auto_heal_link_org créé ✅. (4) TEST 4 - HAPPY PATH FILET DE SÉCURITÉ: Exposant SANS org → auto-création org (id=org-auto-*, source_origin=auto_heal_auth_me) + registration prospect (status=prospect, completion_percent=5, wizard_step=1, source=auto_heal_auth_me) + activity_log auto_create_org ✅. (5) TEST 5 - Idempotence: Second appel retourne MÊME org, aucun doublon créé ✅. MÉCANISME VALIDÉ: (1) Auto-link fonctionne pour utilisateurs orphelins avec pattern u-exp-{orgId}. (2) Filet de sécurité crée automatiquement org + registration pour exposants sans org. (3) Idempotent (pas de doublons sur appels multiples). (4) Admins non affectés (organization=null maintenu). Feature 100% production-ready. Main agent doit summarize et finish."
