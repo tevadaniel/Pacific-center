@@ -1603,7 +1603,10 @@ export async function GET(request, { params }) {
           is_user_priority: r.is_user_priority === true,
           // 🆕 SESSION 47.15 — Indicateur "demande en liste d'attente" (set par pre-reserve-stand avec force_waitlist)
           is_waitlist: r.is_waitlist === true,
-          venue: v ? { id: v.id, name: v.name, code: v.code, capacity_stands: v.capacity_stands } : null,
+          // 🆕 SESSION 52g.14 — Fallback robuste : si venue introuvable OU sans nom, on construit un placeholder lisible
+          venue: v
+            ? { id: v.id, name: v.name || v.code || `Site ${String(v.id || '').slice(-6).toUpperCase()}`, code: v.code || null, capacity_stands: v.capacity_stands || 0 }
+            : (r.venue_id ? { id: r.venue_id, name: `Site ${String(r.venue_id).slice(-6).toUpperCase()}`, code: null, capacity_stands: 0, _placeholder: true } : null),
           deposit: depByReg[r.id] || null,
           animations_count: regSlots.length,
           has_vendredi_animation: has_vendredi,

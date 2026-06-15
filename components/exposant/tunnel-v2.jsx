@@ -45,14 +45,17 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesA
   const occupiedIds = new Set(sorted.map((s) => s.venue_id));
   const remaining = (availableVenues || []).filter((v) => !occupiedIds.has(v.id));
   const canAddMore = sorted.length < 3 && remaining.length > 0;
-  // 🆕 SESSION 52g.13 — Fallback robuste : cherche dans allVenues (TOUTES, même inactives) puis availableVenues
+  // 🆕 SESSION 52g.14 — Fallback robuste : si venue.name manquant, recherche dans allVenues puis availableVenues,
+  //   sinon affiche le code venue ou les 6 derniers caractères de l'ID pour ne JAMAIS afficher "—"
   const venueNameById = (vid) => {
     if (!vid) return null;
     const fromAll = (allVenues || []).find(v => v.id === vid);
     if (fromAll?.name) return fromAll.name;
+    if (fromAll?.code) return fromAll.code;
     const fromAvail = (availableVenues || []).find(v => v.id === vid);
     if (fromAvail?.name) return fromAvail.name;
-    return null;
+    if (fromAvail?.code) return fromAvail.code;
+    return `Site ${String(vid).slice(-6).toUpperCase()}`;
   };
 
   const moveUp = (idx) => {
@@ -129,7 +132,7 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesA
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span className="font-semibold text-sm text-slate-900 truncate">
-                      {site.venue?.name || venueNameById(site.venue_id) || '—'}
+                      {site.venue?.name || venueNameById(site.venue_id) || (site.venue_id ? `Site ${String(site.venue_id).slice(-6).toUpperCase()}` : '— site à choisir —')}
                     </span>
                     {isActive && <Badge className="text-[9px] bg-aracom-orange text-white border-aracom-orange shrink-0">Site actif</Badge>}
                   </div>
