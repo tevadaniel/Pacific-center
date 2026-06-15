@@ -135,6 +135,12 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesA
                       {site.venue?.name || venueNameById(site.venue_id) || (site.venue_id ? `Site ${String(site.venue_id).slice(-6).toUpperCase()}` : '— site à choisir —')}
                     </span>
                     {isActive && <Badge className="text-[9px] bg-aracom-orange text-white border-aracom-orange shrink-0">Site actif</Badge>}
+                    {/* 🆕 SESSION 52g.16 — Badge "EN LISTE D'ATTENTE" très visible si l'inscription est en waitlist */}
+                    {(site.is_waitlist || site.status === 'liste_attente') && (
+                      <Badge className="text-[9px] bg-amber-500 text-white border-amber-600 shrink-0 animate-pulse">
+                        🕒 EN LISTE D&apos;ATTENTE
+                      </Badge>
+                    )}
                   </div>
                   <div className="text-[10.5px] text-slate-500">
                     {isFull ? (

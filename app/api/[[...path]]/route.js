@@ -8366,6 +8366,18 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       if (existing.some(r => r.venue_id === venueId)) {
         return err('Vous êtes déjà inscrit(e) sur ce site. 1 stand max par site.', 400);
       }
+      // 🆕 SESSION 52g.16 — Détection automatique du mode WAITLIST
+      //   Si le site est COMPLET (validés + pré-réservés ≥ capacité), on marque l'inscription en liste d'attente
+      //   pour fluidifier le tunnel (l'exposant n'a pas besoin de cliquer "Rejoindre la liste d'attente").
+      const allActiveOnVenue = await db.collection('registrations').countDocuments({
+        venue_id: venueId,
+        edition_id: EDITION_ID,
+        status: { $in: ['a_confirmer', 'confirme', 'verrouille', 'provisoire', 'rdv_fixe', 'en_attente'] },
+        is_waitlist: { $ne: true },
+      });
+      const capacity = venue.capacity_stands || 0;
+      const isFull = capacity > 0 && allActiveOnVenue >= capacity;
+
       // 🆕 SESSION 52g.15 — Si une registration EXISTE déjà mais SANS venue_id (Site 1 vide après self-register),
       //   on la REMPLIT au lieu de créer une nouvelle.
       const emptyReg = existing.find(r => !r.venue_id);
@@ -8375,7 +8387,8 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
           {
             $set: {
               venue_id: venueId,
-              status: emptyReg.status === 'prospect' ? 'provisoire' : emptyReg.status,
+              status: isFull ? 'liste_attente' : (emptyReg.status === 'prospect' ? 'provisoire' : emptyReg.status),
+              is_waitlist: isFull,
               completion_percent: Math.max(10, emptyReg.completion_percent || 0),
               updated_at: new Date(),
             },
@@ -8383,7 +8396,7 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         );
         const updated = await db.collection('registrations').findOne({ id: emptyReg.id });
         delete updated._id;
-        return json({ ok: true, registration: updated, reused_empty: true });
+        return json({ ok: true, registration: updated, reused_empty: true, is_waitlist: isFull });
       }
       if (existing.length >= maxSites) {
         return err(`Limite atteinte : maximum ${maxSites} site(s) par exposant.`, 400);
@@ -8396,7 +8409,8 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         organization_id: orgId,
         venue_id: venueId,
         stand_code: null,
-        status: 'a_confirmer',
+        status: isFull ? 'liste_attente' : 'a_confirmer',
+        is_waitlist: isFull,
         is_pre_reserved: false,
         is_deposit_received: false,
         is_locked: false,
@@ -8413,7 +8427,7 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       };
       await db.collection('registrations').insertOne(newReg);
       delete newReg._id;
-      return json({ ok: true, registration: newReg });
+      return json({ ok: true, registration: newReg, is_waitlist: isFull });
     }
 
     // 🆕 DELETE/POST /api/exposant/sites/:regId/remove — retire un site (registration) si pas locked
