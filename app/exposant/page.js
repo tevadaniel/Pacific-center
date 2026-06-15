@@ -410,10 +410,40 @@ export default function ExposantPortal() {
               window.location.href = u.toString();
             }
           }}
-          onAddSite={(venueId) => {
-            // Scroll vers UrgencyBanner ou ajoute directement
-            const target = document.querySelector('[data-testid="urgency-banner"], .urgency-banner');
-            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          onAddSite={async (venueId) => {
+            // 🆕 SESSION 52g.15 — Backend gère intelligemment :
+            //   • Si une registration vide (venue_id=null) existe pour l'org → elle est REMPLIE
+            //   • Sinon → nouvelle registration créée (jusqu'à 3 sites max)
+            if (!venueId) return;
+            try {
+              const res = await fetch('/api/exposant/sites/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ organization_id: o?.id, venue_id: venueId }),
+              });
+              const data = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(data?.error || 'Erreur ajout site');
+              const newRegId = data?.registration?.id;
+              // Bascule sur la registration mise à jour ou nouvellement créée
+              if (newRegId && typeof window !== 'undefined') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('reg', newRegId);
+                window.history.replaceState({}, '', url);
+              }
+              await load();
+              // Scroll vers Bloc 1 pour voir le résultat
+              setTimeout(() => {
+                const target = document.querySelector('[data-section="site"]');
+                if (target) {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  target.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2');
+                  setTimeout(() => target.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+                }
+              }, 350);
+            } catch (e) {
+              if (typeof window !== 'undefined') alert(`❌ Impossible de sélectionner ce site : ${e.message}`);
+            }
           }}
           onJumpTo={(target) => {
             if (target === 'documents') {

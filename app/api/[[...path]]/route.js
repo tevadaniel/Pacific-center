@@ -8356,18 +8356,37 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       const limCfg = await db.collection('app_settings').findOne({ key: 'exposant_limits' });
       const maxSites = limCfg?.value?.max_sites_per_exposant || 3;
       const existing = await db.collection('registrations').find({ organization_id: orgId, edition_id: EDITION_ID }).toArray();
-      if (existing.length >= maxSites) {
-        return err(`Limite atteinte : maximum ${maxSites} site(s) par exposant.`, 400);
-      }
-      // Vérifie qu'il n'a pas déjà ce site
-      if (existing.some(r => r.venue_id === venueId)) {
-        return err('Vous êtes déjà inscrit(e) sur ce site. 1 stand max par site.', 400);
-      }
       // Vérifie que le site est ouvert aux exposants
       const venue = await db.collection('venues').findOne({ id: venueId });
       if (!venue) return err('Site introuvable', 404);
       if (venue.is_available_2026 === false || venue.exposant_visible === false) {
         return err('Ce site n\'est pas ouvert aux inscriptions exposants.', 400);
+      }
+      // Vérifie qu'il n'a pas déjà ce site (sauf si c'est la registration vide qu'on va remplir)
+      if (existing.some(r => r.venue_id === venueId)) {
+        return err('Vous êtes déjà inscrit(e) sur ce site. 1 stand max par site.', 400);
+      }
+      // 🆕 SESSION 52g.15 — Si une registration EXISTE déjà mais SANS venue_id (Site 1 vide après self-register),
+      //   on la REMPLIT au lieu de créer une nouvelle.
+      const emptyReg = existing.find(r => !r.venue_id);
+      if (emptyReg) {
+        await db.collection('registrations').updateOne(
+          { id: emptyReg.id },
+          {
+            $set: {
+              venue_id: venueId,
+              status: emptyReg.status === 'prospect' ? 'provisoire' : emptyReg.status,
+              completion_percent: Math.max(10, emptyReg.completion_percent || 0),
+              updated_at: new Date(),
+            },
+          }
+        );
+        const updated = await db.collection('registrations').findOne({ id: emptyReg.id });
+        delete updated._id;
+        return json({ ok: true, registration: updated, reused_empty: true });
+      }
+      if (existing.length >= maxSites) {
+        return err(`Limite atteinte : maximum ${maxSites} site(s) par exposant.`, 400);
       }
       // Crée la registration avec priority = next available
       const nextPriority = (Math.max(0, ...existing.map(r => r.site_priority || 1)) + 1);
