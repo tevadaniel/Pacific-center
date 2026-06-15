@@ -876,10 +876,34 @@ export default function TunnelV2({
   const addSite = async (venueId) => {
     setBusy(true);
     try {
-      await api('/api/exposant/sites/add', { method: 'POST', body: JSON.stringify({ venue_id: venueId }) });
-      toast.success('✅ Site ajouté');
+      // 🆕 SESSION 52g.17 — Inclut organization_id (sinon backend rejette "organization_id et venue_id requis")
+      const res = await api('/api/exposant/sites/add', {
+        method: 'POST',
+        body: JSON.stringify({ organization_id: organization?.id, venue_id: venueId }),
+      });
+      if (res?.is_waitlist) {
+        toast.success('🕒 Site complet — vous êtes en liste d\'attente automatiquement');
+      } else {
+        toast.success('✅ Site ajouté');
+      }
+      // Bascule sur la registration mise à jour ou nouvellement créée
+      const newRegId = res?.registration?.id;
+      if (newRegId && typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('reg', newRegId);
+        window.history.replaceState({}, '', url);
+      }
       onRefresh?.();
-    } catch (e) { toast.error(e.message); }
+      // Scroll vers Bloc 1 avec halo
+      setTimeout(() => {
+        const target = document.querySelector('[data-section="site"]');
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          target.classList.add('ring-2', 'ring-aracom-orange', 'ring-offset-2');
+          setTimeout(() => target.classList.remove('ring-2', 'ring-aracom-orange', 'ring-offset-2'), 1800);
+        }
+      }, 350);
+    } catch (e) { toast.error(`❌ ${e.message}`); }
     finally { setBusy(false); }
   };
   const removeSite = async (regId) => {

@@ -91,3 +91,7 @@ credentials.json
 # (they are injected with production values at deploy time).
 # DO NOT add `.env`, `.env.*`, or `*.env` here.
 .next/cache/webpack/server-production/0.pack
+.env
+.env.*
+*.env
+*.key
