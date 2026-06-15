@@ -195,20 +195,6 @@ export default function AnnexePage() {
           </div>
         </section>
 
-        {/* Signature */}
-        <section className="mt-8 grid grid-cols-2 gap-6 text-[11px]">
-          <div>
-            <div className="font-bold text-aracom-black mb-1">L&apos;Exposant — {org?.name}</div>
-            <div className="text-slate-500">Précédé de la mention « Lu et approuvé »</div>
-            <div className="mt-12 border-t border-slate-400 pt-1 text-slate-500">Date et signature</div>
-          </div>
-          <div>
-            <div className="font-bold text-aracom-black mb-1">L&apos;Organisateur — ARACOM</div>
-            <div className="text-slate-500">Pour ARACOM Conseil</div>
-            <div className="mt-12 border-t border-slate-400 pt-1 text-slate-500">Date et signature</div>
-          </div>
-        </section>
-
         {/* Footer */}
         <div className="mt-6 pt-3 border-t border-slate-200 text-[9px] text-slate-400 text-center">
           ARACOM — Forum de la Rentrée 2026 · Document généré automatiquement le {new Date().toLocaleString('fr-FR')} · Référence registration: {reg?.id}

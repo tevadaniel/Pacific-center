@@ -104,7 +104,6 @@ const SECTIONS = [
     icon: '🤝',
     title: 'Bonnes pratiques',
     content: [
-      "💡 Un sourire et un \"Ia Orana\" chaleureux sont vos meilleurs ambassadeurs auprès du public",
       "💡 Préparez des supports visuels (photos, vidéos courtes) avant l'événement",
       "💡 Coordonnez plusieurs animateurs pour assurer une présence continue",
       "💡 Privilégiez l'interaction : faites essayer, faites participer",
