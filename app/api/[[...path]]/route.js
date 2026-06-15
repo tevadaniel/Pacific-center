@@ -21,6 +21,7 @@ import { handleDashboardGet, computeKpis, computeBySite } from '@/lib/api/handle
 import { handleValidationQueueGet } from '@/lib/api/handlers/validation-queue';
 import { handleValidationPost } from '@/lib/api/handlers/validation-post';
 import { handleProspectsGet, handleProspectsPost, handleProspectsPut, handleProspectsDelete } from '@/lib/api/handlers/prospects';
+import { executeImport as executeFusionImport, previewImport as previewFusionImport } from '@/lib/import-fusion-2026';
 
 // 🛡️ SESSION 28s/43-fix — Build version STABLE par déploiement (plus de Date.now() qui change à chaque HMR/instance)
 //     Source : .next/BUILD_ID (Next.js l'écrit une fois par build, stable) + fallback hash de package.json.
@@ -11210,6 +11211,29 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       stats.venue_elements_removed = ve.deletedCount;
       await logActivity(db, ctx.userId, 'system', 'reset', 'reset_db', null, stats);
       return json({ ok: true, message: 'Base de données réinitialisée — vous pouvez tester en mode propre', stats });
+    }
+
+    // ============ TOOL : IMPORT FUSION 2026 (Excel master file) ============
+    // Wipes all data and re-imports the 72 historical exhibitors from /data-imports/forum-fusion-2026.xlsx
+    // Sheet 1 only ("📋 BASE EXPOSANTS"). Prospects sheet is IGNORED by admin choice (SESSION 53.4).
+    // - dry_run:true → returns a preview without touching DB
+    // - confirm:'JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES' required for apply
+    if (route === 'admin/import-fusion-2026') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const dryRun = !!body?.dry_run;
+      if (!dryRun && body?.confirm !== 'JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES') {
+        return err('Pour appliquer l\'import destructif, envoyez { "confirm": "JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES" }. Pour un aperçu : { "dry_run": true }.', 400);
+      }
+      try {
+        if (dryRun) {
+          const preview = previewFusionImport();
+          return json({ ok: true, dry_run: true, preview });
+        }
+        const result = await executeFusionImport(db, { dryRun: false, actorUserId: ctx.userId || 'u-admin' });
+        return json(result);
+      } catch (e) {
+        return err(`Import échoué : ${e.message}`, 500);
+      }
     }
 
     // ============ TOOL : Ensure ARACOM admin accounts (idempotent, no auth) ============

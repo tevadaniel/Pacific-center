@@ -2,12 +2,117 @@
 
 import { useState, useRef } from 'react';
 import { toast } from 'sonner';
-import { FileText, RefreshCw, Download, CheckCircle2 } from 'lucide-react';
-import { getSession } from '@/lib/auth-client';
+import { FileText, RefreshCw, Download, CheckCircle2, AlertTriangle, Eye } from 'lucide-react';
+import { api, getSession } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+
+/**
+ * 🚨 FUSION 2026 — WIPE & RELOAD depuis le fichier Excel master
+ * /app/data-imports/forum-fusion-2026.xlsx (déposé par admin technique).
+ * DESTRUCTIF : efface tout sauf admins, venues, app_settings.
+ */
+function FusionMasterImport() {
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [applied, setApplied] = useState(null);
+
+  const runPreview = async () => {
+    setBusy(true);
+    try {
+      const r = await api('/api/admin/import-fusion-2026', { method: 'POST', body: JSON.stringify({ dry_run: true }) });
+      setPreview(r.preview);
+      setApplied(null);
+      toast.success(`Aperçu : ${r.preview.total} exposants détectés`);
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const runApply = async () => {
+    if (!confirm('🚨 OPÉRATION DESTRUCTIVE\n\nVous allez :\n• EFFACER les 91 inscriptions actuelles + leurs documents/animations/cautions/validations\n• Importer les 72 exposants historiques depuis le fichier Excel\n• Conserver : comptes admin, sites/venues, templates RIB/convention\n\nCONTINUER ?')) return;
+    if (!confirm('⚠️ DOUBLE CONFIRMATION\n\nCette action est IRRÉVERSIBLE en préview. Tapez OK si vous êtes certain.')) return;
+    setBusy(true);
+    const tid = toast.loading('Import en cours…');
+    try {
+      const r = await api('/api/admin/import-fusion-2026', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: 'JE-VEUX-VRAIMENT-EFFACER-TOUTES-LES-DONNEES' }),
+      });
+      toast.dismiss(tid);
+      setApplied(r);
+      setPreview(null);
+      toast.success(r.message || '✅ Import terminé');
+    } catch (e) { toast.dismiss(tid); toast.error(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <Card className="border-2 border-red-300 bg-gradient-to-br from-red-50 to-orange-50">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2 text-red-900">
+          🚨 IMPORT FUSION 2026 (destructif — base BDD Fusion master)
+        </CardTitle>
+        <p className="text-xs text-red-800 mt-1">
+          Source : <code className="bg-white px-1 rounded">/app/data-imports/forum-fusion-2026.xlsx</code> · Sheet : <b>📋 BASE EXPOSANTS</b> (72 historiques 2019-2025).
+          <br/>Wipe complet puis recréation des organisations + registrations « à confirmer » + comptes exposants. La feuille Prospection 2026 est <b>ignorée</b>.
+          <br/>Conservés : comptes admin, sites/venues, templates RIB/convention/guide.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={runPreview} disabled={busy} variant="outline" className="gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
+            <Eye className="w-4 h-4" /> Aperçu (dry-run, ne touche pas la base)
+          </Button>
+          <Button onClick={runApply} disabled={busy} className="bg-red-600 hover:bg-red-700 text-white gap-2">
+            <AlertTriangle className="w-4 h-4" /> Wipe & Reload — IMPORT RÉEL
+          </Button>
+        </div>
+
+        {preview && (
+          <div className="bg-white rounded-md border border-blue-200 p-3 text-xs">
+            <div className="font-bold text-blue-900 mb-2">📊 Aperçu — {preview.total} exposants détectés</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+              <div className="bg-blue-50 rounded p-2"><div className="text-[10px] uppercase text-blue-700">Avec email</div><div className="font-bold text-lg text-blue-900">{preview.with_email}</div></div>
+              <div className="bg-amber-50 rounded p-2"><div className="text-[10px] uppercase text-amber-700">Sans email</div><div className="font-bold text-lg text-amber-900">{preview.without_email}</div></div>
+              {Object.entries(preview.by_fidelity).map(([k, v]) => (
+                <div key={k} className="bg-slate-50 rounded p-2"><div className="text-[10px] uppercase text-slate-600">{k}</div><div className="font-bold text-lg text-slate-900">{v}</div></div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+              {Object.entries(preview.by_site_historique).map(([k, v]) => (
+                <div key={k} className="border rounded p-2 bg-white"><span className="text-slate-500">{k}</span> : <b>{v}</b></div>
+              ))}
+            </div>
+            <div className="font-semibold text-slate-700 mb-1">Exemples :</div>
+            <ul className="space-y-0.5 ml-4 list-disc">
+              {(preview.sample || []).map((s, i) => (
+                <li key={i}><b>{s.name}</b> — {s.contact || '?'} · {s.email || 'pas d\'email'} · {s.fidelity || '—'} · {s.site || '—'}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {applied && (
+          <div className="bg-emerald-50 rounded-md border border-emerald-300 p-3 text-xs">
+            <div className="font-bold text-emerald-900 flex items-center gap-2 mb-2"><CheckCircle2 className="w-4 h-4" /> {applied.message}</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-white rounded p-2"><div className="text-[10px] uppercase text-slate-500">Organisations</div><div className="font-bold text-lg text-emerald-700">{applied.stats?.created?.organizations}</div></div>
+              <div className="bg-white rounded p-2"><div className="text-[10px] uppercase text-slate-500">Registrations</div><div className="font-bold text-lg text-emerald-700">{applied.stats?.created?.registrations}</div></div>
+              <div className="bg-white rounded p-2"><div className="text-[10px] uppercase text-slate-500">Users exposants</div><div className="font-bold text-lg text-emerald-700">{applied.stats?.created?.users}</div></div>
+              <div className="bg-white rounded p-2"><div className="text-[10px] uppercase text-slate-500">Historiques</div><div className="font-bold text-lg text-emerald-700">{applied.stats?.created?.organization_history}</div></div>
+            </div>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-emerald-800 font-semibold">Voir le détail technique du wipe</summary>
+              <pre className="mt-2 bg-slate-900 text-emerald-300 p-2 rounded overflow-auto text-[10px]">{JSON.stringify(applied.stats?.wipe || {}, null, 2)}</pre>
+            </details>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * IMPORT EXCEL VIEW — Import des exposants depuis un fichier .xlsx.
@@ -45,6 +150,7 @@ export default function ImportExcelView() {
 
   return (
     <div className="space-y-4">
+      <FusionMasterImport />
       <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
         <CardContent className="p-5 flex items-start gap-4 flex-wrap">
           <div className="w-16 h-16 rounded-lg bg-white shadow-md flex items-center justify-center shrink-0">
