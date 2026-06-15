@@ -36,6 +36,15 @@ function dayLabel(d) {
   return d;
 }
 
+// 🆕 SESSION 53.3 — Conventions de mise à disposition par site (PDF officiel Pacific Centers)
+// Disponibles dès que l'exposant a sélectionné un site
+const CONVENTION_BY_VENUE = {
+  'venue-faaa': '/conventions/venue-faaa.pdf',
+  'venue-pun':  '/conventions/venue-pun.pdf',
+  'venue-aru':  '/conventions/venue-aru.pdf',
+  'venue-tar':  '/conventions/venue-tar.pdf',
+};
+
 // =======================================================
 // BLOC 1 — Sites priorisés
 // =======================================================
@@ -150,6 +159,19 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesA
                     )}
                   </div>
                 </button>
+
+                {/* 🆕 SESSION 53.3 — Convention de mise à disposition (PDF officiel Pacific Centers) */}
+                {CONVENTION_BY_VENUE[site.venue_id] && (
+                  <a
+                    href={CONVENTION_BY_VENUE[site.venue_id]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="basis-full inline-flex items-center gap-1 mt-1 text-[10.5px] font-semibold text-aracom-orange hover:text-aracom-orange/80 hover:underline"
+                    title="Télécharger la convention de mise à disposition de stand (PDF)"
+                  >
+                    📜 Télécharger la convention de mise à disposition (PDF)
+                  </a>
+                )}
 
                 {/* Suppression */}
                 {sorted.length > 1 && !cantRemove && (
