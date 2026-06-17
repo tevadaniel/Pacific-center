@@ -783,14 +783,16 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
         </div>
 
         {/* Bouton soumettre */}
-        {isSubmitted && (
+        {/* 🆕 SESSION 53.8 — RULE 6 : bouton ACTIF tant que pas validé par ARACOM.
+            Chaque nouvelle soumission écrase la précédente pour ce site. */}
+        {isSubmitted && !isLocked && (
           <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 mb-2">
-            ⏳ Votre candidature a été soumise à ARACOM. Vous serez notifié dès traitement.
+            ⏳ Candidature soumise à ARACOM (vous pouvez la modifier et la re-soumettre tant qu&apos;elle n&apos;est pas validée).
           </div>
         )}
-        {isLocked && !isSubmitted && (
+        {isLocked && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 mb-2">
-            🔒 Candidature verrouillée par ARACOM.
+            🔒 Candidature validée par ARACOM. Vos modifications sont verrouillées.
           </div>
         )}
 
@@ -798,16 +800,16 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
           <Button
             size="lg"
             onClick={onSubmit}
-            disabled={!canSubmit || isSubmitting || isSubmitted || isLocked}
+            disabled={!canSubmit || isSubmitting || isLocked}
             className={`w-full h-11 text-sm font-bold gap-2 ${
-              canSubmit && !isSubmitted && !isLocked
+              canSubmit && !isLocked
                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                 : 'bg-slate-300 text-slate-500 cursor-not-allowed'
             }`}
             title={!canSubmit && missingList?.length ? `Il manque :\n• ${missingList.join('\n• ')}` : ''}
           >
             {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {isSubmitted ? 'Candidature soumise' : 'Soumettre ma candidature'}
+            {isLocked ? 'Candidature validée' : (isSubmitted ? 'Re-soumettre (écrase la précédente)' : 'Soumettre ma candidature')}
           </Button>
 
           {/* Tooltip natif visible si grisé */}
