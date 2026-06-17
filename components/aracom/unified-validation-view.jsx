@@ -70,9 +70,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       // Fusion : pour chaque registration, on prend le validation_request s'il existe, sinon on mappe le statut
       const merged = [];
       for (const reg of (allRegs || [])) {
-        // Exclut explicitement les statuts non-actifs (prospect → pas encore engagé)
-        // 🆕 SESSION 48ag — Exclut aussi le statut 'refuse' (exposants refusés ne doivent plus apparaître nulle part)
-        if (['prospect', 'cancelled', 'annule', 'refuse', 'refused'].includes(reg.status)) continue;
+        // 🆕 SESSION 53.8 — N'exclut QUE les statuts vraiment terminaux (annule/refuse).
+        //   Les statuts 'contacte' et 'prospect' apparaissent désormais dans la colonne "À contacter".
+        if (['cancelled', 'annule', 'refuse', 'refused'].includes(reg.status)) continue;
         const valReq = valByRegId[reg.id];
         if (valReq) {
           // 🆕 SESSION 48ak/al — Propagation des flags swap depuis la registration
@@ -151,7 +151,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
   const grouped = useMemo(() => {
     const out = {};
     for (const v of venues) {
-      out[v.id] = { venue: v, validated: [], _candidates: [], waitlist: [], freeStands: [], overflowCount: 0 };
+      // 🆕 SESSION 53.8 — Ajout bucket toContact (status='contacte' ou 'prospect')
+      out[v.id] = { venue: v, validated: [], _candidates: [], waitlist: [], toContact: [], freeStands: [], overflowCount: 0 };
     }
     for (const r of requests) {
       const v = r.venue_id;
@@ -170,6 +171,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       // 🆕 SESSION 48z — Statuts élargis pour couvrir les deux sources (validation_requests + registrations)
       if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille') {
         out[v].validated.push(r);
+      } else if (r.status === 'contacte' || r.status === 'prospect') {
+        // 🆕 SESSION 53.8 — Bucket "À contacter / Contacté" (en amont de la pré-réservation)
+        out[v].toContact.push(r);
       } else if (
         // 🆕 SESSION 48ac — On regroupe pré-réservés ET waitlist dans _candidates,
         //                  puis on les ventile selon la capacité disponible (FIFO)
@@ -226,7 +230,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       validated: acc.validated + g.validated.length,
       preReserved: acc.preReserved + g.preReserved.length,
       waitlist: acc.waitlist + g.waitlist.length,
-    }), { validated: 0, preReserved: 0, waitlist: 0 });
+      toContact: acc.toContact + (g.toContact?.length || 0),
+    }), { validated: 0, preReserved: 0, waitlist: 0, toContact: 0 });
   }, [grouped]);
 
   // 🆕 SESSION 52g.5 — Compteurs par jour (sur tous les requests, ignorant le dayFilter actif)
@@ -425,6 +430,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           const valBreakdown = dayBreakdown(g.validated);
           const preBreakdown = dayBreakdown(g.preReserved);
           const waitBreakdown = dayBreakdown(g.waitlist);
+          const contactBreakdown = dayBreakdown(g.toContact || []);
           // 🆕 SESSION 52g.11 — Helper : sépare les items en sous-colonnes Vendredi / Samedi.
           //   Un exposant présent les 2 jours apparaît dans LES 2 colonnes (le but est de voir le jour).
           const getDays = (r) => {
@@ -447,6 +453,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           const valByDay = splitByDay(g.validated);
           const preByDay = splitByDay(g.preReserved);
           const waitByDay = splitByDay(g.waitlist);
+          const contactByDay = splitByDay(g.toContact || []);
           // 🆕 Récap stands par jour (validés + pré-réservés) vs capacité
           const capacity = g.venue.capacity_stands || 0;
           const venDayReserved = valBreakdown.vendredi_total + preBreakdown.vendredi_total;
@@ -491,18 +498,19 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   </Badge>
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  <b className="text-emerald-700">{g.validated.length}</b>v · <b className="text-violet-700">{g.preReserved.length}</b>p · <b className="text-amber-700">{g.waitlist.length}</b>a
+                  <b className="text-emerald-700">{g.validated.length}</b>v · <b className="text-violet-700">{g.preReserved.length}</b>p · <b className="text-amber-700">{g.waitlist.length}</b>a · <b className="text-sky-700">{(g.toContact || []).length}</b>c
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-3">
-              {/* 🆕 SESSION 52g.7 — Sous-en-tête : récap par bucket et par jour */}
-              <div className="grid grid-cols-3 gap-3 mb-2 text-[10px]">
-                <DayBreakdownStrip tone="emerald" label="Validés" bd={valBreakdown} />
+              {/* 🆕 SESSION 53.8 — 4 colonnes (alignées sur les statuts de la liste des exposants) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-2 text-[10px]">
+                <DayBreakdownStrip tone="emerald" label="Confirmés" bd={valBreakdown} />
                 <DayBreakdownStrip tone="violet" label="Pré-réservés" bd={preBreakdown} />
                 <DayBreakdownStrip tone="amber" label="Liste d'attente" bd={waitBreakdown} />
+                <DayBreakdownStrip tone="sky" label="À contacter" bd={contactBreakdown} />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                 {/* ───── COL 1 : VALIDÉS (par jour) ───── */}
                 <Section
                   icon={<Check className="w-3.5 h-3.5 text-emerald-600" />}
@@ -639,6 +647,38 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                         </Row>
                       );
                     }}
+                  />
+                </Section>
+
+                {/* ───── COL 4 : À CONTACTER / CONTACTÉ ─── 🆕 SESSION 53.8 ─── */}
+                <Section
+                  icon={<Mail className="w-3.5 h-3.5 text-sky-600" />}
+                  title="À contacter"
+                  count={(g.toContact || []).length}
+                  tone="sky"
+                >
+                  <DayColumns
+                    venItems={contactByDay.ven}
+                    samItems={contactByDay.sam}
+                    emptyLabel="—"
+                    renderRow={(r) => (
+                      <Row key={r.id} icon={r.status === 'contacte' ? '📞' : '👋'} tone="sky">
+                        <ExposantName r={r} onClick={effectiveExposantClick} />
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
+                          <Badge className={`text-[9px] px-1 py-0 ${r.status === 'contacte' ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-blue-100 text-blue-900 border-blue-300'}`}>
+                            {r.status === 'contacte' ? 'Contacté' : 'À contacter'}
+                          </Badge>
+                          {r.organization?.main_email && (
+                            <a href={`mailto:${r.organization.main_email}`} className="underline hover:text-sky-700" onClick={(e) => e.stopPropagation()}>
+                              {r.organization.main_email}
+                            </a>
+                          )}
+                          {r.created_at && (
+                            <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
+                          )}
+                        </div>
+                      </Row>
+                    )}
                   />
                 </Section>
               </div>
@@ -792,6 +832,7 @@ function Section({ icon, title, count, tone, children }) {
     emerald: 'border-emerald-200 bg-emerald-50/30',
     violet: 'border-violet-200 bg-violet-50/30',
     amber: 'border-amber-200 bg-amber-50/30',
+    sky: 'border-sky-200 bg-sky-50/30',
   };
   return (
     <div className={`rounded-md border ${toneClasses[tone] || 'border-slate-200'} p-2 space-y-1.5`}>
@@ -810,6 +851,7 @@ function Row({ icon, tone, children }) {
     emerald: 'border-emerald-100',
     violet: 'border-violet-100',
     amber: 'border-amber-100',
+    sky: 'border-sky-100',
   };
   return (
     <div className={`bg-white rounded border ${toneClasses[tone] || 'border-slate-100'} px-2 py-1.5 flex items-start gap-2`}>
@@ -908,6 +950,7 @@ function DayBreakdownStrip({ tone = 'slate', label, bd }) {
     emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-900', accent: 'text-emerald-700' },
     violet: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-900', accent: 'text-violet-700' },
     amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900', accent: 'text-amber-700' },
+    sky: { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-900', accent: 'text-sky-700' },
     slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-900', accent: 'text-slate-700' },
   };
   const t = tones[tone] || tones.slate;
