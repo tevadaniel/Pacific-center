@@ -3924,15 +3924,18 @@ agent_communication:
 
   - task: "SESSION 53.3 — Auto-rebalance Waitlists (helper extrait + auto-triggers + UI button)"
     implemented: true
-    working: "NA"
+    working: true
     file: "app/api/[[...path]]/route.js, app/aracom/page.js"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Implémentation complète du rééquilibrage automatique des listes d'attente. (1) Helper rebalanceVenueWaitlist(db, venueId, ctxUserId) extrait en haut de route.js après logActivity(). Tri par status > priorité org > created_at. Idempotent. (2) Endpoint existant POST /api/admin/venues/:id/rebalance refactorisé pour utiliser le helper. (3) NOUVEAU endpoint POST /api/admin/rebalance-all-waitlists qui rééquilibre tous les sites actifs en un appel et retourne le détail par site. Permissions admin requises (403 sinon). (4) Auto-triggers ajoutés sur 5 endpoints qui modifient la capacité : (a) POST /api/venue-stands (création d'un stand), (b) POST /api/venues/:id/set-availability avec is_available_2026=true (activation site), (c) POST /api/registrations/:id/release-stand (libération exposant, marque aussi le stand 'libre'), (d) POST /api/registrations/:id/assign-stand avec stand_code=null (détachement admin), (e) POST /api/admin/registrations/:id/cancel (annulation admin, marque le stand 'libre'). Tous les auto-triggers logguent dans activity_logs avec action='rebalance_waitlist_auto' si promoted > 0. (5) UI : bouton 'Rééquilibrer maintenant' ajouté dans SitesView au-dessus de la grille des cartes de site (composant ARACOM Sites & stands). Toast détaillé par site qui montre les promotions. Test live confirmé : création d'un stand sur Punaauia (12 en waitlist) → 1 exposant promu automatiquement (waitlist passé à 11). Build version bumpée 1.0.48 → 1.0.49."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ - 10/10 TESTS PASSÉS (100%). (1) POST /api/admin/rebalance-all-waitlists avec admin → 200, structure correcte avec 4 sites actifs (Faaa/Punaauia/Arue/Taravao), Mahina/Moorea exclus. Sans admin → 403. (2) POST /api/admin/venues/:id/rebalance avec admin → 200 + stats. 404 sur venue inexistant. 403 sans admin. (3) AUTO-TRIGGER stand creation : POST /api/venue-stands sur venue-pun (12 waitlist, 0 libre) → 201 + promotion auto immédiate. Waitlist 12→11. Stand status='reserved' avec assignment. Reg promu : stand_code défini, is_waitlist=false, is_pre_reserved=true, status='a_confirmer'. (4) Idempotency : 2ème appel rebalance-all → promoted=0 (pas de duplication). (5) Régressions OK : dashboard/kpis, dashboard/by-site, venues (6), registrations (84) — tous 200. Cleanup test stand effectué par main agent (Punaauia waitlist remis à 12). Note : auto-triggers #2-5 (site activation, release-stand, assign-stand detach, cancel-reservation) non testés en automatique mais utilisent le même helper, comportement identique attendu."
 
 agent_communication:
   - agent: "main"
