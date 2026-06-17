@@ -26,6 +26,7 @@ import {
   Tent, Sun,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
+import StandViewToggle from '@/components/stand-view-toggle';
 
 const DAY_FRI = 'vendredi';
 const DAY_SAT = 'samedi';
@@ -358,14 +359,16 @@ function Bloc3Stand({ registration, venue, venueAvailability, onRefresh, onPickS
     }
   };
 
-  // Groupe les stands par zone pour un affichage clair
+  // Groupe les stands par zone (utilisé en mode fallback si StandViewToggle indispo)
+  // 🆕 SESSION 53.6 — Remplacé par StandViewToggle (Plan PNG + Grille, sync admin↔exposant).
+  //   On garde la variable au cas où mais elle n'est plus utilisée directement.
+  // eslint-disable-next-line no-unused-vars
   const standsByZone = useMemo(() => {
     const groups = {};
     for (const s of stands) {
       const z = s.zone || s.zone_name || 'Zone non définie';
       (groups[z] = groups[z] || []).push(s);
     }
-    // Trie chaque zone par stand_code
     for (const z in groups) groups[z].sort((a, b) => (a.stand_code || '').localeCompare(b.stand_code || '', 'fr', { numeric: true }));
     return groups;
   }, [stands]);
@@ -430,52 +433,26 @@ function Bloc3Stand({ registration, venue, venueAvailability, onRefresh, onPickS
           </Button>
         )}
 
-        {/* Plan des stands */}
+        {/* Plan des stands — utilise StandViewToggle (Plan PNG + Grille, sync admin↔exposant) */}
         {showPlan && !isLocked && (
-          <div className="mt-3 border border-slate-200 rounded-lg p-2 bg-slate-50 max-h-[420px] overflow-y-auto">
+          <div className="mt-3 border border-slate-200 rounded-lg p-2 bg-slate-50">
             {loadingStands && <div className="text-center py-6 text-xs text-slate-500"><Loader2 className="w-4 h-4 animate-spin inline mr-1" />Chargement des stands…</div>}
             {!loadingStands && stands.length === 0 && <div className="text-center py-6 text-xs text-slate-500">Aucun stand disponible sur ce site.</div>}
-            {!loadingStands && Object.keys(standsByZone).sort().map(zone => (
-              <div key={zone} className="mb-3 last:mb-0">
-                <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1.5 sticky top-0 bg-slate-50 py-1">{zone} <span className="font-normal text-slate-500">({standsByZone[zone].length})</span></div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-                  {standsByZone[zone].map(s => {
-                    const isOwn = s.assignment?.registration_id === r.id;
-                    const isFree = !s.assignment || s.assignment.request_status === 'waitlist';
-                    const isTaken = s.assignment?.request_status === 'pending' || s.assignment?.request_status === 'validated';
-                    const isInactive = s.is_active === false;
-                    const waitlistCnt = isTaken ? (s.assignment?.waitlist_position ? 1 : 0) : 0; // approximation
-                    let bgClass = 'bg-white hover:bg-slate-50 border-slate-300';
-                    let label = 'Libre';
-                    let textClass = 'text-slate-700';
-                    if (isInactive) { bgClass = 'bg-slate-200 border-slate-300 cursor-not-allowed opacity-50'; label = 'Inactif'; textClass = 'text-slate-500'; }
-                    else if (isOwn) { bgClass = 'bg-emerald-100 hover:bg-emerald-200 border-emerald-500 ring-2 ring-emerald-400'; label = '✓ Votre stand'; textClass = 'text-emerald-800'; }
-                    else if (isTaken) { bgClass = 'bg-rose-50 hover:bg-rose-100 border-rose-300'; label = 'Occupé'; textClass = 'text-rose-700'; }
-                    else if (isFree) { bgClass = 'bg-green-50 hover:bg-green-100 border-green-400 cursor-pointer'; label = 'Libre'; textClass = 'text-green-800'; }
-                    return (
-                      <button
-                        key={s.id}
-                        disabled={isInactive || picking === s.id}
-                        onClick={() => pickStand(s)}
-                        className={`text-left border rounded-md p-1.5 transition ${bgClass} ${textClass}`}
-                        title={isTaken ? `Stand ${s.stand_code} — occupé. Cliquer pour rejoindre la liste d'attente.` : isOwn ? 'Votre stand actuel' : isFree ? `Cliquer pour pré-réserver le stand ${s.stand_code}` : ''}
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold text-xs font-mono">{s.stand_code}</span>
-                          {picking === s.id && <Loader2 className="w-3 h-3 animate-spin" />}
-                        </div>
-                        <div className="text-[9.5px] mt-0.5 opacity-80">{label}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-            <div className="mt-2 text-[10px] text-slate-500 flex flex-wrap gap-2 pt-2 border-t border-slate-200">
-              <span><span className="inline-block w-2 h-2 bg-green-400 rounded-sm mr-1"></span>Libre</span>
-              <span><span className="inline-block w-2 h-2 bg-emerald-400 rounded-sm mr-1"></span>Votre stand</span>
-              <span><span className="inline-block w-2 h-2 bg-rose-300 rounded-sm mr-1"></span>Occupé (rejoignable en liste d&apos;attente)</span>
-              <span><span className="inline-block w-2 h-2 bg-slate-300 rounded-sm mr-1"></span>Inactif</span>
+            {!loadingStands && stands.length > 0 && (
+              <StandViewToggle
+                venue={venue}
+                stands={stands}
+                highlightStandCode={r.stand_code || null}
+                onStandClick={(stand) => pickStand(stand)}
+                editable={false}
+                anonymizeOthers={true}
+                serverSyncRole="reader"
+                showFilters={false}
+                compact={true}
+              />
+            )}
+            <div className="mt-2 text-[10px] text-slate-500 italic">
+              ARACOM se réserve le droit de réaffecter votre stand selon les besoins logistiques.
             </div>
           </div>
         )}
