@@ -11213,8 +11213,129 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       return json({ ok: true, message: 'Base de données réinitialisée — vous pouvez tester en mode propre', stats });
     }
 
+    // ============ TOOL : GESTION DES SITES D'UNE ORGANISATION (édition multi-sites) ============
+    // Permet à l'admin de cocher/décocher les sites associés à un exposant depuis la liste.
+    // - Si venue_id ajouté → crée une nouvelle registration (status='a_confirmer')
+    // - Si venue_id retiré : BLOQUE si docs/caution/animations attachés, sinon ARCHIVE (status='annule')
+    if (route.match(/^admin\/organizations\/[^/]+\/venues$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const orgId = route.split('/')[2];
+      const desiredVenueIds = Array.isArray(body?.venue_ids) ? body.venue_ids : [];
+      const desiredSet = new Set(desiredVenueIds.filter(Boolean));
+
+      const org = await db.collection('organizations').findOne({ id: orgId });
+      if (!org) return err('Organisation introuvable', 404);
+
+      // Registrations actuelles non archivées
+      const currentRegs = await db.collection('registrations').find({
+        organization_id: orgId,
+        status: { $ne: 'annule' },
+      }).toArray();
+
+      const currentVenues = new Set(currentRegs.filter(r => r.venue_id).map(r => r.venue_id));
+      const toAdd = [...desiredSet].filter(v => !currentVenues.has(v));
+      const toRemove = currentRegs.filter(r => r.venue_id && !desiredSet.has(r.venue_id));
+
+      // Vérifie les blocages : caution payée, docs, animations sur les regs à retirer
+      const blockers = [];
+      for (const reg of toRemove) {
+        const checks = [];
+        // 1. Caution payée
+        const deposit = await db.collection('deposit_transactions').findOne({
+          registration_id: reg.id,
+          status: { $in: ['recue', 'received', 'paid'] },
+        });
+        if (deposit) checks.push('caution payée');
+        // 2. Documents uploadés
+        const docCount = await db.collection('registration_documents').countDocuments({ registration_id: reg.id });
+        if (docCount > 0) checks.push(`${docCount} document(s) attaché(s)`);
+        // 3. Animations programmées
+        const animCount = await db.collection('animation_slots').countDocuments({ registration_id: reg.id });
+        if (animCount > 0) checks.push(`${animCount} animation(s) programmée(s)`);
+        // 4. Stand assigné + confirmé
+        if (reg.status === 'confirme' && reg.candidature_locked) checks.push('candidature verrouillée');
+        if (checks.length > 0) {
+          blockers.push({ reg_id: reg.id, venue_id: reg.venue_id, stand_code: reg.stand_code, reasons: checks });
+        }
+      }
+
+      if (blockers.length > 0) {
+        return err({
+          error: 'Suppression bloquée — données attachées sur certains sites',
+          blockers,
+          hint: 'Détachez d\'abord les documents/cautions/animations avant de retirer ces sites.',
+        }, 409);
+      }
+
+      const now = new Date();
+      const stats = { added: 0, archived: 0 };
+
+      // ➕ Créer les nouveaux registrations pour les sites ajoutés
+      for (const venueId of toAdd) {
+        // Si une reg sans venue (multi-sites en attente) existe pour cette org → on la "réaffecte" au site
+        const orphan = currentRegs.find(r => !r.venue_id);
+        if (orphan) {
+          await db.collection('registrations').updateOne({ id: orphan.id }, {
+            $set: { venue_id: venueId, updated_at: now },
+          });
+          currentRegs.splice(currentRegs.indexOf(orphan), 1); // consommé
+          currentVenues.add(venueId);
+          stats.added += 1;
+          continue;
+        }
+        // Sinon créer une nouvelle reg
+        const newRegId = `reg-${orgId.replace(/^org-/, '')}-${venueId.replace(/^venue-/, '')}-${Date.now().toString(36)}`;
+        await db.collection('registrations').insertOne({
+          id: newRegId,
+          edition_id: 'edition-2026',
+          organization_id: orgId,
+          venue_id: venueId,
+          stand_code: null,
+          status: 'a_confirmer',
+          attending_days: [],
+          attending_day_times: {},
+          completion_percent: 5,
+          wizard_step: 1,
+          is_convention_signed: false,
+          is_deposit_required: true,
+          is_deposit_received: false,
+          is_insurance_uploaded: false,
+          is_guide_sent: false,
+          candidature_locked: false,
+          post_event_status: 'en_attente',
+          source: 'admin_add_venue',
+          created_at: now,
+          updated_at: now,
+        });
+        stats.added += 1;
+      }
+
+      // 🗑 Archiver les registrations dont le site a été décoché (sans données attachées)
+      for (const reg of toRemove) {
+        await db.collection('registrations').updateOne({ id: reg.id }, {
+          $set: { status: 'annule', is_archived: true, archived_at: now, archived_by: ctx.userId, updated_at: now },
+        });
+        // Libérer le stand si pré-réservé
+        if (reg.stand_code) {
+          await db.collection('venue_stands').updateOne({ venue_id: reg.venue_id, stand_code: reg.stand_code }, {
+            $set: { status: 'libre', updated_at: now },
+            $unset: { reserved_for: '', reserved_at: '', confirmed_for: '' },
+          });
+          await db.collection('stand_assignments').updateMany(
+            { registration_id: reg.id, status: { $nin: ['annule', 'cancelled'] } },
+            { $set: { status: 'annule', request_status: 'annule', updated_at: now } }
+          );
+        }
+        stats.archived += 1;
+      }
+
+      await logActivity(db, ctx.userId, 'organization', orgId, 'edit_venues', { current_venues: [...currentVenues] }, { desired_venues: [...desiredSet], ...stats });
+      return json({ ok: true, stats, message: `✅ ${stats.added} site(s) ajouté(s) · ${stats.archived} archivé(s)` });
+    }
+
     // ============ TOOL : AUTO-PRÉAFFECTATION DES STANDS (post-import listing) ============
     // Pour chaque exposant importé avec venue_id pré-affecté :
+    //  - Trie par priorité : status 'a_confirmer' > 'a_relancer' · fidelity Fidèle > Régulier > Ponctuel
     //  - Trie par priorité : status 'a_confirmer' > 'a_relancer' · fidelity Fidèle > Régulier > Ponctuel
     //  - Assigne un stand_code libre jusqu'à atteindre la capacité du site (= "pré-réservé")
     //  - Le surplus est mis en liste d'attente (is_waitlist=true, status='liste_attente', stand_code=null)

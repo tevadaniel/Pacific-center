@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { Users, MapPin, FileCheck2, Wallet, AlertTriangle, AlertCircle, Send, Search, FileText, RefreshCw, RotateCcw, CheckCircle2, XCircle, Clock, Building2, Smartphone, Mail, Phone, Lock, Activity, Sparkles, Download, Trash2, Move, Plus, KeyRound, ThumbsUp, Star, Smile, MessageCircle, Calendar, Zap, Printer, Eye, TrendingUp, Ban, Music, Filter } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, CartesianGrid } from 'recharts';
@@ -418,22 +419,20 @@ function ExposantsView() {
   const [rows, setRows] = useState([]);
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
+  // 🆕 SESSION 53.6 — Multi-select des sites + option "Sans site" (multi-sites ou non affecté)
+  const [filters, setFilters] = useState({ venue_ids: [], no_site: false, status: '', priority: '', discipline: '', search: '' });
   const [showNew, setShowNew] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
+  const [editVenuesFor, setEditVenuesFor] = useState(null); // org pour l'édition multi-sites
   const { open: openExposant, refreshTrigger } = useExposantPanel();
 
-  // 🛡️ SESSION 28r — Compteur de requêtes pour ignorer les réponses obsolètes
-  //     (sinon, en cas de filter rapide, l'ancienne réponse écrase la nouvelle → exposants qui clignotent)
   const loadSeqRef = useRef(0);
 
-  // 🔗 Ouvre directement la fiche si un registration_id est passé dans l'URL (?open=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const openId = new URLSearchParams(window.location.search).get('open');
     if (openId) {
       openExposant(openId);
-      // Nettoie le param pour éviter de rouvrir en boucle sur refresh
       const url = new URL(window.location.href);
       url.searchParams.delete('open');
       window.history.replaceState({}, '', url.toString());
@@ -444,12 +443,14 @@ function ExposantsView() {
     const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
+      // 🆕 Charge TOUTES les regs (filtrage client-side pour pouvoir grouper par org)
       const qs = new URLSearchParams();
-      Object.entries(filters).forEach(([k, v]) => { if (v) qs.set(k, v); });
-      // 🛡️ Cache-buster pour les navigateurs récalcitrants (Safari iOS notamment)
+      if (filters.status) qs.set('status', filters.status);
+      if (filters.priority) qs.set('priority', filters.priority);
+      if (filters.discipline) qs.set('discipline', filters.discipline);
+      if (filters.search) qs.set('search', filters.search);
       qs.set('_t', Date.now().toString());
       const [r, v] = await Promise.all([api('/api/registrations?' + qs.toString()), api('/api/venues')]);
-      // 🛡️ Si une requête plus récente est partie entretemps, on ignore cette réponse
       if (seq !== loadSeqRef.current) return;
       setRows(r); setVenues(v);
     } catch (e) {
@@ -457,18 +458,53 @@ function ExposantsView() {
     }
     if (seq === loadSeqRef.current) setLoading(false);
   };
-  useEffect(() => { load(); }, [filters]);
-  // Recharge après fermeture d'une fiche pour répercuter les modifications
+  useEffect(() => { load(); }, [filters.status, filters.priority, filters.discipline, filters.search]);
   useEffect(() => { if (refreshTrigger) load(); }, [refreshTrigger]);
 
-  // 🆕 SESSION 28r — Après création d'un nouvel exposant, on reset les filtres ET on attend
-  //     que le DB soit bien committé avant de recharger (évite les exposants qui clignotent)
+  // 🆕 SESSION 53.6 — Groupage par organisation + agrégation des sites
+  const groupedOrgs = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const orgId = r.organization_id || r.organization?.id;
+      if (!orgId) continue;
+      if (!map.has(orgId)) {
+        map.set(orgId, {
+          orgId,
+          org: r.organization,
+          registrations: [],
+          venue_ids: new Set(),
+          has_no_site: false,
+        });
+      }
+      const g = map.get(orgId);
+      g.registrations.push(r);
+      if (r.venue_id) g.venue_ids.add(r.venue_id);
+      else g.has_no_site = true;
+    }
+    const list = Array.from(map.values()).map(g => ({
+      ...g,
+      venue_ids: Array.from(g.venue_ids),
+    }));
+    // tri : nom org alpha
+    list.sort((a, b) => (a.org?.name || '').localeCompare(b.org?.name || ''));
+    return list;
+  }, [rows]);
+
+  // Filtre client-side : sites cochés OU "sans site"
+  const filteredOrgs = useMemo(() => {
+    const venueSet = new Set(filters.venue_ids || []);
+    const wantNoSite = !!filters.no_site;
+    if (venueSet.size === 0 && !wantNoSite) return groupedOrgs;
+    return groupedOrgs.filter(g => {
+      const matchVenue = g.venue_ids.some(v => venueSet.has(v));
+      const matchNoSite = wantNoSite && (g.has_no_site || g.venue_ids.length === 0);
+      return matchVenue || matchNoSite;
+    });
+  }, [groupedOrgs, filters.venue_ids, filters.no_site]);
+
   const handleCreated = async () => {
     setShowNew(false);
-    // Reset filtres pour s'assurer que le nouvel exposant est bien visible
-    // (status par défaut = 'contacte', donc si l'utilisateur filtre par confirmé, il ne le verrait pas)
-    setFilters({ venue_id: '', status: '', priority: '', discipline: '', search: '' });
-    // Petit delay pour laisser le temps au backend de commit + au state de se mettre à jour
+    setFilters({ venue_ids: [], no_site: false, status: '', priority: '', discipline: '', search: '' });
     await new Promise((r) => setTimeout(r, 250));
     await load();
     toast.info('✅ Liste rafraîchie — le nouvel exposant doit apparaître maintenant');
@@ -510,10 +546,13 @@ function ExposantsView() {
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <Input className="pl-9" placeholder="Rechercher par nom, contact, stand…" value={filters.search} onChange={e => setFilters({ ...filters, search: e.target.value })} />
             </div>
-            <Select value={filters.venue_id || 'all'} onValueChange={v => setFilters({ ...filters, venue_id: v === 'all' ? '' : v })}>
-              <SelectTrigger><SelectValue placeholder="Site" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">Tous les sites</SelectItem>{venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
-            </Select>
+            {/* 🆕 SESSION 53.6 — Filtre multi-sites par cases à cocher */}
+            <SiteCheckboxFilter
+              venues={venues}
+              selectedVenueIds={filters.venue_ids}
+              noSite={filters.no_site}
+              onChange={(venue_ids, no_site) => setFilters({ ...filters, venue_ids, no_site })}
+            />
             <Select value={filters.status || 'all'} onValueChange={v => setFilters({ ...filters, status: v === 'all' ? '' : v })}>
               <SelectTrigger><SelectValue placeholder="Statut" /></SelectTrigger>
               <SelectContent><SelectItem value="all">Tous statuts</SelectItem>{REGISTRATION_STATUS.map(s => <SelectItem key={s} value={s}>{REGISTRATION_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
@@ -534,7 +573,10 @@ function ExposantsView() {
             </Select>
           </div>
           <div className="flex items-center justify-between mt-3 pt-3 border-t">
-            <div className="text-sm text-slate-600">{rows.length} exposant(s) affiché(s)</div>
+            <div className="text-sm text-slate-600">
+              {filteredOrgs.length} exposant(s) · {filteredOrgs.reduce((s, g) => s + g.registrations.length, 0)} inscription(s)
+              {' '}({filteredOrgs.filter(g => g.venue_ids.length > 1).length} multi-sites)
+            </div>
             <div className="flex gap-2">
               <Button size="sm" className="gap-2 bg-blue-600 hover:bg-blue-700" onClick={() => setShowNew(true)}><Plus className="w-3.5 h-3.5" /> Nouveau exposant</Button>
               <Button size="sm" variant="outline" onClick={() => exportExposantsCSV(rows)} className="gap-2"><Download className="w-3.5 h-3.5" /> Export CSV</Button>
@@ -558,6 +600,16 @@ function ExposantsView() {
         venues={venues}
       />
 
+      {/* 🆕 SESSION 53.6 — Dialog d'édition des sites d'un exposant */}
+      {editVenuesFor && (
+        <EditOrgVenuesDialog
+          group={editVenuesFor}
+          venues={venues}
+          onClose={() => setEditVenuesFor(null)}
+          onSaved={() => { setEditVenuesFor(null); load(); }}
+        />
+      )}
+
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
@@ -565,53 +617,261 @@ function ExposantsView() {
               <tr className="text-left text-slate-500 text-xs uppercase tracking-wider">
                 <th className="py-3 px-4">Exposant</th>
                 <th className="py-3 px-2">Prio</th>
-                <th className="py-3 px-2">Site</th>
-                <th className="py-3 px-2">Stand</th>
+                <th className="py-3 px-2 min-w-[220px]">Sites · Stands</th>
                 <th className="py-3 px-2">Statut</th>
-                <th className="py-3 px-2">Créneaux</th>
                 <th className="py-3 px-2">Conv.</th>
                 <th className="py-3 px-2">Caution</th>
                 <th className="py-3 px-2">Contact</th>
-                <th className="py-3 px-2"></th>
+                <th className="py-3 px-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {loading && <tr><td colSpan="10" className="py-8 text-center text-slate-400">Chargement…</td></tr>}
-              {!loading && rows.length === 0 && <tr><td colSpan="10" className="py-8 text-center text-slate-400">Aucun résultat</td></tr>}
-              {rows.map(r => (
-                <tr key={r.id} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { if (e.target.closest('button,a,input,[role="checkbox"]')) return; openExposant(r.id); }}>
-                  <td className="py-2.5 px-4">
-                    <div className="flex items-center gap-2">
-                      <AiInsightTrigger registration={r} size="xs" />
-                      <div>
-                        <ExposantLink id={r.id} className="font-medium text-slate-900">{r.organization?.name}</ExposantLink>
-                        <div className="text-xs text-slate-500">{r.organization?.discipline}</div>
+              {loading && <tr><td colSpan="8" className="py-8 text-center text-slate-400">Chargement…</td></tr>}
+              {!loading && filteredOrgs.length === 0 && <tr><td colSpan="8" className="py-8 text-center text-slate-400">Aucun résultat</td></tr>}
+              {filteredOrgs.map(g => {
+                const primary = g.registrations[0]; // pour afficher Prio/Conv/Caution/Contact
+                const statuses = [...new Set(g.registrations.map(r => r.status))];
+                const allSameStatus = statuses.length === 1;
+                const convSigned = g.registrations.some(r => r.is_convention_signed);
+                const depositReceived = g.registrations.some(r => r.deposit?.status === 'recue');
+                return (
+                  <tr key={g.orgId} className="hover:bg-slate-50 cursor-pointer" onClick={(e) => { if (e.target.closest('button,a,input,[role="checkbox"]')) return; openExposant(primary.id); }}>
+                    <td className="py-2.5 px-4">
+                      <div className="flex items-center gap-2">
+                        <AiInsightTrigger registration={primary} size="xs" />
+                        <div>
+                          <ExposantLink id={primary.id} className="font-medium text-slate-900">{g.org?.name}</ExposantLink>
+                          <div className="text-xs text-slate-500">{g.org?.discipline}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-2"><PrioBadge p={r.organization?.priority_level} /></td>
-                  <td className="px-2 text-slate-700">{r.venue?.name}</td>
-                  <td className="px-2 font-mono text-xs text-slate-700">{r.stand_code}</td>
-                  <td className="px-2"><span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium ${REGISTRATION_STATUS_COLOR[r.status] || 'bg-slate-100'}`}>{REGISTRATION_STATUS_LABEL[r.status] || r.status}</span></td>
-                  <td className="px-2 text-xs text-slate-600">
-                    {r.friday_slot_label && <span className="inline-block bg-blue-50 text-blue-700 px-1.5 rounded mr-1">V</span>}
-                    {r.saturday_slot_label && <span className="inline-block bg-emerald-50 text-emerald-700 px-1.5 rounded">S</span>}
-                  </td>
-                  <td className="px-2">{r.is_convention_signed ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-slate-300" />}</td>
-                  <td className="px-2">
-                    {r.deposit?.status === 'recue' ? <Badge className="bg-emerald-600 text-[10px] font-normal">reçue</Badge> : <Badge variant="secondary" className="text-[10px] font-normal">{DEPOSIT_STATUS_LABEL[r.deposit?.status] || '—'}</Badge>}
-                  </td>
-                  <td className="px-2 text-xs text-slate-600 max-w-[180px] truncate">{r.organization?.main_email || r.organization?.main_phone}</td>
-                  <td className="px-2 text-right"><Button size="sm" variant="ghost" onClick={() => openExposant(r.id)}>Ouvrir</Button></td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-2"><PrioBadge p={g.org?.priority_level} /></td>
+                    {/* 🆕 Cellule SITES · STANDS avec badges multi-sites */}
+                    <td className="px-2">
+                      <OrgSitesBadges group={g} venues={venues} onOpenReg={openExposant} />
+                    </td>
+                    <td className="px-2">
+                      {allSameStatus ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium ${REGISTRATION_STATUS_COLOR[primary.status] || 'bg-slate-100'}`}>{REGISTRATION_STATUS_LABEL[primary.status] || primary.status}</span>
+                      ) : (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button className="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100">Mixte ({statuses.length})</button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-2 text-xs">
+                            <div className="font-semibold text-slate-700 mb-1">Statuts par site :</div>
+                            {g.registrations.map(r => (
+                              <div key={r.id} className="flex justify-between border-b last:border-b-0 py-1">
+                                <span>{venues.find(v => v.id === r.venue_id)?.name || '— sans site —'}</span>
+                                <span className={`px-1.5 rounded text-[10px] ${REGISTRATION_STATUS_COLOR[r.status] || 'bg-slate-100'}`}>{REGISTRATION_STATUS_LABEL[r.status] || r.status}</span>
+                              </div>
+                            ))}
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </td>
+                    <td className="px-2">{convSigned ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-slate-300" />}</td>
+                    <td className="px-2">{depositReceived ? <Badge className="bg-emerald-600 text-[10px] font-normal">reçue</Badge> : <Badge variant="secondary" className="text-[10px] font-normal">—</Badge>}</td>
+                    <td className="px-2 text-xs text-slate-600 max-w-[180px] truncate">{g.org?.main_email || g.org?.main_phone}</td>
+                    <td className="px-2 text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Button size="sm" variant="outline" className="gap-1 text-[11px] h-7" title="Éditer les sites de cet exposant" onClick={(e) => { e.stopPropagation(); setEditVenuesFor(g); }}>
+                          <MapPin className="w-3 h-3" /> Sites
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => openExposant(primary.id)}>Ouvrir</Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </CardContent>
       </Card>
-
-      {/* FicheExposant maintenant rendu globalement via ExposantPanelProvider — pas besoin ici */}
     </div>
+  );
+}
+
+// 🆕 SESSION 53.6 — Filtre multi-sites avec checkboxes (popover)
+function SiteCheckboxFilter({ venues, selectedVenueIds, noSite, onChange }) {
+  const [open, setOpen] = useState(false);
+  const count = (selectedVenueIds?.length || 0) + (noSite ? 1 : 0);
+  const toggleVenue = (id) => {
+    const set = new Set(selectedVenueIds || []);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    onChange([...set], noSite);
+  };
+  const label = count === 0 ? 'Tous les sites'
+    : count === 1 ? (noSite && selectedVenueIds.length === 0 ? 'Sans site' : (venues.find(v => v.id === selectedVenueIds[0])?.name || '1 site'))
+    : `${count} sites cochés`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex items-center justify-between border rounded-md px-3 py-2 text-sm hover:bg-slate-50 w-full">
+          <span className="truncate">{label}</span>
+          <Filter className="w-3.5 h-3.5 text-slate-400 ml-2 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-60 p-2">
+        <div className="text-xs font-semibold text-slate-700 mb-2">Filtrer par site</div>
+        <div className="space-y-1">
+          {venues.filter(v => v.is_active !== false).map(v => (
+            <label key={v.id} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-sm">
+              <Checkbox checked={selectedVenueIds?.includes(v.id)} onCheckedChange={() => toggleVenue(v.id)} />
+              <span>{v.name}</span>
+            </label>
+          ))}
+          <div className="border-t my-1"></div>
+          <label className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-sm">
+            <Checkbox checked={noSite} onCheckedChange={() => onChange(selectedVenueIds, !noSite)} />
+            <span className="italic text-slate-600">Sans site affecté</span>
+          </label>
+        </div>
+        {count > 0 && (
+          <Button size="sm" variant="ghost" className="w-full mt-2 text-xs" onClick={() => { onChange([], false); }}>Réinitialiser</Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// 🆕 SESSION 53.6 — Badges multi-sites (max 2 visibles + "+N" avec popover)
+function OrgSitesBadges({ group, venues, onOpenReg }) {
+  const regs = group.registrations || [];
+  if (regs.length === 0) return <span className="text-slate-400 italic text-xs">aucun</span>;
+  const STATUS_COLOR = {
+    confirme: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    a_confirmer: 'bg-blue-100 text-blue-700 border-blue-300',
+    liste_attente: 'bg-amber-100 text-amber-700 border-amber-300',
+    a_relancer: 'bg-orange-100 text-orange-700 border-orange-300',
+    en_attente_validation: 'bg-violet-100 text-violet-700 border-violet-300',
+    annule: 'bg-slate-100 text-slate-500 border-slate-300',
+  };
+  const renderBadge = (r, withClick = true) => {
+    const venue = venues.find(v => v.id === r.venue_id);
+    const venueName = venue?.name || '— Multi-sites —';
+    const shortName = venueName.length > 10 ? venueName.slice(0, 8) + '…' : venueName;
+    const cls = STATUS_COLOR[r.status] || 'bg-slate-100 text-slate-700 border-slate-300';
+    return (
+      <button
+        key={r.id}
+        onClick={withClick ? (e) => { e.stopPropagation(); onOpenReg(r.id); } : undefined}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10.5px] font-medium ${cls} hover:opacity-80`}
+        title={`${venueName}${r.stand_code ? ' · stand ' + r.stand_code : ''} · ${REGISTRATION_STATUS_LABEL[r.status] || r.status}`}
+      >
+        <span className="font-semibold">{shortName}</span>
+        {r.stand_code && <span className="font-mono text-[9.5px]">{r.stand_code}</span>}
+        {r.is_waitlist && <span className="text-[9.5px]">⏳</span>}
+      </button>
+    );
+  };
+  if (regs.length <= 2) {
+    return <div className="flex flex-wrap gap-1">{regs.map(r => renderBadge(r))}</div>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1 items-center">
+      {regs.slice(0, 2).map(r => renderBadge(r))}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10.5px] font-semibold bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+          >
+            +{regs.length - 2}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-3">
+          <div className="text-xs font-semibold text-slate-700 mb-2">{regs.length} inscriptions sur {regs.length} sites</div>
+          <div className="flex flex-wrap gap-1">
+            {regs.map(r => renderBadge(r))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+// 🆕 SESSION 53.6 — Dialog d'édition des sites d'un exposant (checkboxes multi-select)
+function EditOrgVenuesDialog({ group, venues, onClose, onSaved }) {
+  const initialIds = group.registrations.filter(r => r.venue_id).map(r => r.venue_id);
+  const [selectedIds, setSelectedIds] = useState(new Set(initialIds));
+  const [keepNoSite, setKeepNoSite] = useState(group.has_no_site);
+  const [busy, setBusy] = useState(false);
+
+  const toggleVenue = (id) => {
+    const set = new Set(selectedIds);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    setSelectedIds(set);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const venue_ids = [...selectedIds];
+      // Note: keepNoSite est ignoré côté serveur (gère seulement les venue_ids assignés)
+      // Si l'utilisateur veut ne plus avoir de "sans site", il décoche tout et n'a aucun venue_id
+      const r = await api(`/api/admin/organizations/${group.orgId}/venues`, {
+        method: 'POST',
+        body: JSON.stringify({ venue_ids }),
+      });
+      toast.success(r.message || 'Sites mis à jour');
+      onSaved();
+    } catch (e) {
+      // Le serveur renvoie un détail des blocages le cas échéant
+      try {
+        const obj = typeof e.message === 'string' ? JSON.parse(e.message) : e;
+        if (obj.blockers && obj.blockers.length) {
+          const lines = obj.blockers.map(b => `• ${venues.find(v => v.id === b.venue_id)?.name || b.venue_id} → ${b.reasons.join(', ')}`).join('\n');
+          alert(`🚫 Impossible de retirer ces sites :\n\n${lines}\n\n${obj.hint || ''}`);
+        } else {
+          toast.error(e.message || 'Erreur');
+        }
+      } catch {
+        toast.error(e.message || 'Erreur');
+      }
+    }
+    setBusy(false);
+  };
+
+  const initialSet = new Set(initialIds);
+  const willAdd = [...selectedIds].filter(id => !initialSet.has(id));
+  const willRemove = [...initialSet].filter(id => !selectedIds.has(id));
+
+  return (
+    <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Éditer les sites — {group.org?.name}</DialogTitle>
+          <DialogDescription>Cochez les sites où cet exposant doit avoir une inscription. Décocher un site l&apos;archive (bloqué si données attachées).</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          {venues.filter(v => v.is_active !== false).map(v => (
+            <label key={v.id} className="flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-slate-50 cursor-pointer">
+              <Checkbox checked={selectedIds.has(v.id)} onCheckedChange={() => toggleVenue(v.id)} />
+              <div className="flex-1">
+                <div className="text-sm font-medium">{v.name}</div>
+                <div className="text-[10px] text-slate-500">
+                  {initialSet.has(v.id) ? '✅ inscrit actuellement' : '— pas d\'inscription —'}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+        {(willAdd.length > 0 || willRemove.length > 0) && (
+          <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs">
+            <div className="font-semibold text-blue-900 mb-1">Aperçu des modifications :</div>
+            {willAdd.length > 0 && <div className="text-emerald-700">➕ Ajouter : {willAdd.map(id => venues.find(v => v.id === id)?.name).join(', ')}</div>}
+            {willRemove.length > 0 && <div className="text-red-700">🗑 Archiver : {willRemove.map(id => venues.find(v => v.id === id)?.name).join(', ')} <span className="text-[10px] text-slate-500">(bloqué si caution/docs/animations)</span></div>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
+          <Button onClick={save} disabled={busy || (willAdd.length === 0 && willRemove.length === 0)}>
+            {busy ? 'Sauvegarde…' : 'Enregistrer'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

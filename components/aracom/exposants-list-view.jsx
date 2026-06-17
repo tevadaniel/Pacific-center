@@ -15,13 +15,16 @@ import { toast } from 'sonner';
 import {
   Search, Plus, Download, Trash2, Send, ExternalLink, Check,
   X, AlertTriangle, Loader2, ChevronDown, ChevronUp, ArrowUpDown,
-  ArrowDownUp,
+  ArrowDownUp, Filter, MapPin,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useExposantPanel } from './exposant-panel-context';
 
 const STATUS_OPTS = [
@@ -65,9 +68,12 @@ export default function ExposantsListView() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterSite, setFilterSite] = useState('');
+  // 🆕 SESSION 53.6 — Multi-select de sites (array) + option "sans site affecté"
+  const [filterSites, setFilterSites] = useState([]); // array de venue_ids
+  const [filterNoSite, setFilterNoSite] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPrio, setFilterPrio] = useState('');
+  const [editVenuesFor, setEditVenuesFor] = useState(null); // org pour édition multi-sites
   // 🔽 TRI — clé + direction (synchronisé avec dropdown + en-têtes cliquables)
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
@@ -123,8 +129,14 @@ export default function ExposantsListView() {
   // 🔎 Filtrage en mémoire
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const venueSet = new Set(filterSites);
     const base = rows.filter((r) => {
-      if (filterSite && r.venue_id !== filterSite) return false;
+      // 🆕 SESSION 53.6 — Multi-site filtre : ce reg doit appartenir à un des venues cochés OU être sans venue si "sans site" coché
+      if (venueSet.size > 0 || filterNoSite) {
+        const matchVenue = r.venue_id && venueSet.has(r.venue_id);
+        const matchNoSite = filterNoSite && !r.venue_id;
+        if (!matchVenue && !matchNoSite) return false;
+      }
       if (filterStatus && r.status !== filterStatus) return false;
       if (filterPrio) {
         const prio = r.organization?.priority_level || (r.organization?.status === 'prospect' ? 'prospect' : null);
@@ -169,7 +181,38 @@ export default function ExposantsListView() {
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return sorted;
-  }, [rows, search, filterSite, filterStatus, filterPrio, sortKey, sortDir, venues]);
+  }, [rows, search, filterSites, filterNoSite, filterStatus, filterPrio, sortKey, sortDir, venues]);
+
+  // 🆕 SESSION 53.6 — Groupage par organization pour affichage 1 ligne = 1 exposant
+  const groupedRows = useMemo(() => {
+    const map = new Map();
+    for (const r of filtered) {
+      const orgId = r.organization_id || r.organization?.id;
+      if (!orgId) continue;
+      if (!map.has(orgId)) {
+        map.set(orgId, {
+          orgId,
+          org: r.organization,
+          registrations: [],
+          venue_ids: new Set(),
+          has_no_site: false,
+        });
+      }
+      const g = map.get(orgId);
+      g.registrations.push(r);
+      if (r.venue_id) g.venue_ids.add(r.venue_id);
+      else g.has_no_site = true;
+    }
+    // Préserve l'ordre du sort en utilisant l'index du premier reg dans `filtered`
+    const orgOrder = new Map();
+    filtered.forEach((r, idx) => {
+      const orgId = r.organization_id || r.organization?.id;
+      if (orgId && !orgOrder.has(orgId)) orgOrder.set(orgId, idx);
+    });
+    return Array.from(map.values())
+      .map(g => ({ ...g, venue_ids: Array.from(g.venue_ids), primary: g.registrations[0] }))
+      .sort((a, b) => (orgOrder.get(a.orgId) || 0) - (orgOrder.get(b.orgId) || 0));
+  }, [filtered]);
 
   // 🔽 Helpers tri : toggle on header click + sync dropdown
   const toggleSort = (key, defaultDir = 'asc') => {
@@ -412,13 +455,6 @@ export default function ExposantsListView() {
             className="pl-9 h-9 text-sm"
           />
         </div>
-        <Select value={filterSite || '_all'} onValueChange={(v) => setFilterSite(v === '_all' ? '' : v)}>
-          <SelectTrigger className="w-40 h-9 text-xs"><SelectValue placeholder="Tous les sites" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="_all">Tous les sites</SelectItem>
-            {venues.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
         <Select value={filterStatus || '_all'} onValueChange={(v) => setFilterStatus(v === '_all' ? '' : v)}>
           <SelectTrigger className="w-40 h-9 text-xs"><SelectValue placeholder="Tous statuts" /></SelectTrigger>
           <SelectContent>
@@ -426,6 +462,13 @@ export default function ExposantsListView() {
             {STATUS_OPTS.map((o) => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}
           </SelectContent>
         </Select>
+        {/* 🆕 SESSION 53.6 — Filtre multi-sites avec cases à cocher */}
+        <SiteCheckboxFilter
+          venues={venues}
+          selectedVenueIds={filterSites}
+          noSite={filterNoSite}
+          onChange={(ids, no) => { setFilterSites(ids); setFilterNoSite(no); }}
+        />
         <Select value={filterPrio || '_all'} onValueChange={(v) => setFilterPrio(v === '_all' ? '' : v)}>
           <SelectTrigger className="w-32 h-9 text-xs"><SelectValue placeholder="Priorité" /></SelectTrigger>
           <SelectContent>
@@ -451,7 +494,14 @@ export default function ExposantsListView() {
 
       {/* ═══════════════ ACTIONS GLOBALES ═══════════════ */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-600 mr-auto">{filtered.length} exposant(s) affiché(s)</span>
+        <span className="text-xs text-slate-600 mr-auto">
+          {groupedRows.length} exposant(s) · {filtered.length} inscription(s)
+          {groupedRows.filter(g => g.venue_ids.length > 1).length > 0 && (
+            <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 border border-violet-200 text-[10px] font-semibold">
+              {groupedRows.filter(g => g.venue_ids.length > 1).length} multi-sites
+            </span>
+          )}
+        </span>
         <Button size="sm" onClick={() => setShowNew(true)} className="h-8 text-xs gap-1 bg-blue-600 hover:bg-blue-700 text-white">
           <Plus className="w-3.5 h-3.5" /> Nouveau exposant
         </Button>
@@ -497,26 +547,37 @@ export default function ExposantsListView() {
               {loading && (
                 <tr><td colSpan="8" className="text-center text-slate-400 py-6"><Loader2 className="w-5 h-5 animate-spin inline" /></td></tr>
               )}
-              {!loading && filtered.length === 0 && (
+              {!loading && groupedRows.length === 0 && (
                 <tr><td colSpan="8" className="text-center text-slate-400 py-6 italic">Aucun exposant trouvé</td></tr>
               )}
-              {!loading && filtered.map((r) => {
+              {!loading && groupedRows.map((g) => {
+                const r = g.primary; // ligne représentative (pour selection + actions principales)
                 const isSel = selected.has(r.id);
-                const opt = getStatusOpt(r.status);
+                const statuses = [...new Set(g.registrations.map(x => x.status))];
+                const allSameStatus = statuses.length === 1;
+                const aggStatus = allSameStatus ? r.status : 'mixte';
+                const opt = allSameStatus ? getStatusOpt(r.status) : { key: 'mixte', label: `Mixte (${statuses.length})`, cls: 'bg-amber-100 text-amber-900 border-amber-300', dotCls: 'bg-amber-500' };
                 const prio = r.organization?.priority_level || (r.organization?.status === 'prospect' ? 'prospect' : null);
                 const prioOpt = getPrioOpt(prio);
+                const anyConvSigned = g.registrations.some(x => x.is_convention_signed);
+                const anyDepositPaid = g.registrations.find(x => x.deposit?.amount_xpf);
                 return (
-                  <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50 transition ${isSel ? 'bg-blue-50/40' : ''}`}>
+                  <tr key={g.orgId} className={`border-b border-slate-100 hover:bg-slate-50 transition ${isSel ? 'bg-blue-50/40' : ''}`}>
                     <td className="p-2">
                       <input type="checkbox" checked={isSel} onChange={() => toggleOne(r.id)} className="rounded" />
                     </td>
                     <td className="p-2">
                       <button onClick={() => openExposant(r.id)} className="text-left">
                         <div className="font-semibold text-slate-900 hover:underline flex items-center gap-1.5 flex-wrap">
-                          <span>{r.organization?.name || '—'}</span>
-                          {/* 🆕 SESSION 41 — Badge fidélité multi-éditions */}
+                          <span>{g.org?.name || '—'}</span>
+                          {/* 🆕 SESSION 53.6 — Badge Multi-sites */}
+                          {g.venue_ids.length > 1 && (
+                            <span className="text-[9px] bg-violet-100 text-violet-800 border border-violet-300 font-bold px-1.5 py-0.5 rounded" title={`${g.venue_ids.length} sites`}>
+                              🎯 {g.venue_ids.length}×
+                            </span>
+                          )}
                           {(() => {
-                            const nb = r.organization?.participation_history?.nb_editions || 0;
+                            const nb = g.org?.participation_history?.nb_editions || 0;
                             if (nb >= 4) return <span className="text-[9px] bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold px-1.5 py-0.5 rounded" title={`Fidèle · ${nb} éditions`}>🏆 {nb}×</span>;
                             if (nb >= 2) return <span className="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-1.5 py-0.5 rounded" title={`Multi-éditions · ${nb} éditions`}>🏅 {nb}×</span>;
                             if (nb === 1) return <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 font-medium px-1.5 py-0.5 rounded" title="Participation antérieure">1×</span>;
@@ -524,10 +585,10 @@ export default function ExposantsListView() {
                           })()}
                         </div>
                         <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
-                          <span>{r.organization?.discipline || '—'}</span>
-                          {r.organization?.created_at && (
-                            <span className="text-slate-400" title={new Date(r.organization.created_at).toLocaleString('fr-FR')}>
-                              · créé le {new Date(r.organization.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' })}
+                          <span>{g.org?.discipline || '—'}</span>
+                          {g.org?.created_at && (
+                            <span className="text-slate-400" title={new Date(g.org.created_at).toLocaleString('fr-FR')}>
+                              · créé le {new Date(g.org.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' })}
                             </span>
                           )}
                         </div>
@@ -536,36 +597,63 @@ export default function ExposantsListView() {
                     <td className="p-2">
                       {prioOpt ? <Badge className={`${prioOpt.cls} text-[10px] font-bold`}>{prioOpt.label}</Badge> : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="p-2 text-slate-700">{venueMap[r.venue_id] || <span className="text-slate-300">—</span>}</td>
+                    {/* 🆕 SESSION 53.6 — Cellule Sites multi-badges */}
                     <td className="p-2">
-                      <Select value={r.status || 'contacte'} onValueChange={(v) => updateStatus(r.id, v)}>
-                        <SelectTrigger className={`h-7 text-[11px] font-medium px-2 ${opt.cls} border`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STATUS_OPTS.map((o) => (
-                            <SelectItem key={o.key} value={o.key}>
-                              <span className="flex items-center gap-1.5">
-                                <span className={`w-2 h-2 rounded-full ${o.dotCls}`} />
-                                {o.label}
-                              </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <OrgSitesBadges group={g} venues={venues} onOpenReg={openExposant} />
                     </td>
                     <td className="p-2">
-                      {r.is_convention_signed
+                      {allSameStatus ? (
+                        <Select value={r.status || 'contacte'} onValueChange={(v) => updateStatus(r.id, v)}>
+                          <SelectTrigger className={`h-7 text-[11px] font-medium px-2 ${opt.cls} border`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {STATUS_OPTS.map((o) => (
+                              <SelectItem key={o.key} value={o.key}>
+                                <span className="flex items-center gap-1.5">
+                                  <span className={`w-2 h-2 rounded-full ${o.dotCls}`} />
+                                  {o.label}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button className={`h-7 text-[11px] font-medium px-2 rounded border ${opt.cls} hover:opacity-80`}>{opt.label}</button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-64 p-2 text-xs">
+                            <div className="font-semibold text-slate-700 mb-1">Statut par site :</div>
+                            {g.registrations.map(x => {
+                              const xo = getStatusOpt(x.status);
+                              return (
+                                <div key={x.id} className="flex justify-between items-center border-b last:border-b-0 py-1">
+                                  <span>{venueMap[x.venue_id] || '— sans site —'}</span>
+                                  <span className={`px-1.5 rounded text-[10px] ${xo.cls}`}>{xo.label}</span>
+                                </div>
+                              );
+                            })}
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </td>
+                    <td className="p-2">
+                      {anyConvSigned
                         ? <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px]">Signée</Badge>
                         : <Badge className="bg-slate-100 text-slate-600 border-slate-300 text-[10px]">Non</Badge>}
                     </td>
                     <td className="p-2">
-                      {r.deposit?.amount_xpf
-                        ? <span className="font-mono text-slate-800">{r.deposit.amount_xpf.toLocaleString('fr')} XPF</span>
+                      {anyDepositPaid
+                        ? <span className="font-mono text-slate-800">{anyDepositPaid.deposit.amount_xpf.toLocaleString('fr')} XPF</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="p-2">
                       <div className="flex items-center justify-end gap-0.5">
+                        {/* 🆕 SESSION 53.6 — Édition des sites */}
+                        <button onClick={() => setEditVenuesFor(g)} title="Éditer les sites associés" className="p-1.5 rounded hover:bg-violet-100 text-violet-600">
+                          <MapPin className="w-3.5 h-3.5" />
+                        </button>
                         <button onClick={() => openExposant(r.id)} title="Ouvrir fiche" className="p-1.5 rounded hover:bg-slate-100 text-slate-600">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
@@ -579,14 +667,13 @@ export default function ExposantsListView() {
                         </button>
                         <button
                           onClick={() => {
-                            // 🆕 SESSION 47.7 — Ouvre l'onglet Mailing avec cet exposant pré-coché (envoi unique)
-                            if (!r.organization?.main_email) { toast.error('Pas d\'email enregistré pour cet exposant'); return; }
+                            if (!g.org?.main_email) { toast.error('Pas d\'email enregistré pour cet exposant'); return; }
                             const url = new URL(window.location.href);
                             url.searchParams.set('tab', 'mailing');
                             url.searchParams.set('preselect', r.id);
                             window.location.href = url.toString();
                           }}
-                          title={`Composer un email pour ${r.organization?.name || 'cet exposant'}`}
+                          title={`Composer un email pour ${g.org?.name || 'cet exposant'}`}
                           className="p-1.5 rounded hover:bg-blue-100 text-blue-600"
                         >
                           <Send className="w-3.5 h-3.5" />
@@ -712,6 +799,16 @@ export default function ExposantsListView() {
       {showNew && (
         <NewExposantInline venues={venues} onClose={() => setShowNew(false)} onCreated={async () => { setShowNew(false); await load(); toast.success('✅ Nouvel exposant créé'); }} />
       )}
+
+      {/* 🆕 SESSION 53.6 — Dialog d'édition des sites associés à un exposant */}
+      {editVenuesFor && (
+        <EditOrgVenuesDialog
+          group={editVenuesFor}
+          venues={venues}
+          onClose={() => setEditVenuesFor(null)}
+          onSaved={() => { setEditVenuesFor(null); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -796,5 +893,189 @@ function NewExposantInline({ venues, onClose, onCreated }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ╔══════════════════════════════════════════════════════╗
+// 🆕 SESSION 53.6 — FILTRE MULTI-SITES (cases à cocher)
+// ╚══════════════════════════════════════════════════════╝
+function SiteCheckboxFilter({ venues, selectedVenueIds, noSite, onChange }) {
+  const [open, setOpen] = useState(false);
+  const count = (selectedVenueIds?.length || 0) + (noSite ? 1 : 0);
+  const toggleVenue = (id) => {
+    const set = new Set(selectedVenueIds || []);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    onChange([...set], noSite);
+  };
+  const label = count === 0 ? 'Tous les sites'
+    : count === 1 ? (noSite && selectedVenueIds.length === 0 ? '⚪ Sans site' : (venues.find(v => v.id === selectedVenueIds[0])?.name || '1 site'))
+    : `${count} sites cochés`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex items-center justify-between border rounded-md px-3 h-9 text-xs hover:bg-slate-50 w-40">
+          <span className="truncate">{label}</span>
+          <Filter className="w-3.5 h-3.5 text-slate-400 ml-2 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-60 p-2">
+        <div className="text-xs font-semibold text-slate-700 mb-2">Filtrer par site</div>
+        <div className="space-y-1">
+          {(venues || []).filter(v => v.is_active !== false).map(v => (
+            <label key={v.id} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-sm">
+              <Checkbox checked={selectedVenueIds?.includes(v.id)} onCheckedChange={() => toggleVenue(v.id)} />
+              <span>{v.name}</span>
+            </label>
+          ))}
+          <div className="border-t my-1"></div>
+          <label className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-sm">
+            <Checkbox checked={noSite} onCheckedChange={() => onChange(selectedVenueIds, !noSite)} />
+            <span className="italic text-slate-600">Sans site affecté</span>
+          </label>
+        </div>
+        {count > 0 && (
+          <Button size="sm" variant="ghost" className="w-full mt-2 text-xs" onClick={() => { onChange([], false); }}>Réinitialiser</Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ╔══════════════════════════════════════════════════════╗
+// 🆕 SESSION 53.6 — BADGES MULTI-SITES (max 2 + "+N" popover)
+// ╚══════════════════════════════════════════════════════╝
+function OrgSitesBadges({ group, venues, onOpenReg }) {
+  const regs = group.registrations || [];
+  if (regs.length === 0) return <span className="text-slate-300 text-xs">—</span>;
+  const STATUS_BADGE = {
+    confirme: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    contacte: 'bg-amber-50 text-amber-700 border-amber-200',
+    a_confirmer: 'bg-blue-50 text-blue-700 border-blue-200',
+    liste_attente: 'bg-violet-50 text-violet-700 border-violet-200',
+    a_relancer: 'bg-orange-50 text-orange-700 border-orange-200',
+    en_attente_validation: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
+    annule: 'bg-slate-50 text-slate-500 border-slate-200',
+  };
+  const venueName = (id) => (venues.find(v => v.id === id)?.name || (id ? '?' : 'Multi-sites'));
+  const renderBadge = (r, withClick = true) => {
+    const cls = STATUS_BADGE[r.status] || 'bg-slate-50 text-slate-700 border-slate-200';
+    const name = venueName(r.venue_id);
+    return (
+      <button
+        key={r.id}
+        onClick={withClick ? (e) => { e.stopPropagation(); onOpenReg(r.id); } : undefined}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10.5px] font-medium ${cls} hover:opacity-80`}
+        title={`${name}${r.stand_code ? ' · stand ' + r.stand_code : ''}`}
+      >
+        <span className="font-semibold">{name}</span>
+        {r.stand_code && <span className="font-mono text-[9.5px] opacity-80">{r.stand_code}</span>}
+        {r.is_waitlist && <span title="Liste d'attente">⏳</span>}
+      </button>
+    );
+  };
+  if (regs.length <= 2) {
+    return <div className="flex flex-wrap gap-1">{regs.map(r => renderBadge(r))}</div>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1 items-center">
+      {regs.slice(0, 2).map(r => renderBadge(r))}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10.5px] font-semibold bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
+          >
+            +{regs.length - 2}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-3">
+          <div className="text-xs font-semibold text-slate-700 mb-2">{regs.length} inscriptions sur {regs.length} site(s)</div>
+          <div className="flex flex-wrap gap-1">{regs.map(r => renderBadge(r))}</div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+// ╔══════════════════════════════════════════════════════╗
+// 🆕 SESSION 53.6 — DIALOG ÉDITION DES SITES D'UN EXPOSANT
+// ╚══════════════════════════════════════════════════════╝
+function EditOrgVenuesDialog({ group, venues, onClose, onSaved }) {
+  const initialIds = group.registrations.filter(r => r.venue_id).map(r => r.venue_id);
+  const [selectedIds, setSelectedIds] = useState(new Set(initialIds));
+  const [busy, setBusy] = useState(false);
+  const activeVenues = (venues || []).filter(v => v.is_active !== false);
+
+  const toggleVenue = (id) => {
+    const set = new Set(selectedIds);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    setSelectedIds(set);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const venue_ids = [...selectedIds];
+      const r = await api(`/api/admin/organizations/${group.orgId}/venues`, {
+        method: 'POST',
+        body: JSON.stringify({ venue_ids }),
+      });
+      toast.success(r.message || 'Sites mis à jour');
+      onSaved();
+    } catch (e) {
+      // Le serveur renvoie un objet d'erreur structuré pour les blocages
+      let parsed = null;
+      try { parsed = JSON.parse(e.message); } catch { /* ignore */ }
+      if (parsed?.blockers?.length) {
+        const lines = parsed.blockers.map(b => `• ${venues.find(v => v.id === b.venue_id)?.name || b.venue_id} → ${b.reasons.join(', ')}`).join('\n');
+        alert(`🚫 Impossible de retirer ces sites :\n\n${lines}\n\n${parsed.hint || ''}`);
+      } else {
+        toast.error(e.message || 'Erreur');
+      }
+    }
+    setBusy(false);
+  };
+
+  const initialSet = new Set(initialIds);
+  const willAdd = [...selectedIds].filter(id => !initialSet.has(id));
+  const willRemove = [...initialSet].filter(id => !selectedIds.has(id));
+
+  return (
+    <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Sites de {group.org?.name}</DialogTitle>
+          <DialogDescription>
+            Cochez les sites où cet exposant doit avoir une inscription. <span className="block mt-1 text-[11px]">Décocher un site l&apos;<b>archive</b> (bloqué si caution, documents ou animations attachés).</span>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2 max-h-[50vh] overflow-y-auto">
+          {activeVenues.map(v => (
+            <label key={v.id} className="flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-slate-50 cursor-pointer">
+              <Checkbox checked={selectedIds.has(v.id)} onCheckedChange={() => toggleVenue(v.id)} />
+              <div className="flex-1">
+                <div className="text-sm font-medium">{v.name}</div>
+                <div className="text-[10px] text-slate-500">
+                  {initialSet.has(v.id) ? '✅ inscrit actuellement' : '— pas d\'inscription —'}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+        {(willAdd.length > 0 || willRemove.length > 0) && (
+          <div className="bg-blue-50 border border-blue-200 rounded p-2 text-xs">
+            <div className="font-semibold text-blue-900 mb-1">Aperçu des modifications :</div>
+            {willAdd.length > 0 && <div className="text-emerald-700">➕ Ajouter : {willAdd.map(id => venues.find(v => v.id === id)?.name).join(', ')}</div>}
+            {willRemove.length > 0 && <div className="text-red-700">🗑 Archiver : {willRemove.map(id => venues.find(v => v.id === id)?.name).join(', ')}</div>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
+          <Button onClick={save} disabled={busy || (willAdd.length === 0 && willRemove.length === 0)}>
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Enregistrer'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
