@@ -1778,7 +1778,7 @@ export async function GET(request, { params }) {
           is_complete: isComplete,
           // 🆕 SESSION 28l — Statut de soumission par-site
           validation_request: valReq ? { id: valReq.id, status: valReq.status, requested_at: valReq.created_at, rdv_date: valReq.rdv_date || null } : null,
-          can_submit: isComplete && !valReq && !r.candidature_locked && !r.is_locked,
+          can_submit: isComplete && !r.candidature_locked && !r.is_locked,
         };
       }).sort((a, b) => (a.site_priority || 99) - (b.site_priority || 99));
       return json(out);

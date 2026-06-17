@@ -3956,6 +3956,22 @@ agent_communication:
 
 backend:
   - task: "SESSION 53.4 — Rule 6/8: Validation request re-submission workflow"
+
+  - task: "SESSION 53.4 — Rule 6/8 : Re-submission jusqu'à validation admin + verrouillage uniquement par ARACOM"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, app/exposant/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Rule 6 : l'exposant peut re-soumettre sa demande de validation autant de fois que nécessaire (overwriting) tant qu'ARACOM n'a pas verrouillé. Rule 8 : seule l'action ARACOM 'validate' verrouille définitivement (candidature_locked=true). Modifications backend : (1) POST /api/registrations/:id/request-validation ne met PLUS candidature_locked=true (suppression des 2 lignes). (2) POST /api/admin/registrations/:id/validate ajoute candidature_locked=true + candidature_locked_at en plus de locked_at + status='confirme'. (3) can_submit retire la condition !valReq → can_submit:isComplete && !candidature_locked && !is_locked. Modifications frontend : MultiSitesPanel (line 1249) : condition !isLocked && !valReq → !isLocked. Label/style du bouton dynamique selon valReq présent ou non ('Soumettre' vs 'Re-soumettre (écrase la précédente)'). Step3Card (line 1558) : même logique. Bouton Retirer reste désactivé après première soumission (Rule 6 site immuable). Version bumpée 1.0.50 → 1.0.51."
+      - working: true
+        agent: "testing"
+        comment: "✅ Tests Rule 6/8 PASS. (1) Re-submission autorisée 2 fois consécutives sans erreur, ancienne validation_request passée à 'annulee', nouvelle 'en_attente'. candidature_locked reste false/null après submission. (2) POST /admin/registrations/:id/validate met bien candidature_locked=true + locked_at + status='confirme'. (3) Après validate admin : request-validation rejeté 400 'Inscription déjà confirmée'. (4) can_submit:true après re-submission (UI bouton reste actif). (5) Régressions OK : dashboard/kpis, registrations, rebalance-all-waitlists. Cleanup effectué par main agent (reg-fusion-ace-arue-aru et reg-fusion-budokan-judo-pirae-aru remis à 'a_confirmer' + animation_slots de test supprimés)."
+
     implemented: true
     working: true
     file: "app/api/[[...path]]/route.js (lines 9541-9661, 4160-4206, 1781)"
