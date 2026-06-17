@@ -27,11 +27,16 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useExposantPanel } from './exposant-panel-context';
 
+// 🆕 SESSION 53.9 — Statuts enrichis (validation + attente + prospection)
+// Le dropdown propose désormais 7 statuts cohérents avec le cycle de vie d'un exposant.
 const STATUS_OPTS = [
-  { key: 'contacte', label: 'À confirmer', cls: 'bg-amber-100 text-amber-900 border-amber-300', dotCls: 'bg-amber-500' },
-  { key: 'confirme', label: 'Confirmé', cls: 'bg-emerald-100 text-emerald-900 border-emerald-300', dotCls: 'bg-emerald-500' },
-  { key: 'liste_attente', label: "Liste d'attente", cls: 'bg-violet-100 text-violet-900 border-violet-300', dotCls: 'bg-violet-500' },
-  { key: 'annule', label: 'Annulé', cls: 'bg-red-100 text-red-900 border-red-300', dotCls: 'bg-red-500' },
+  { key: 'prospect',      label: 'Pas encore contacté', cls: 'bg-slate-100 text-slate-800 border-slate-300', dotCls: 'bg-slate-400' },
+  { key: 'contacte',      label: 'Contacté',           cls: 'bg-blue-100 text-blue-900 border-blue-300',     dotCls: 'bg-blue-500' },
+  { key: 'a_relancer',    label: 'À relancer',         cls: 'bg-orange-100 text-orange-900 border-orange-300', dotCls: 'bg-orange-500' },
+  { key: 'a_confirmer',   label: 'Pré-réservé',        cls: 'bg-amber-100 text-amber-900 border-amber-300',   dotCls: 'bg-amber-500' },
+  { key: 'confirme',      label: 'Validée',            cls: 'bg-emerald-100 text-emerald-900 border-emerald-300', dotCls: 'bg-emerald-500' },
+  { key: 'liste_attente', label: "Liste d'attente",    cls: 'bg-violet-100 text-violet-900 border-violet-300', dotCls: 'bg-violet-500' },
+  { key: 'annule',        label: 'Annulé',             cls: 'bg-red-100 text-red-900 border-red-300',         dotCls: 'bg-red-500' },
 ];
 
 const PRIO_OPTS = [
@@ -58,7 +63,7 @@ const SORT_OPTS = [
   { key: 'convention',   label: '📝 Convention (signée d\'abord)', dir: 'desc' },
 ];
 const PRIO_ORDER = { A: 0, B: 1, C: 2, prospect: 3, '': 4, null: 4, undefined: 4 };
-const STATUS_ORDER = { contacte: 0, liste_attente: 1, confirme: 2, annule: 3 };
+const STATUS_ORDER = { prospect: 0, contacte: 1, a_relancer: 2, a_confirmer: 3, confirme: 4, liste_attente: 5, annule: 6 };
 
 const getStatusOpt = (s) => STATUS_OPTS.find((o) => o.key === s) || STATUS_OPTS[0];
 const getPrioOpt = (p) => PRIO_OPTS.find((o) => o.key === p) || null;
@@ -947,14 +952,16 @@ function SiteCheckboxFilter({ venues, selectedVenueIds, noSite, onChange }) {
 function OrgSitesBadges({ group, venues, onOpenReg }) {
   const regs = group.registrations || [];
   if (regs.length === 0) return <span className="text-slate-300 text-xs">—</span>;
+  // 🆕 SESSION 53.9 — Badges enrichis cohérents avec STATUS_OPTS (7 statuts)
   const STATUS_BADGE = {
     confirme: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    contacte: 'bg-amber-50 text-amber-700 border-amber-200',
-    a_confirmer: 'bg-blue-50 text-blue-700 border-blue-200',
+    a_confirmer: 'bg-amber-50 text-amber-800 border-amber-200',
+    contacte: 'bg-blue-50 text-blue-700 border-blue-200',
+    prospect: 'bg-slate-50 text-slate-600 border-slate-200',
     liste_attente: 'bg-violet-50 text-violet-700 border-violet-200',
     a_relancer: 'bg-orange-50 text-orange-700 border-orange-200',
     en_attente_validation: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
-    annule: 'bg-slate-50 text-slate-500 border-slate-200',
+    annule: 'bg-red-50 text-red-500 border-red-200',
   };
   const venueName = (id) => (venues.find(v => v.id === id)?.name || (id ? '?' : 'Multi-sites'));
   const renderBadge = (r, withClick = true) => {
