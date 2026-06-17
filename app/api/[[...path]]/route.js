@@ -11213,6 +11213,144 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       return json({ ok: true, message: 'Base de données réinitialisée — vous pouvez tester en mode propre', stats });
     }
 
+    // ============ TOOL : AUTO-PRÉAFFECTATION DES STANDS (post-import listing) ============
+    // Pour chaque exposant importé avec venue_id pré-affecté :
+    //  - Trie par priorité : status 'a_confirmer' > 'a_relancer' · fidelity Fidèle > Régulier > Ponctuel
+    //  - Assigne un stand_code libre jusqu'à atteindre la capacité du site (= "pré-réservé")
+    //  - Le surplus est mis en liste d'attente (is_waitlist=true, status='liste_attente', stand_code=null)
+    if (route === 'admin/auto-preaffect-stands') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const dryRun = !!body?.dry_run;
+
+      // Source = uniquement les regs importées
+      const allRegs = await db.collection('registrations').find({
+        source: 'import_listing_exposants_2026',
+        venue_id: { $ne: null },
+      }).toArray();
+
+      // Récupère les orgs pour avoir la fidélité
+      const orgIds = [...new Set(allRegs.map(r => r.organization_id))];
+      const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+      const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+
+      const FIDELITY_ORDER = { 'Fidèle': 0, 'Régulier': 1, 'Ponctuel': 2 };
+      const STATUS_ORDER = { 'a_confirmer': 0, 'a_relancer': 1 };
+
+      // Group by venue
+      const byVenue = {};
+      for (const r of allRegs) {
+        if (!byVenue[r.venue_id]) byVenue[r.venue_id] = [];
+        byVenue[r.venue_id].push(r);
+      }
+
+      const stats = { by_venue: {}, total_preassigned: 0, total_waitlist: 0 };
+      const operations = [];
+
+      for (const [venueId, regs] of Object.entries(byVenue)) {
+        // Tri par priorité
+        regs.sort((a, b) => {
+          const sa = STATUS_ORDER[a.status] ?? 9;
+          const sb = STATUS_ORDER[b.status] ?? 9;
+          if (sa !== sb) return sa - sb;
+          const oa = orgById[a.organization_id];
+          const ob = orgById[b.organization_id];
+          const fa = FIDELITY_ORDER[oa?.participation_history?.fidelity] ?? 9;
+          const fb = FIDELITY_ORDER[ob?.participation_history?.fidelity] ?? 9;
+          if (fa !== fb) return fa - fb;
+          // tie-breaker : nom alpha
+          return (oa?.name || '').localeCompare(ob?.name || '');
+        });
+
+        // Stands libres pour ce venue, triés par code
+        const stands = await db.collection('venue_stands')
+          .find({ venue_id: venueId, is_active: true })
+          .sort({ stand_code: 1 })
+          .toArray();
+        const freeStands = stands.filter(s => !s.status || s.status === 'libre');
+
+        const venueStats = { capacity: freeStands.length, regs_count: regs.length, preaffected: 0, waitlisted: 0, items: [] };
+
+        for (let i = 0; i < regs.length; i++) {
+          const reg = regs[i];
+          const org = orgById[reg.organization_id];
+          if (i < freeStands.length) {
+            const stand = freeStands[i];
+            venueStats.preaffected += 1;
+            stats.total_preassigned += 1;
+            venueStats.items.push({ action: 'preaffected', name: org?.name, status: reg.status, fidelity: org?.participation_history?.fidelity, stand_code: stand.stand_code });
+            operations.push({ type: 'preaffect', regId: reg.id, standId: stand.id, standCode: stand.stand_code, venueId });
+          } else {
+            venueStats.waitlisted += 1;
+            stats.total_waitlist += 1;
+            venueStats.items.push({ action: 'waitlist', name: org?.name, status: reg.status, fidelity: org?.participation_history?.fidelity });
+            operations.push({ type: 'waitlist', regId: reg.id, venueId });
+          }
+        }
+        stats.by_venue[venueId] = venueStats;
+      }
+
+      if (dryRun) {
+        return json({ ok: true, dry_run: true, stats });
+      }
+
+      // APPLY
+      const now = new Date();
+      for (const op of operations) {
+        if (op.type === 'preaffect') {
+          await db.collection('registrations').updateOne({ id: op.regId }, {
+            $set: {
+              venue_id: op.venueId,
+              stand_code: op.standCode,
+              is_pre_reserved: true,
+              is_waitlist: false,
+              pre_reserved_at: now,
+              updated_at: now,
+            },
+          });
+          // Cancel old assignments
+          await db.collection('stand_assignments').updateMany(
+            { registration_id: op.regId, status: { $nin: ['annule', 'cancelled'] } },
+            { $set: { status: 'annule', request_status: 'annule', updated_at: now } }
+          );
+          // Create new pre_reserve assignment
+          await db.collection('stand_assignments').insertOne({
+            id: uuid(),
+            registration_id: op.regId,
+            venue_stand_id: op.standId,
+            stand_code: op.standCode,
+            status: 'pre_reserve',
+            request_status: 'pending',
+            request_submitted_at: now,
+            waitlist_position: null,
+            validated_at: null,
+            validated_by: null,
+            refused_reason: null,
+            created_at: now,
+            updated_at: now,
+          });
+          // Mark venue_stand as reserved
+          await db.collection('venue_stands').updateOne({ id: op.standId }, {
+            $set: { status: 'reserved', updated_at: now },
+          });
+        } else {
+          // waitlist
+          await db.collection('registrations').updateOne({ id: op.regId }, {
+            $set: {
+              status: 'liste_attente',
+              is_waitlist: true,
+              is_pre_reserved: false,
+              stand_code: null,
+              waitlisted_at: now,
+              updated_at: now,
+            },
+          });
+        }
+      }
+
+      await logActivity(db, ctx.userId, 'system', 'auto-preaffect', 'auto_preaffect_stands', null, stats);
+      return json({ ok: true, dry_run: false, stats, message: `✅ ${stats.total_preassigned} stands pré-réservés · ${stats.total_waitlist} en liste d'attente` });
+    }
+
     // ============ TOOL : IMPORT FUSION 2026 (Excel master file) ============
     // Wipes all data and re-imports the 72 historical exhibitors from /data-imports/forum-fusion-2026.xlsx
     // Sheet 1 only ("📋 BASE EXPOSANTS"). Prospects sheet is IGNORED by admin choice (SESSION 53.4).

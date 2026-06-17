@@ -18,6 +18,7 @@ function FusionMasterImport() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null);
   const [applied, setApplied] = useState(null);
+  const [preaffectStats, setPreaffectStats] = useState(null);
 
   const runPreview = async () => {
     setBusy(true);
@@ -48,6 +49,21 @@ function FusionMasterImport() {
     setBusy(false);
   };
 
+  const runPreaffect = async (dryRun = false) => {
+    setBusy(true);
+    const tid = toast.loading(dryRun ? 'Calcul des pré-réservations…' : 'Pré-affectation des stands en cours…');
+    try {
+      const r = await api('/api/admin/auto-preaffect-stands', {
+        method: 'POST',
+        body: JSON.stringify({ dry_run: dryRun }),
+      });
+      toast.dismiss(tid);
+      setPreaffectStats(r.stats);
+      toast.success(r.message || `${r.stats.total_preassigned} pré-réservés · ${r.stats.total_waitlist} liste d'attente`);
+    } catch (e) { toast.dismiss(tid); toast.error(e.message); }
+    setBusy(false);
+  };
+
   return (
     <Card className="border-2 border-red-300 bg-gradient-to-br from-red-50 to-orange-50">
       <CardHeader>
@@ -71,6 +87,34 @@ function FusionMasterImport() {
           <Button onClick={runApply} disabled={busy} className="bg-red-600 hover:bg-red-700 text-white gap-2">
             <AlertTriangle className="w-4 h-4" /> Wipe & Reload — IMPORT RÉEL
           </Button>
+        </div>
+
+        {/* 🆕 Bouton Auto-Préaffectation des stands */}
+        <div className="border-t border-red-200 pt-3">
+          <div className="text-xs font-semibold text-red-900 mb-1">🎯 Étape 2 — Pré-affecter les stands selon le site choisi</div>
+          <div className="text-[11px] text-red-700 mb-2">Pour chaque venue, assigne un stand jusqu&apos;à atteindre sa capacité (priorité : Confirmé &gt; Relance · Fidèle &gt; Régulier &gt; Ponctuel). Le surplus est mis en liste d&apos;attente.</div>
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={() => runPreaffect(true)} disabled={busy} variant="outline" size="sm" className="gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
+              <Eye className="w-4 h-4" /> Aperçu pré-affectation
+            </Button>
+            <Button onClick={() => runPreaffect(false)} disabled={busy} size="sm" className="bg-orange-600 hover:bg-orange-700 text-white gap-2">
+              <RefreshCw className="w-4 h-4" /> Lancer la pré-affectation
+            </Button>
+          </div>
+          {preaffectStats && (
+            <div className="mt-3 bg-white rounded-md border border-orange-200 p-2 text-xs">
+              <div className="font-bold text-orange-900 mb-1">🎯 {preaffectStats.total_preassigned} stands pré-réservés · {preaffectStats.total_waitlist} en liste d&apos;attente</div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                {Object.entries(preaffectStats.by_venue || {}).map(([v, st]) => (
+                  <div key={v} className="border rounded p-1.5">
+                    <div className="font-semibold text-slate-800">{v.replace('venue-', '').toUpperCase()}</div>
+                    <div className="text-[10px] text-slate-500">cap. {st.capacity} · {st.regs_count} demandes</div>
+                    <div className="text-[10px]"><span className="text-emerald-700 font-semibold">{st.preaffected}</span> pré-réservés · <span className="text-amber-700 font-semibold">{st.waitlisted}</span> waitlist</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {preview && (
