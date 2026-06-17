@@ -189,8 +189,9 @@ function Bloc1Sites({ allSites, activeRegId, availableVenues, allVenues, venuesA
           })}
         </ul>
 
-        {/* Ajouter un site */}
-        {canAddMore && (
+        {/* 🆕 SESSION 53.7 — RULE 6 : "Ajouter un site" désactivé côté exposant.
+            Seul ARACOM (cockpit admin) peut ajouter/retirer un site. */}
+        {false && canAddMore && (
           <details className="mt-2">
             <summary className="text-xs font-semibold text-aracom-orange cursor-pointer hover:underline inline-flex items-center gap-1">
               <Plus className="w-3 h-3" /> Ajouter un site ({3 - sorted.length} restant{3 - sorted.length > 1 ? 's' : ''})
@@ -314,16 +315,9 @@ function Bloc3Stand({ registration, venue, venueAvailability, onPickStand, onRel
                     : r.status === 'a_confirmer' ? '⏳ En attente de validation ARACOM'
                     : '🟧 Pré-réservé'}
                 </div>
+                {/* 🆕 SESSION 53.7 — RULE 6 : Le stand est attribué par ARACOM, l'exposant ne peut plus le libérer */}
+                <div className="text-[10px] text-slate-500 mt-1 italic">L&apos;attribution du stand est gérée par ARACOM. Contactez-nous si besoin d&apos;un changement.</div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onReleaseStand}
-                disabled={busy || r.status === 'confirme'}
-                className="h-7 text-[10px] gap-1 text-red-700 border-red-300 hover:bg-red-50"
-              >
-                Libérer
-              </Button>
             </div>
           </div>
         )}
@@ -339,38 +333,17 @@ function Bloc3Stand({ registration, venue, venueAvailability, onPickStand, onRel
           </div>
         )}
 
-        {/* Cas 3 — Site complet, proposer waitlist */}
-        {!hasStand && !isWaitlist && isFull && (
-          <button
-            onClick={onJoinWaitlist}
-            disabled={busy}
-            className="w-full rounded-lg border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 px-3 py-3 flex items-center justify-between gap-2 transition disabled:opacity-50"
-          >
-            <div className="text-left">
-              <div className="font-bold text-sm text-amber-900">Rejoindre la liste d&apos;attente</div>
-              <div className="text-[11px] text-amber-800">{waitlistCount} inscrit{waitlistCount > 1 ? 's' : ''} actuellement</div>
+        {/* 🆕 SESSION 53.7 — RULE 6 : Pas de Cas 3/4 cliquables.
+            Si l'exposant n'a pas de stand et n'est pas en waitlist, c'est qu'ARACOM doit l'affecter.
+            On affiche un message informatif sans CTA de réservation. */}
+        {!hasStand && !isWaitlist && (
+          <div className="rounded-lg border-2 border-slate-200 bg-slate-50 p-3 flex items-center gap-2 flex-wrap">
+            <Clock className="w-4 h-4 text-slate-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-sm text-slate-700">Stand en cours d&apos;attribution par ARACOM</div>
+              <div className="text-[10.5px] text-slate-600">Vous serez notifié dès qu&apos;un stand vous sera attribué sur {venue?.name || 'votre site'}.</div>
             </div>
-            <span className="text-amber-900 font-bold flex items-center gap-1">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-            </span>
-          </button>
-        )}
-
-        {/* Cas 4 — Stands libres : CTA unique */}
-        {!hasStand && !isWaitlist && !isFull && (
-          <button
-            onClick={onPickStand}
-            disabled={busy}
-            className="w-full rounded-lg border-2 border-emerald-400 bg-emerald-50 hover:bg-emerald-100 px-3 py-3 flex items-center justify-between gap-2 transition disabled:opacity-50"
-          >
-            <div className="text-left">
-              <div className="font-bold text-base text-emerald-900">{free} stand{free > 1 ? 's' : ''} libre{free > 1 ? 's' : ''} — Réserver un stand</div>
-              <div className="text-[11px] text-emerald-800">Sélectionnez votre emplacement sur le plan ↓</div>
-            </div>
-            <span className="text-emerald-900 font-bold flex items-center gap-1">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-            </span>
-          </button>
+          </div>
         )}
       </CardContent>
     </Card>
