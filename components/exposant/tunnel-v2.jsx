@@ -893,37 +893,62 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
           ))}
         </div>
 
-        {/* Bouton soumettre */}
-        {/* 🆕 SESSION 53.8 — RULE 6 : bouton ACTIF tant que pas validé par ARACOM.
-            Chaque nouvelle soumission écrase la précédente pour ce site. */}
+        {/* Bouton soumettre — 🆕 SESSION 53.7 RULE 6 : Toujours TRÈS VISIBLE et coloré
+            même quand incomplet. Clic sur bouton incomplet → toast listant ce qui manque.
+            Tant qu'ARACOM n'a pas verrouillé, l'exposant peut re-soumettre autant qu'il veut. */}
         {isSubmitted && !isLocked && (
           <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 mb-2">
-            ⏳ Candidature soumise à ARACOM (vous pouvez la modifier et la re-soumettre tant qu&apos;elle n&apos;est pas validée).
+            ⏳ Candidature soumise à ARACOM (vous pouvez la modifier et la <b>re-soumettre</b> tant qu&apos;elle n&apos;est pas validée).
           </div>
         )}
         {isLocked && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 mb-2">
-            🔒 Candidature validée par ARACOM. Vos modifications sont verrouillées.
+            🔒 Candidature validée par ARACOM. Vos modifications sont verrouillées (les documents restent uploadables).
           </div>
         )}
 
         <div className="relative group">
           <Button
             size="lg"
-            onClick={onSubmit}
-            disabled={!canSubmit || isSubmitting || isLocked}
-            className={`w-full h-11 text-sm font-bold gap-2 ${
-              canSubmit && !isLocked
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                : 'bg-slate-300 text-slate-500 cursor-not-allowed'
+            onClick={() => {
+              if (isLocked) return;
+              if (!canSubmit) {
+                // Toast avec liste explicite de ce qui manque
+                toast.error(`⚠️ Il vous reste à compléter avant de ${isSubmitted ? 're-soumettre' : 'soumettre'} :\n• ${missingList.join('\n• ')}`, { duration: 6000 });
+                // Scroll vers la 1re étape manquante (mapping kind → data-section)
+                const firstMissing = checks.find(c => !c.ok);
+                if (firstMissing?.kind) {
+                  const KIND_MAP = { 'anim': 'planning', 'doc': 'submit' };
+                  const sectionKey = KIND_MAP[firstMissing.kind] || firstMissing.kind;
+                  const el = document.querySelector(`[data-section="${sectionKey}"]`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+              }
+              onSubmit();
+            }}
+            disabled={isSubmitting || isLocked}
+            className={`w-full h-12 text-sm font-bold gap-2 transition-all ${
+              isLocked
+                ? 'bg-emerald-600/80 text-white cursor-not-allowed'
+                : canSubmit
+                  ? (isSubmitted
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white shadow-lg ring-2 ring-blue-300/40 animate-pulse'
+                      : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-lg ring-2 ring-emerald-300/40')
+                  : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-md opacity-90'
             }`}
-            title={!canSubmit && missingList?.length ? `Il manque :\n• ${missingList.join('\n• ')}` : ''}
+            title={!canSubmit && missingList?.length ? `Cliquez pour voir ce qui manque` : ''}
+            data-testid="submit-candidature-btn"
           >
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {isLocked ? 'Candidature validée' : (isSubmitted ? 'Re-soumettre (écrase la précédente)' : 'Soumettre ma candidature')}
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (isLocked ? <Lock className="w-4 h-4" /> : <Send className="w-4 h-4" />)}
+            {isLocked
+              ? 'Candidature validée par ARACOM'
+              : (isSubmitted
+                  ? (canSubmit ? '✅ Re-soumettre ma candidature (écrase la précédente)' : `⚠️ Compléter avant re-soumission (${missingList.length} élément${missingList.length > 1 ? 's' : ''})`)
+                  : (canSubmit ? '🚀 Soumettre ma candidature à ARACOM' : `⚠️ Cliquez pour voir ce qui manque (${missingList.length} élément${missingList.length > 1 ? 's' : ''})`))}
           </Button>
 
-          {/* Tooltip natif visible si grisé */}
+          {/* Liste détaillée des éléments manquants */}
           {!canSubmit && missingList?.length > 0 && (
             <div className="mt-2 rounded-md border-2 border-amber-300 bg-amber-50/80 px-3 py-2">
               <div className="text-[11px] font-bold text-amber-900 mb-1 flex items-center gap-1">
@@ -941,6 +966,11 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
           {canSubmit && !isSubmitted && (
             <div className="mt-2 rounded-md border-2 border-emerald-300 bg-emerald-50/60 px-3 py-2 text-[11px] text-emerald-900 flex items-center gap-1.5">
               <Sparkles className="w-3 h-3" /> <span className="font-semibold">Tout est prêt !</span> Vous pouvez soumettre votre candidature.
+            </div>
+          )}
+          {canSubmit && isSubmitted && !isLocked && (
+            <div className="mt-2 rounded-md border-2 border-blue-300 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-900 flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3" /> <span className="font-semibold">Modifications détectées</span> — cliquez pour re-soumettre (écrase la précédente demande).
             </div>
           )}
         </div>
