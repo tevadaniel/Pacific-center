@@ -281,67 +281,201 @@ function Bloc2Days({ days, onChangeDays, isLocked, busy }) {
 }
 
 // =======================================================
-// BLOC 3 — Stand (priorité UX maximale : CTA unique)
+// BLOC 3 — Stand (sélection libre + plan visuel cliquable)
+// 🆕 SESSION 53.5 — RULE 6 révisée : l'exposant CHOISIT/CHANGE son stand
+//   tant que ARACOM n'a pas verrouillé. Si pris → bascule waitlist.
 // =======================================================
-function Bloc3Stand({ registration, venue, venueAvailability, onPickStand, onReleaseStand, onJoinWaitlist, busy }) {
+function Bloc3Stand({ registration, venue, venueAvailability, onRefresh, onPickStand, onReleaseStand, onJoinWaitlist, busy }) {
   const r = registration || {};
   const av = venueAvailability || {};
-  const free = av.available_stands ?? 0;
-  const isFull = !!av.capacity_full || free <= 0;
-  const waitlistCount = av.waitlist_count || 0;
   const hasStand = !!r.stand_code;
   const isWaitlist = !!r.is_waitlist || r.status === 'liste_attente';
+  const isLocked = !!r.candidature_locked || !!r.is_locked || r.status === 'confirme';
+
+  const [showPlan, setShowPlan] = useState(false);
+  const [stands, setStands] = useState([]);
+  const [loadingStands, setLoadingStands] = useState(false);
+  const [picking, setPicking] = useState(null); // stand_id en cours de réservation
+
+  const loadStands = async () => {
+    if (!venue?.id) return;
+    setLoadingStands(true);
+    try {
+      const data = await api(`/api/venues/${venue.id}/stands`);
+      setStands(Array.isArray(data) ? data : []);
+    } catch { setStands([]); }
+    finally { setLoadingStands(false); }
+  };
+
+  // Charge automatiquement les stands à l'ouverture
+  useEffect(() => {
+    if (showPlan && stands.length === 0) loadStands();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPlan]);
+
+  const pickStand = async (stand, forceWaitlist = false) => {
+    if (isLocked) {
+      toast.error('🔒 Votre candidature est verrouillée par ARACOM. Contactez-nous.');
+      return;
+    }
+    const isOwn = stand.assignment?.registration_id === r.id;
+    if (isOwn) { toast.info('Vous êtes déjà sur ce stand.'); return; }
+    const isTaken = stand.assignment && stand.assignment.request_status === 'pending' && !isOwn;
+    if (isTaken && !forceWaitlist) {
+      const ok = window.confirm(`Le stand ${stand.stand_code} est déjà pré-réservé par un autre exposant.\n\nVoulez-vous vous mettre en LISTE D'ATTENTE sur ce stand (position ${(stand.assignment?.waitlist_position || 0) + 1}/3) ?`);
+      if (!ok) return;
+      return pickStand(stand, true);
+    }
+    if (hasStand && r.stand_code !== stand.stand_code) {
+      const ok = window.confirm(`Changer votre stand de ${r.stand_code} vers ${stand.stand_code} ?\n\nL'ancien stand sera libéré et un exposant en liste d'attente pourra y être promu automatiquement.`);
+      if (!ok) return;
+    }
+    setPicking(stand.id);
+    try {
+      const res = await api(`/api/registrations/${r.id}/pre-reserve-stand`, {
+        method: 'POST',
+        body: JSON.stringify({ stand_id: stand.id, force_waitlist: forceWaitlist }),
+      });
+      if (res.conflict && res.waitlist_full) {
+        toast.error(res.message || 'Liste d\'attente complète sur ce stand');
+      } else if (res.conflict && !forceWaitlist) {
+        // Should not happen because we handled above, but just in case
+        const ok = window.confirm(res.message || 'Conflit. Se mettre en liste d\'attente ?');
+        if (ok) return pickStand(stand, true);
+      } else if (res.ok) {
+        if (res.request_status === 'waitlist') {
+          toast.success(`📋 Vous êtes en liste d'attente sur le stand ${stand.stand_code} (position ${res.waitlist_position}/3)`);
+        } else {
+          toast.success(`✅ Stand ${stand.stand_code} pré-réservé !`);
+        }
+        setShowPlan(false);
+        await onRefreshCb?.();
+      }
+    } catch (e) {
+      toast.error(e.message || 'Erreur de réservation');
+    } finally {
+      setPicking(null);
+    }
+  };
+
+  // Groupe les stands par zone pour un affichage clair
+  const standsByZone = useMemo(() => {
+    const groups = {};
+    for (const s of stands) {
+      const z = s.zone || s.zone_name || 'Zone non définie';
+      (groups[z] = groups[z] || []).push(s);
+    }
+    // Trie chaque zone par stand_code
+    for (const z in groups) groups[z].sort((a, b) => (a.stand_code || '').localeCompare(b.stand_code || '', 'fr', { numeric: true }));
+    return groups;
+  }, [stands]);
+
+  const onRefreshCb = onRefresh || onPickStand; // refresh callback fallback
 
   return (
     <Card data-section="stand" className="border-orange-300">
       <CardContent className="p-3 md:p-4">
-        <header className="flex items-center gap-2 mb-2">
+        <header className="flex items-center gap-2 mb-2 flex-wrap">
           <span className="w-7 h-7 rounded-full bg-orange-600 text-white flex items-center justify-center text-xs font-bold">3</span>
           <h3 className="font-bold text-base text-slate-900">Mon stand</h3>
-          {hasStand && <Badge className="bg-emerald-600 text-white border-emerald-700 text-[10px] ml-auto">✓ Verrouillé</Badge>}
+          {hasStand && !isWaitlist && <Badge className="bg-emerald-600 text-white border-emerald-700 text-[10px]">✓ Pré-réservé</Badge>}
+          {isWaitlist && <Badge className="bg-amber-500 text-white border-amber-600 text-[10px]">📋 Liste d&apos;attente</Badge>}
+          {isLocked && <Badge className="bg-slate-600 text-white border-slate-700 text-[10px] ml-auto"><Lock className="w-3 h-3 inline mr-0.5" />Verrouillé ARACOM</Badge>}
         </header>
 
-        {/* Cas 1 — Stand déjà attribué */}
-        {hasStand && (
-          <div className="rounded-lg border-2 border-emerald-400 bg-emerald-50 p-3">
+        {/* État courant */}
+        {hasStand && !isWaitlist && (
+          <div className="rounded-lg border-2 border-emerald-400 bg-emerald-50 p-3 mb-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <Lock className="w-4 h-4 text-emerald-700" />
+              <Lock className="w-4 h-4 text-emerald-700 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="font-bold text-base text-emerald-900">
-                  Stand {r.stand_code} — réservé ✓
-                </div>
-                <div className="text-[11px] text-emerald-800">
-                  {r.status === 'confirme' ? '✅ Validé par ARACOM'
-                    : r.status === 'a_confirmer' ? '⏳ En attente de validation ARACOM'
-                    : '🟧 Pré-réservé'}
-                </div>
-                {/* 🆕 SESSION 53.7 — RULE 6 : Le stand est attribué par ARACOM, l'exposant ne peut plus le libérer */}
-                <div className="text-[10px] text-slate-500 mt-1 italic">L&apos;attribution du stand est gérée par ARACOM. Contactez-nous si besoin d&apos;un changement.</div>
+                <div className="font-bold text-base text-emerald-900">Stand {r.stand_code} — pré-réservé sur {venue?.name}</div>
+                <div className="text-[11px] text-emerald-800">{r.status === 'confirme' ? '✅ Validé par ARACOM' : r.status === 'a_confirmer' ? '⏳ En attente de validation ARACOM' : '🟧 Pré-réservé'}</div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Cas 2 — Waitlist active */}
-        {!hasStand && isWaitlist && (
-          <div className="rounded-lg border-2 border-amber-400 bg-amber-50 p-3 flex items-center gap-2 flex-wrap">
+        {isWaitlist && (
+          <div className="rounded-lg border-2 border-amber-400 bg-amber-50 p-3 mb-2 flex items-center gap-2 flex-wrap">
             <Clock className="w-4 h-4 text-amber-700 shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="font-bold text-sm text-amber-900">En liste d&apos;attente sur {venue?.name || '—'}</div>
-              <div className="text-[10.5px] text-amber-800">ARACOM vous contactera dès qu&apos;un stand se libère.</div>
+              <div className="text-[10.5px] text-amber-800">Vous serez promu automatiquement dès qu&apos;un stand se libère. Vous pouvez aussi essayer de choisir un autre stand ci-dessous.</div>
             </div>
           </div>
         )}
 
-        {/* 🆕 SESSION 53.7 — RULE 6 : Pas de Cas 3/4 cliquables.
-            Si l'exposant n'a pas de stand et n'est pas en waitlist, c'est qu'ARACOM doit l'affecter.
-            On affiche un message informatif sans CTA de réservation. */}
         {!hasStand && !isWaitlist && (
-          <div className="rounded-lg border-2 border-slate-200 bg-slate-50 p-3 flex items-center gap-2 flex-wrap">
-            <Clock className="w-4 h-4 text-slate-500 shrink-0" />
+          <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-3 mb-2 flex items-center gap-2 flex-wrap">
+            <MapPin className="w-4 h-4 text-blue-700 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-sm text-slate-700">Stand en cours d&apos;attribution par ARACOM</div>
-              <div className="text-[10.5px] text-slate-600">Vous serez notifié dès qu&apos;un stand vous sera attribué sur {venue?.name || 'votre site'}.</div>
+              <div className="font-bold text-sm text-blue-900">Choisissez votre stand sur {venue?.name || 'votre site'}</div>
+              <div className="text-[10.5px] text-blue-800">Cliquez sur un stand libre ci-dessous. ARACOM se réserve le droit de réaffecter en fonction des besoins logistiques.</div>
+            </div>
+          </div>
+        )}
+
+        {/* CTA Ouverture du plan des stands */}
+        {!isLocked && (
+          <Button
+            size="sm"
+            variant={showPlan ? 'outline' : 'default'}
+            onClick={() => setShowPlan(s => !s)}
+            className={`gap-1 text-xs h-8 ${showPlan ? 'border-slate-300 text-slate-700' : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white'}`}
+            data-testid="toggle-stand-plan"
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            {showPlan ? 'Fermer le plan' : hasStand ? 'Changer de stand' : 'Voir les stands disponibles'}
+          </Button>
+        )}
+
+        {/* Plan des stands */}
+        {showPlan && !isLocked && (
+          <div className="mt-3 border border-slate-200 rounded-lg p-2 bg-slate-50 max-h-[420px] overflow-y-auto">
+            {loadingStands && <div className="text-center py-6 text-xs text-slate-500"><Loader2 className="w-4 h-4 animate-spin inline mr-1" />Chargement des stands…</div>}
+            {!loadingStands && stands.length === 0 && <div className="text-center py-6 text-xs text-slate-500">Aucun stand disponible sur ce site.</div>}
+            {!loadingStands && Object.keys(standsByZone).sort().map(zone => (
+              <div key={zone} className="mb-3 last:mb-0">
+                <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1.5 sticky top-0 bg-slate-50 py-1">{zone} <span className="font-normal text-slate-500">({standsByZone[zone].length})</span></div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                  {standsByZone[zone].map(s => {
+                    const isOwn = s.assignment?.registration_id === r.id;
+                    const isFree = !s.assignment || s.assignment.request_status === 'waitlist';
+                    const isTaken = s.assignment?.request_status === 'pending' || s.assignment?.request_status === 'validated';
+                    const isInactive = s.is_active === false;
+                    const waitlistCnt = isTaken ? (s.assignment?.waitlist_position ? 1 : 0) : 0; // approximation
+                    let bgClass = 'bg-white hover:bg-slate-50 border-slate-300';
+                    let label = 'Libre';
+                    let textClass = 'text-slate-700';
+                    if (isInactive) { bgClass = 'bg-slate-200 border-slate-300 cursor-not-allowed opacity-50'; label = 'Inactif'; textClass = 'text-slate-500'; }
+                    else if (isOwn) { bgClass = 'bg-emerald-100 hover:bg-emerald-200 border-emerald-500 ring-2 ring-emerald-400'; label = '✓ Votre stand'; textClass = 'text-emerald-800'; }
+                    else if (isTaken) { bgClass = 'bg-rose-50 hover:bg-rose-100 border-rose-300'; label = 'Occupé'; textClass = 'text-rose-700'; }
+                    else if (isFree) { bgClass = 'bg-green-50 hover:bg-green-100 border-green-400 cursor-pointer'; label = 'Libre'; textClass = 'text-green-800'; }
+                    return (
+                      <button
+                        key={s.id}
+                        disabled={isInactive || picking === s.id}
+                        onClick={() => pickStand(s)}
+                        className={`text-left border rounded-md p-1.5 transition ${bgClass} ${textClass}`}
+                        title={isTaken ? `Stand ${s.stand_code} — occupé. Cliquer pour rejoindre la liste d'attente.` : isOwn ? 'Votre stand actuel' : isFree ? `Cliquer pour pré-réserver le stand ${s.stand_code}` : ''}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-bold text-xs font-mono">{s.stand_code}</span>
+                          {picking === s.id && <Loader2 className="w-3 h-3 animate-spin" />}
+                        </div>
+                        <div className="text-[9.5px] mt-0.5 opacity-80">{label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <div className="mt-2 text-[10px] text-slate-500 flex flex-wrap gap-2 pt-2 border-t border-slate-200">
+              <span><span className="inline-block w-2 h-2 bg-green-400 rounded-sm mr-1"></span>Libre</span>
+              <span><span className="inline-block w-2 h-2 bg-emerald-400 rounded-sm mr-1"></span>Votre stand</span>
+              <span><span className="inline-block w-2 h-2 bg-rose-300 rounded-sm mr-1"></span>Occupé (rejoignable en liste d&apos;attente)</span>
+              <span><span className="inline-block w-2 h-2 bg-slate-300 rounded-sm mr-1"></span>Inactif</span>
             </div>
           </div>
         )}
@@ -1060,6 +1194,7 @@ export default function TunnelV2({
         registration={r}
         venue={venue}
         venueAvailability={venueAvailability}
+        onRefresh={onRefresh}
         onPickStand={onOpenStandPicker}
         onReleaseStand={releaseStand}
         onJoinWaitlist={joinWaitlist}

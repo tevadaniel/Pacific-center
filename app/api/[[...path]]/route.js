@@ -9934,12 +9934,21 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
     }
 
     // ---- Exposant : pré-réservation d'un stand (atomique) ----
+    // 🆕 SESSION 53.5 — RULE 6 révisée : l'exposant PEUT choisir/changer son stand
+    //   tant que la candidature n'est pas verrouillée par ARACOM (candidature_locked=true).
+    //   Si le stand convoité est déjà pris par un autre exposant → bascule en liste d'attente sur ce stand
+    //   ou bien sur le site (force_waitlist=true).
+    //   Le changement de stand libère automatiquement l'ancien (status='libre' + auto-rebalance).
     if (route.match(/^registrations\/[^/]+\/pre-reserve-stand$/)) {
       const regId = p[1];
       const { stand_id, force_waitlist } = body;
       if (!stand_id) return err('stand_id requis', 400);
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
+      // 🆕 SESSION 53.5 — Bloque si candidature verrouillée par ARACOM
+      if (reg.candidature_locked || reg.is_locked || reg.status === 'confirme') {
+        return err('Votre candidature est verrouillée par ARACOM. Contactez-nous pour modifier votre stand.', 400);
+      }
       const stand = await db.collection('venue_stands').findOne({ id: stand_id });
       if (!stand) return err('Stand introuvable', 404);
       // 🆕 SESSION 47.15 — Détection de conflit + workflow waitlist
@@ -9989,6 +9998,10 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       // Détermine le request_status
       const newRequestStatus = (hasActiveOwner || force_waitlist) ? 'waitlist' : 'pending';
       const waitlistPosition = newRequestStatus === 'waitlist' ? waitlistCount + 1 : null;
+      // Déterminer si l'exposant changeait de stand (sauvegarder l'ancien)
+      const oldStandCode = reg.stand_code;
+      const oldVenueId = reg.venue_id;
+      const isChangingStand = oldStandCode && (oldStandCode !== stand.stand_code || oldVenueId !== stand.venue_id);
       // Update registration : assign venue + stand
       const upd = {
         venue_id: stand.venue_id,
@@ -10020,7 +10033,31 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
         created_at: new Date(),
         updated_at: new Date(),
       });
-      await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id, request_status: newRequestStatus, waitlist_position: waitlistPosition });
+      // 🆕 SESSION 53.5 — Sync statuts venue_stands :
+      //   1) Marquer le nouveau stand comme 'reserved' (si pas waitlist)
+      //   2) Marquer l'ancien stand comme 'libre' SI l'exposant changeait + aucun autre owner actif
+      if (newRequestStatus === 'pending') {
+        await db.collection('venue_stands').updateOne({ id: stand.id }, { $set: { status: 'reserved', updated_at: new Date() } });
+      }
+      if (isChangingStand) {
+        const oldStandDoc = await db.collection('venue_stands').findOne({ venue_id: oldVenueId, stand_code: oldStandCode });
+        if (oldStandDoc) {
+          const stillOwned = await db.collection('stand_assignments').findOne({
+            venue_stand_id: oldStandDoc.id,
+            status: { $nin: ['annule', 'cancelled'] },
+            request_status: 'pending',
+          });
+          if (!stillOwned) {
+            await db.collection('venue_stands').updateOne({ id: oldStandDoc.id }, { $set: { status: 'libre', updated_at: new Date() } });
+            // Auto-rebalance pour ancien venue (libère un waitlister sur l'ancien site)
+            try {
+              const rb = await rebalanceVenueWaitlist(db, oldVenueId, getUserContext(request).userId || 'system_auto');
+              if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${oldVenueId} (stand change)`);
+            } catch (e) { console.error('[auto-rebalance] pre-reserve-stand error:', e?.message); }
+          }
+        }
+      }
+      await logActivity(db, getUserContext(request).userId, 'registrations', regId, 'update', null, { event: 'pre_reserve_stand', stand_code: stand.stand_code, venue_id: stand.venue_id, request_status: newRequestStatus, waitlist_position: waitlistPosition, old_stand_code: oldStandCode });
       return json({ ok: true, stand_code: stand.stand_code, status: upd.status, request_status: newRequestStatus, waitlist_position: waitlistPosition });
     }
 
