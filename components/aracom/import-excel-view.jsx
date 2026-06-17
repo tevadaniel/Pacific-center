@@ -52,11 +52,14 @@ function FusionMasterImport() {
     <Card className="border-2 border-red-300 bg-gradient-to-br from-red-50 to-orange-50">
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2 text-red-900">
-          🚨 IMPORT FUSION 2026 (destructif — base BDD Fusion master)
+          🚨 IMPORT LISTING EXPOSANTS 2026 (destructif — base à jour)
         </CardTitle>
         <p className="text-xs text-red-800 mt-1">
-          Source : <code className="bg-white px-1 rounded">/app/data-imports/forum-fusion-2026.xlsx</code> · Sheet : <b>📋 BASE EXPOSANTS</b> (72 historiques 2019-2025).
-          <br/>Wipe complet puis recréation des organisations + registrations « à confirmer » + comptes exposants. La feuille Prospection 2026 est <b>ignorée</b>.
+          Source : <code className="bg-white px-1 rounded">/app/data-imports/listing-exposants.xlsx</code> · Sheet : <b>📋 BASE EXPOSANTS (2)</b> (84 exposants à jour).
+          <br/>Wipe complet puis recréation des organisations + registrations selon le statut 2026 du fichier :
+          <br/>• <b>Confirmé</b> → status <code className="bg-white px-1 rounded">a_confirmer</code> (verbalement OK, dossier à finaliser)
+          <br/>• <b>Relance</b> → status <code className="bg-white px-1 rounded">a_relancer</code> (campagne mailing à faire)
+          <br/>• Site précis (Faa&apos;a / Punaauia / Arue / Taravao) → venue pré-affecté · <b>Multi-sites</b> → venue vide (au choix)
           <br/>Conservés : comptes admin, sites/venues, templates RIB/convention/guide.
         </p>
       </CardHeader>
