@@ -602,6 +602,111 @@ async function logActivity(db, userId, entity_type, entity_id, action_type, old_
   });
 }
 
+// ============ HELPER : REBALANCE WAITLIST (auto-promotion) ============
+// 🆕 SESSION 53 — Extrait en helper réutilisable pour permettre l'auto-déclenchement
+//   après chaque événement qui libère ou ajoute de la capacité :
+//   - création d'un nouveau stand
+//   - activation d'un site (set-availability ON)
+//   - libération d'un stand (release-stand / assign-stand avec stand_code=null)
+//   - annulation/archivage d'un exposant pré-réservé
+//
+// Promeut les exposants en liste d'attente vers pré-réservé dès qu'un stand devient libre.
+// Tri : status (a_confirmer > a_relancer) · org.priority_level (fidele > standard) · created_at asc
+// Retourne { promoted, capacity, free_before, waitlist_before, promotions[] }
+async function rebalanceVenueWaitlist(db, venueId, ctxUserId = 'system_auto') {
+  if (!venueId) return { promoted: 0, skipped: true };
+  const venue = await db.collection('venues').findOne({ id: venueId });
+  if (!venue) return { promoted: 0, skipped: true, reason: 'venue_not_found' };
+
+  // Stands libres pour ce venue (status 'libre' ou non défini)
+  const allStands = await db.collection('venue_stands')
+    .find({ venue_id: venueId, is_active: { $ne: false } })
+    .sort({ stand_code: 1 })
+    .toArray();
+  const freeStands = allStands.filter(s => !s.status || s.status === 'libre');
+
+  // Regs en waitlist pour ce venue
+  const waitRegs = await db.collection('registrations').find({
+    venue_id: venueId,
+    is_waitlist: true,
+    status: 'liste_attente',
+  }).toArray();
+
+  if (freeStands.length === 0 || waitRegs.length === 0) {
+    return { promoted: 0, capacity: allStands.length, free_before: freeStands.length, waitlist_before: waitRegs.length, promotions: [] };
+  }
+
+  // Trie par priorité (Confirmé > Relance · Fidèle > standard · created_at asc)
+  const orgIds = [...new Set(waitRegs.map(r => r.organization_id))];
+  const orgs = await db.collection('organizations').find({ id: { $in: orgIds } }).toArray();
+  const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+  const STATUS_ORDER = { 'a_confirmer': 0, 'a_relancer': 1 };
+  const PRIO_ORDER = { 'fidele': 0, 'standard': 1, 'prospect': 2 };
+  waitRegs.sort((a, b) => {
+    const oa = orgById[a.organization_id];
+    const ob = orgById[b.organization_id];
+    const sa = STATUS_ORDER[a.status] ?? 9;
+    const sb = STATUS_ORDER[b.status] ?? 9;
+    if (sa !== sb) return sa - sb;
+    const pa = PRIO_ORDER[oa?.priority_level] ?? 9;
+    const pb = PRIO_ORDER[ob?.priority_level] ?? 9;
+    if (pa !== pb) return pa - pb;
+    return (a.created_at || 0) - (b.created_at || 0);
+  });
+
+  const stats = { capacity: allStands.length, free_before: freeStands.length, waitlist_before: waitRegs.length, promoted: 0 };
+  const now = new Date();
+  const promotions = [];
+  const N = Math.min(freeStands.length, waitRegs.length);
+  for (let i = 0; i < N; i++) {
+    const reg = waitRegs[i];
+    const stand = freeStands[i];
+    await db.collection('registrations').updateOne({ id: reg.id }, {
+      $set: {
+        stand_code: stand.stand_code,
+        is_pre_reserved: true,
+        is_waitlist: false,
+        status: 'a_confirmer',
+        pre_reserved_at: now,
+        updated_at: now,
+      },
+    });
+    await db.collection('venue_stands').updateOne({ id: stand.id }, {
+      $set: { status: 'reserved', updated_at: now },
+    });
+    await db.collection('stand_assignments').updateMany(
+      { registration_id: reg.id, status: { $nin: ['annule', 'cancelled'] } },
+      { $set: { status: 'annule', request_status: 'annule', updated_at: now } }
+    );
+    await db.collection('stand_assignments').insertOne({
+      id: uuid(),
+      registration_id: reg.id,
+      venue_stand_id: stand.id,
+      stand_code: stand.stand_code,
+      status: 'pre_reserve',
+      request_status: 'pending',
+      request_submitted_at: now,
+      waitlist_position: null,
+      validated_at: null,
+      validated_by: null,
+      refused_reason: null,
+      created_at: now,
+      updated_at: now,
+    });
+    const org = orgById[reg.organization_id];
+    promotions.push({ reg_id: reg.id, org_name: org?.name, stand_code: stand.stand_code });
+    stats.promoted += 1;
+  }
+
+  stats.promotions = promotions;
+  if (stats.promoted > 0) {
+    try {
+      await logActivity(db, ctxUserId, 'venue', venueId, 'rebalance_waitlist_auto', null, stats);
+    } catch {/* non bloquant */}
+  }
+  return stats;
+}
+
 // ---------- SEED ----------
 async function doSeed(force = false) {
   const db = await getDb();
@@ -7376,6 +7481,17 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       if (stand_code !== undefined) upd.stand_code = stand_code; // null OK = detach
       await db.collection('registrations').updateOne({ id: regId }, { $set: upd });
       await logActivity(db, ctx.userId, 'registration', regId, stand_code === null ? 'stand_detach' : 'stand_assign', null, { venue_stand_id, stand_code });
+      // 🆕 SESSION 53 — Auto-rebalance si stand libéré (detach)
+      if (stand_code === null) {
+        const reg = await db.collection('registrations').findOne({ id: regId });
+        const targetVenueId = venue_id === undefined ? reg?.venue_id : venue_id;
+        if (targetVenueId) {
+          try {
+            const rb = await rebalanceVenueWaitlist(db, targetVenueId, ctx.userId || 'system_auto');
+            if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${targetVenueId} (stand_detach)`);
+          } catch (e) { console.error('[auto-rebalance] assign-stand detach error:', e?.message); }
+        }
+      }
       return json({ ok: true });
     }
 
@@ -7636,6 +7752,11 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       };
       await db.collection('venue_stands').insertOne(stand);
       if (venue) await db.collection('venues').updateOne({ id: venue_id }, { $set: { capacity_stands: (venue.capacity_stands || 0) + 1 } });
+      // 🆕 SESSION 53 — Auto-rebalance : nouveau stand libre → promouvoir un waitlister
+      try {
+        const rb = await rebalanceVenueWaitlist(db, venue_id, ctx.userId || 'system_auto');
+        if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${venue_id} (création de stand)`);
+      } catch (e) { console.error('[auto-rebalance] stand-create error:', e?.message); }
       delete stand._id;
       return json(stand, 201);
     }
@@ -8087,6 +8208,13 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
         updated_at: new Date(),
       };
       await db.collection('venues').updateOne({ id }, { $set: upd });
+      // 🆕 SESSION 53 — Auto-rebalance : activer un site peut libérer des stands → promouvoir des waitlisters
+      if (newVal === true) {
+        try {
+          const rb = await rebalanceVenueWaitlist(db, id, ctx.userId || 'system_auto');
+          if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${id} (activation site)`);
+        } catch (e) { console.error('[auto-rebalance] set-availability error:', e?.message); }
+      }
       return json({ ok: true, is_available_2026: newVal, synced: newVal });
     }
 
@@ -8313,6 +8441,22 @@ ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-le
       };
       await db.collection('registrations').updateOne({ id: regId }, { $set: cancelPatch });
       await logActivity(db, ctx.userId, 'registration', regId, 'cancel_reservation', reg, { ...cancelPatch, _deleted_animations: deletedAnims, _freed_stand: oldStand });
+
+      // 🆕 SESSION 53 — Marquer le stand libéré comme 'libre' + auto-rebalance
+      if (oldStand && oldVenueId) {
+        try {
+          await db.collection('venue_stands').updateOne(
+            { venue_id: oldVenueId, stand_code: oldStand },
+            { $set: { status: 'libre', updated_at: new Date() } }
+          );
+        } catch (e) { console.error('[cancel-free-stand-mark]', e.message); }
+      }
+      if (oldVenueId) {
+        try {
+          const rb = await rebalanceVenueWaitlist(db, oldVenueId, ctx.userId || 'system_auto');
+          if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${oldVenueId} (cancel_reservation)`);
+        } catch (e) { console.error('[auto-rebalance] cancel error:', e?.message); }
+      }
 
       // 4) Notifie l'exposant (sauf si notify=false explicite)
       let mailSent = false;
@@ -9882,6 +10026,8 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
       if (reg.status === 'confirme') return err('Impossible de libérer un stand confirmé. Contactez ARACOM.', 400);
+      const oldStandCode = reg.stand_code;
+      const oldVenueId = reg.venue_id;
       await db.collection('registrations').updateOne({ id: regId }, { $set: {
         stand_code: null,
         is_pre_reserved: false,
@@ -9890,6 +10036,18 @@ ${reason ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding
       } });
       // Cancel any active stand_assignments for this registration
       await db.collection('stand_assignments').updateMany({ registration_id: regId, status: { $ne: 'annule' } }, { $set: { status: 'annule', updated_at: new Date() } });
+      // Marquer le stand comme libre
+      if (oldStandCode && oldVenueId) {
+        await db.collection('venue_stands').updateOne(
+          { venue_id: oldVenueId, stand_code: oldStandCode },
+          { $set: { status: 'libre', updated_at: new Date() } }
+        );
+      }
+      // 🆕 SESSION 53 — Auto-rebalance : stand libéré → promouvoir un waitlister
+      try {
+        const rb = await rebalanceVenueWaitlist(db, oldVenueId, ctx.userId || 'system_auto');
+        if (rb.promoted > 0) console.log(`[auto-rebalance] +${rb.promoted} promu(s) sur venue ${oldVenueId} (release-stand)`);
+      } catch (e) { console.error('[auto-rebalance] release-stand error:', e?.message); }
       return json({ ok: true });
     }
 
@@ -11211,6 +11369,34 @@ Retourne UNIQUEMENT le JSON { "subject": "...", "body_html": "..." }.`;
       stats.venue_elements_removed = ve.deletedCount;
       await logActivity(db, ctx.userId, 'system', 'reset', 'reset_db', null, stats);
       return json({ ok: true, message: 'Base de données réinitialisée — vous pouvez tester en mode propre', stats });
+    }
+
+    // ============ TOOL : REBALANCE WAITLIST POUR UN SITE (capacité changée) ============
+    // Promeut les exposants en waitlist vers pré-réservé dès qu'un stand devient libre.
+    // - Priorité : status (a_confirmer > a_relancer) · org.priority_level (fidele > standard) · pre_reserved_priority asc · created_at asc
+    // - À appeler après : ajout d'un stand, libération manuelle, désactivation/réactivation d'un stand
+    // - 🆕 SESSION 53 : déclenché AUSSI en automatique depuis les endpoints qui modifient la capacité
+    if (route.match(/^admin\/venues\/[^/]+\/rebalance$/)) {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const venueId = route.split('/')[2];
+      const venue = await db.collection('venues').findOne({ id: venueId });
+      if (!venue) return err('Site introuvable', 404);
+      const stats = await rebalanceVenueWaitlist(db, venueId, ctx.userId || 'u-admin');
+      return json({ ok: true, stats, message: `✅ ${stats.promoted} exposant(s) promu(s) de la liste d'attente vers pré-réservé sur ${venue.name}` });
+    }
+
+    // 🆕 SESSION 53 — Rééquilibrage GLOBAL (tous sites en un clic)
+    if (route === 'admin/rebalance-all-waitlists') {
+      if (ctx.role !== 'aracom_admin') return err('Accès admin requis', 403);
+      const venues = await db.collection('venues').find({ is_active: { $ne: false }, is_available_2026: { $ne: false } }).toArray();
+      const all = [];
+      let totalPromoted = 0;
+      for (const v of venues) {
+        const s = await rebalanceVenueWaitlist(db, v.id, ctx.userId || 'u-admin');
+        totalPromoted += s.promoted || 0;
+        all.push({ venue_id: v.id, venue_name: v.name, ...s });
+      }
+      return json({ ok: true, total_promoted: totalPromoted, sites: all, message: `✅ ${totalPromoted} exposant(s) promu(s) au total sur ${venues.length} sites` });
     }
 
     // ============ TOOL : GESTION DES SITES D'UNE ORGANISATION (édition multi-sites) ============

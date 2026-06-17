@@ -1832,6 +1832,43 @@ function SitesView() {
     } catch (e) { toast.error(e.message); }
   };
 
+  // 🆕 SESSION 53 — Rééquilibrage manuel global des listes d'attente (tous sites)
+  const [rebalancing, setRebalancing] = useState(false);
+  const rebalanceAll = async () => {
+    if (!confirm("Promouvoir automatiquement les exposants en liste d'attente vers les stands libres ?\n\nCette action s'applique à TOUS les sites. Elle est aussi déclenchée automatiquement lors d'une libération de stand ou de l'ajout d'un nouveau stand.")) return;
+    setRebalancing(true);
+    try {
+      const res = await api('/api/admin/rebalance-all-waitlists', { method: 'POST', body: JSON.stringify({}) });
+      if (res.total_promoted > 0) {
+        const details = res.sites.filter(s => s.promoted > 0).map(s => `• ${s.venue_name} : +${s.promoted}`).join('\n');
+        toast.success(`✅ ${res.total_promoted} exposant(s) promu(s) au total\n${details}`, { duration: 6000 });
+      } else {
+        toast.info("ℹ️ Aucun rééquilibrage nécessaire (pas de stand libre ou aucune liste d'attente).");
+      }
+      api('/api/venues').then(setVenues);
+      api('/api/registrations').then(setRegs);
+      if (selected) api(`/api/venues/${selected}/stands`).then(setStands);
+    } catch (e) { toast.error(e.message); }
+    finally { setRebalancing(false); }
+  };
+
+  const rebalanceVenue = async (v) => {
+    setRebalancing(true);
+    try {
+      const res = await api(`/api/admin/venues/${v.id}/rebalance`, { method: 'POST', body: JSON.stringify({}) });
+      if (res.stats?.promoted > 0) {
+        const names = (res.stats.promotions || []).map(p => `• ${p.org_name} → ${p.stand_code}`).join('\n');
+        toast.success(`✅ ${res.stats.promoted} exposant(s) promu(s) sur ${v.name}\n${names}`, { duration: 6000 });
+      } else {
+        toast.info(`ℹ️ Aucun rééquilibrage nécessaire sur ${v.name}`);
+      }
+      api('/api/venues').then(setVenues);
+      api('/api/registrations').then(setRegs);
+      if (selected === v.id) api(`/api/venues/${v.id}/stands`).then(setStands);
+    } catch (e) { toast.error(e.message); }
+    finally { setRebalancing(false); }
+  };
+
   // 🆕 SESSION 48i — Toggle vue plan pour les exposants (par site)
   const toggleMapView = async (v) => {
     const newVal = !(v.map_view_enabled !== false);
@@ -1866,6 +1903,26 @@ function SitesView() {
           </div>
           {/* 🆕 Config : Limite max de sites par exposant */}
           <ExposantLimitsConfig />
+          {/* 🆕 SESSION 53 — Rééquilibrage auto + bouton global */}
+          <div className="mb-3 p-2.5 rounded-md border border-amber-200 bg-amber-50/60 flex items-start gap-3">
+            <div className="text-2xl">⚖️</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-amber-900">Listes d&apos;attente — promotion automatique</div>
+              <div className="text-[11px] text-amber-800 mt-0.5">
+                Les exposants en liste d&apos;attente sont promus <b>automatiquement</b> vers les stands libres dès qu&apos;un stand est ajouté, libéré ou qu&apos;une réservation est annulée. Vous pouvez aussi déclencher un rééquilibrage manuel.
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-300 text-amber-900 hover:bg-amber-100 shrink-0"
+              onClick={rebalanceAll}
+              disabled={rebalancing}
+              data-testid="rebalance-all-waitlists"
+            >
+              {rebalancing ? '⏳ Rééquilibrage…' : '⚖️ Rééquilibrer maintenant'}
+            </Button>
+          </div>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
             {venues.map(v => {
               const active = v.is_available_2026 !== false;
