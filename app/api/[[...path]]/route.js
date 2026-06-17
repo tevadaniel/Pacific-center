@@ -4169,10 +4169,15 @@ export async function POST(request, { params }) {
       const reg = await db.collection('registrations').findOne({ id: regId });
       if (!reg) return err('Inscription introuvable', 404);
       const now = new Date();
+      // 🆕 SESSION 53.4 RULE 8 : Validation ARACOM verrouille la candidature_locked
+      //   (l'exposant ne peut plus modifier dates/animations/zones — le bouton Soumettre devient inactif).
+      //   Les uploads de documents restent libres (Rule 8 explicite).
       await db.collection('registrations').updateOne(
         { id: regId },
         { $set: {
             status: 'confirme',
+            candidature_locked: true,
+            candidature_locked_at: now,
             locked_at: now,
             locked_by: ctx.userId || 'u-admin',
             updated_at: now,
@@ -9590,13 +9595,12 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
         created_at: new Date(),
         updated_at: new Date(),
       });
-      // Update registration flag + 🔒 Verrouillage de la candidature
-      // (l'exposant ne peut plus modifier son site/stand/animations tant qu'ARACOM ne débloque pas)
+      // Update registration flag — 🆕 SESSION 53.4 RULE 6 : NE PAS verrouiller candidature_locked sur submit.
+      //   L'exposant doit pouvoir re-soumettre (overwrite) jusqu'à ce que ARACOM valide définitivement.
+      //   Le verrouillage est désormais effectué uniquement par l'admin via POST /api/admin/registrations/:id/validate.
       await db.collection('registrations').updateOne({ id: regId }, { $set: {
         validation_request_id: reqId,
         validation_requested_at: new Date(),
-        candidature_locked: true,
-        candidature_locked_at: new Date(),
         updated_at: new Date(),
       } });
 

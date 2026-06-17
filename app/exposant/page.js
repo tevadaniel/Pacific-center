@@ -1244,9 +1244,9 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, allVenues = [
                       → Travailler sur ce site
                     </Button>
                   )}
-                  {/* 🆕 SESSION 35 — Soumettre ce site : bloqué si site incomplet (toast clair) */}
-                  {/* 🆕 SESSION 47.15 — Label dynamique selon mode liste d'attente */}
-                  {!isLocked && !valReq && (
+                  {/* 🆕 SESSION 53.4 RULE 6 : Bouton "Soumettre / Re-soumettre" reste ACTIF tant qu'ARACOM n'a pas verrouillé.
+                       Chaque nouvelle soumission écrase la précédente. Disparaît uniquement quand isLocked = true. */}
+                  {!isLocked && (
                     <Button
                       size="sm"
                       onClick={() => {
@@ -1262,11 +1262,14 @@ function MultiSitesPanel({ allSites, currentRegId, organizationId, allVenues = [
                       }}
                       disabled={busySubmit === s.id}
                       className={`text-xs gap-1 h-8 ${canSubmit && (!isMultiSite || allSites.some(x => x.is_user_priority))
-                        ? (s.is_waitlist ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white' : 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white')
+                        ? (s.is_waitlist ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white' : (valReq ? 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white' : 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white'))
                         : 'bg-slate-300 text-slate-600 cursor-not-allowed hover:bg-slate-300'}`}
+                      title={valReq ? 'Re-soumettre écrase votre précédente demande tant qu\'elle n\'est pas validée.' : 'Soumettre votre candidature à ARACOM.'}
                     >
                       {busySubmit === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
-                      {s.is_waitlist ? 'Soumettre la demande sur la liste d\'attente' : 'Soumettre ce site'}
+                      {s.is_waitlist
+                        ? (valReq ? 'Re-soumettre (liste d\'attente)' : 'Soumettre la demande sur la liste d\'attente')
+                        : (valReq ? 'Re-soumettre (écrase la précédente)' : 'Soumettre ce site')}
                     </Button>
                   )}
                   {!isLocked && !valReq && allSites.length > 1 && (
@@ -1554,13 +1557,19 @@ function Step3Card({ registration, docs, validationRequest, isLocked, unlocked, 
       <CardContent className="pt-4 space-y-4">
         <DocsBlockExposant registrationId={registration.id} docs={docs} onRefresh={onRefresh} />
 
-        {/* Bouton de soumission */}
-        {!validationRequest && !isLocked && (
+        {/* 🆕 SESSION 53.4 RULE 6 : Bouton de soumission RESTE ACTIF tant qu'ARACOM n'a pas validé.
+            Chaque clic écrase la précédente demande. Disparaît uniquement quand isLocked = true. */}
+        {!isLocked && (
           <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 border-2 border-violet-300 rounded-lg p-5">
             <div className="flex items-start gap-3">
               <Send className="w-6 h-6 text-violet-600 shrink-0 mt-1" />
               <div className="flex-1">
-                <h4 className="font-bold text-violet-900">Prêt à soumettre votre demande ?</h4>
+                <h4 className="font-bold text-violet-900">{validationRequest ? 'Re-soumettre ma demande à ARACOM' : 'Prêt à soumettre votre demande ?'}</h4>
+                {validationRequest && (
+                  <p className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-md p-2 mt-2">
+                    ⏳ Demande déjà soumise (statut : <b>{validationRequest.status}</b>). Vous pouvez la modifier et la <b>re-soumettre</b> pour écraser la précédente tant qu&apos;ARACOM ne l&apos;a pas validée.
+                  </p>
+                )}
                 <p className="text-sm text-violet-800 mt-1">
                   Une fois soumise, ARACOM vous fixera un <b>rendez-vous</b> pour récupérer :
                 </p>
@@ -1570,11 +1579,16 @@ function Step3Card({ registration, docs, validationRequest, isLocked, unlocked, 
                   <li>Caution de <b>20 000 XPF</b> en chèque (à l&apos;ordre d&apos;ARACOM)</li>
                 </ul>
                 <p className="text-xs text-violet-700 mt-2">Une fois le rendez-vous honoré, votre stand sera <b>définitivement verrouillé</b> et vous recevrez un email de confirmation avec le guide de l&apos;exposant.</p>
-                <Button onClick={submitValidation} disabled={submitting} className="mt-3 bg-violet-600 hover:bg-violet-700 gap-2">
-                  <Send className="w-4 h-4" /> {submitting ? 'Envoi en cours…' : 'Soumettre ma demande à ARACOM'}
+                <Button onClick={submitValidation} disabled={submitting} className={`mt-3 gap-2 ${validationRequest ? 'bg-blue-600 hover:bg-blue-700' : 'bg-violet-600 hover:bg-violet-700'}`}>
+                  <Send className="w-4 h-4" /> {submitting ? 'Envoi en cours…' : (validationRequest ? 'Re-soumettre (écrase la précédente)' : 'Soumettre ma demande à ARACOM')}
                 </Button>
               </div>
             </div>
+          </div>
+        )}
+        {isLocked && (
+          <div className="rounded-md border-2 border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            🔒 Candidature validée par ARACOM. Vos modifications sont verrouillées (mais vous pouvez toujours déposer des documents complémentaires ci-dessus).
           </div>
         )}
       </CardContent>

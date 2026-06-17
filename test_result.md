@@ -3948,3 +3948,37 @@ agent_communication:
 agent_communication:
   - agent: "testing"
     message: "SESSION 53.3 — AUTO-REBALANCE WAITLIST TESTING COMPLETE. Tested 10 critical scenarios covering manual rebalance endpoints and auto-trigger on stand creation. RESULTS: 10/10 TESTS PASSED (100% SUCCESS RATE). MANUAL ENDPOINTS: ✅ POST /api/admin/rebalance-all-waitlists with admin returns correct structure with 4 active sites (Faaa, Punaauia, Arue, Taravao). Mahina and Moorea correctly excluded (disabled). Each site has all required fields (venue_id, venue_name, promoted, capacity, free_before, waitlist_before, promotions). ✅ Without admin role correctly returns 403 'Accès admin requis'. ✅ POST /api/admin/venues/:venueId/rebalance with admin returns correct stats structure. ✅ With non-existent venue returns 404 'Site introuvable'. ✅ Without admin role returns 403. AUTO-TRIGGER: ✅ Stand creation (POST /api/venue-stands) automatically triggers rebalance. Created stand P-AUTO-TEST-1781728145 on Punaauia (12 waitlisters, 0 free stands). Auto-rebalance promoted 1 waitlister: waitlist 12 → 11. Stand status='reserved' with assignment. Promoted registration verified: stand_code set, is_waitlist=false, is_pre_reserved=true, status='a_confirmer'. IDEMPOTENCE: ✅ Calling rebalance twice returns promoted=0 on second call (no duplicates). REGRESSIONS: ✅ All dashboard endpoints working (kpis, by-site). ✅ GET /api/venues returns all 6 sites for admin. ✅ GET /api/registrations returns 84 registrations. CRITICAL FINDINGS: (1) All manual rebalance endpoints working perfectly with correct permissions. (2) Auto-trigger on stand creation working perfectly. (3) Idempotency verified. (4) No regressions detected. RECOMMENDATION: Feature is 100% READY. Main agent should summarize and finish. NOTE: Only tested auto-trigger #1 (stand creation). Auto-triggers #2-5 (site activation, release-stand, assign-stand detach, cancel-reservation) not tested due to complexity and risk of data corruption. These should be tested manually or in a separate session with proper cleanup."
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SESSION 53.4 — Rule 6/8 Backend Changes (Validation Re-submission Workflow)
+# ═════════════════════════════════════════════════════════════════════════
+
+backend:
+  - task: "SESSION 53.4 — Rule 6/8: Validation request re-submission workflow"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js (lines 9541-9661, 4160-4206, 1781)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTÉ EXHAUSTIVEMENT - 4/4 TESTS PASSÉS (100%). SESSION 53.4 Rule 6/8 backend changes testés avec succès. RULE 6 (Re-submission allowed): ✅ POST /api/registrations/:id/request-validation does NOT set candidature_locked=true (line 9598-9605). Exposant can re-submit multiple times (overwriting previous validation_request). First submission creates validation_request with status='en_attente', candidature_locked remains false/null. Second submission creates NEW validation_request_id, previous one set to status='annulee'. Verified: candidature_locked=null after submission, validation_request_id updated, previous request cancelled. RULE 8 (Admin validate locks): ✅ POST /api/admin/registrations/:id/validate NOW sets candidature_locked=true + candidature_locked_at + locked_at + status='confirme' (lines 4172-4186). After admin validate: candidature_locked=true, candidature_locked_at set, locked_at set, status='confirme'. Re-submission correctly blocked with 400 'Inscription déjà confirmée'. my-sites endpoint: can_submit=false after admin validate. DISCREPANCY FOUND (can_submit field): ⚠️ Current code (line 1781): can_submit = isComplete && !valReq && !candidature_locked && !is_locked. OBSERVED: can_submit becomes FALSE immediately when validation_request is created. BUSINESS RULE: can_submit should remain TRUE to allow re-submission (as long as candidature_locked=false). RECOMMENDATION: Remove !valReq condition from can_submit calculation. SUGGESTED FIX: can_submit = isComplete && !candidature_locked && !is_locked. This discrepancy does NOT break the re-submission workflow (exposant can still call POST request-validation), but the UI button 'Soumettre ce site' becomes disabled after first submission (UX issue). REGRESSION: ✅ All dashboard endpoints working (kpis, by-site, rebalance-all-waitlists). CONCLUSION: Rule 6 and Rule 8 backend logic 100% functional. Re-submission workflow works perfectly. Admin validate correctly locks candidature. Minor UX issue with can_submit field (UI button disabled after first submission, but API still accepts re-submission)."
+
+agent_communication:
+  - agent: "testing"
+    message: "SESSION 53.4 — RULE 6/8 BACKEND TEST COMPLETE. Tested validation request re-submission workflow changes. RESULTS: 4/4 tests passed (100% success rate). RULE 6 VERIFIED: ✅ POST /api/registrations/:id/request-validation does NOT set candidature_locked=true. Exposant can re-submit multiple times (overwriting previous). First submission: validation_request_id created, candidature_locked=null. Second submission: NEW validation_request_id, previous one status='annulee'. RULE 8 VERIFIED: ✅ POST /api/admin/registrations/:id/validate NOW sets candidature_locked=true + candidature_locked_at + locked_at + status='confirme'. After admin validate: all fields correctly set, re-submission blocked with 400, my-sites can_submit=false. CRITICAL FINDING (MINOR UX ISSUE): ⚠️ can_submit field calculation (line 1781) includes !valReq condition, causing can_submit to become FALSE immediately after first submission. BUSINESS RULE says: can_submit should remain TRUE to allow re-submission (as long as candidature_locked=false). IMPACT: UI button 'Soumettre ce site' becomes disabled after first submission, but API still accepts re-submission (workflow not broken, just UX issue). RECOMMENDATION: Update line 1781 from 'can_submit: isComplete && !valReq && !candidature_locked && !is_locked' to 'can_submit: isComplete && !candidature_locked && !is_locked'. REGRESSION: ✅ All dashboard endpoints working. CONCLUSION: Rule 6/8 backend logic 100% functional. Re-submission workflow works perfectly. Admin validate correctly locks candidature. Main agent should fix can_submit calculation for better UX, then summarize and finish."
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+metadata:
+  created_by: "testing_agent"
+  version: "1.0"
+  test_sequence: 54
+  run_ui: false
