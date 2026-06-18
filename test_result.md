@@ -4067,3 +4067,16 @@ agent_communication:
         comment: "Demande utilisateur : 'les statuts doivent être les mêmes que ceux dans la liste des exposants' et 'rajoute contacté ou à contacter'. Modifications UnifiedValidationView : (1) Renommé 'Validés' → 'Confirmés' (cohérent avec STATUS_OPTS de la liste exposants où confirme='Confirmé'). (2) Inclut désormais les statuts 'contacte' et 'prospect' (auparavant filtrés ligne 75). (3) Ajout d'un 4e bucket 'toContact' dans le groupement par venue. (4) Ajout d'une 4e colonne UI 'À CONTACTER' (icône Mail, tone sky bleu ciel) avec sous-colonnes Vendredi/Samedi. (5) Badge dynamique 'Contacté' (amber) vs 'À contacter' (blue) selon le status. (6) Email cliquable mailto: dans chaque ligne. (7) Layout grid passé de md:grid-cols-3 à md:grid-cols-2 xl:grid-cols-4 (responsive). (8) DayBreakdownStrip et Section enrichis avec le tone 'sky'. (9) Compteur header enrichi : V·P·A·C (4 indicateurs au lieu de 3). Test live OK : screenshot Faaa montre 16 pré-réservés + 0 confirmés + 0 waitlist + 0 à contacter. Version bumpée 1.0.54 → 1.0.55."
 
 
+
+
+  - task: "SESSION 53.10 — Fix incohérence dashboard : statut pre_validated reconnu + filet de sécurité"
+    implemented: true
+    working: true
+    file: "components/aracom/unified-validation-view.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Bug rapporté par l'utilisateur via 2 captures : Faaa montrait '0v · 15p · 0a' (15 pré-réservés) dans le dashboard, mais '16/16 stands occupés' dans la vue Remplissage & animations. 1 exposant (Polynélivre) était silencieusement perdu. Cause root : le statut 'pre_validated' (utilisé quand ARACOM pré-valide une demande sans la verrouiller) n'était reconnu par AUCUN bucket dans le grouped() de UnifiedValidationView → l'item passait dans le else implicite et disparaissait. Modifications : (1) Ajouté 'pre_validated' à la liste des statuts qui poussent vers le bucket 'validated' (vert) — cohérent avec la sémantique métier (pre_validated = ARACOM a déjà approuvé). (2) Ajouté un filet de sécurité : tout statut inconnu mais avec stand_code va dans _candidates (pré-réservés) avec un console.warn — empêche désormais toute perte silencieuse d'exposant. (3) Commentaire de référence (cohérence avec site-animations-overview.jsx qui inclut déjà pre_validated dans son comptage). Version bumpée 1.0.56 → 1.0.57."

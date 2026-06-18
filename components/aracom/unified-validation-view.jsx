@@ -82,6 +82,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
           //   Sinon valReq.status (validated/confirme/refused) a TOUJOURS priorité.
           // 🆕 SESSION 52e FIX — ex_pre_reserved demotés → 'liste_attente' (cohérent avec is_waitlist=true en DB)
           //   tri en fin de liste assuré par swap_demoted_at (cf. ligne ~182)
+          // 🆕 SESSION 53.10 — Si valReq est en pre_validated, on conserve ce statut pour le bucket VALIDÉES
           const valStatusInFlight = ['en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer', 'waitlist', 'liste_attente'].includes(valReq.status);
           let effectiveStatus = valReq.status;
           if (valStatusInFlight) {
@@ -169,7 +170,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         : dayFilter === 'both' ? (daysAttended.includes('vendredi') && daysAttended.includes('samedi'))
         : true;
       if (!matchesDay) continue;
-      if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille') {
+      // 🆕 SESSION 53.10 — Statuts de validation explicites (cohérent avec site-animations-overview)
+      //   validated / confirme / locked / verrouille / pre_validated → VALIDÉES (vert)
+      //   Sans ce ajout, les pré-validés étaient silencieusement perdus (cause du décalage "1 place restante" vs "16/16").
+      if (r.status === 'validated' || r.status === 'confirme' || r.status === 'locked' || r.status === 'verrouille' || r.status === 'pre_validated') {
         out[v].validated.push(r);
       } else if (
         r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe' ||
@@ -177,6 +181,13 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
         r.status === 'waitlist'
       ) {
         out[v]._candidates.push(r);
+      } else {
+        // 🆕 SESSION 53.10 — Filet de sécurité : tout statut inconnu mais avec stand_code → _candidates
+        //   pour éviter de "perdre" un exposant comme c'est arrivé avec pre_validated.
+        if (r.stand_code) {
+          console.warn('[UnifiedValidationView] Statut inconnu, fallback _candidates :', r.status, r.id);
+          out[v]._candidates.push(r);
+        }
       }
     }
     // 🆕 SESSION 48ac — Ventilation FIFO (premier arrivé, premier servi) :
