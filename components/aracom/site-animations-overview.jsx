@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { MapPin, Sparkles, AlertTriangle, Users, ClipboardCheck } from 'lucide-react';
 import { ExposantLink } from './exposant-panel-context';
+import { toast } from 'sonner';
 
 /**
  * 🆕 SESSION 45 — Vue d'ensemble + onglet par site du remplissage stand par jour
@@ -50,8 +51,8 @@ export default function SiteAnimationsOverview() {
     const m = new Map();
     for (const vr of validations) {
       if (!vr.venue_id) continue;
-      // Skip ceux qui sont déjà finalisés (verrouille / refused / cancelled)
-      if (['verrouille', 'refused', 'cancelled', 'annule'].includes(vr.status)) continue;
+      // 🆕 SESSION 53.11 — Filtre tous les statuts finaux (annule + annulee + variants)
+      if (['verrouille', 'refused', 'cancelled', 'annule', 'annulee', 'refuse'].includes(vr.status)) continue;
       if (!m.has(vr.venue_id)) m.set(vr.venue_id, []);
       m.get(vr.venue_id).push(vr);
     }
@@ -343,7 +344,7 @@ export default function SiteAnimationsOverview() {
           {/* ───────── PER-SITE TABS ───────── */}
           {venueStats.map((s) => (
             <TabsContent key={s.id} value={s.id} className="mt-4 space-y-3">
-              <SiteDetailPanel site={s} />
+              <SiteDetailPanel site={s} onRefresh={load} />
             </TabsContent>
           ))}
         </Tabs>
@@ -370,7 +371,7 @@ function KpiMini({ label, value, sub, accent = 'blue' }) {
   );
 }
 
-function SiteDetailPanel({ site }) {
+function SiteDetailPanel({ site, onRefresh }) {
   const s = site;
   const fillPct = s.standsTotal ? Math.round((s.standsUsed / s.standsTotal) * 100) : 0;
   return (
@@ -416,7 +417,7 @@ function SiteDetailPanel({ site }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
                 {s.preValidated.map((vr, idx) => (
-                  <ValidationRow key={vr.id} vr={vr} rank={idx + 1} kind="prevalidated" />
+                  <ValidationRow key={vr.id} vr={vr} rank={idx + 1} kind="prevalidated" onRefresh={onRefresh} />
                 ))}
               </div>
             </div>
@@ -429,7 +430,7 @@ function SiteDetailPanel({ site }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
                 {s.waitlist.map((vr, idx) => (
-                  <ValidationRow key={vr.id} vr={vr} rank={s.standsTotal + idx + 1} kind="waitlist" />
+                  <ValidationRow key={vr.id} vr={vr} rank={s.standsTotal + idx + 1} kind="waitlist" onRefresh={onRefresh} />
                 ))}
               </div>
             </div>
@@ -552,7 +553,10 @@ function DayCard({ day, exposants, stand, demo }) {  const total = stand + demo;
 
 
 // 🆕 SESSION 45 — Ligne d'affichage d'une demande de validation (pré-validé ou liste d'attente)
-function ValidationRow({ vr, rank, kind }) {
+// 🆕 SESSION 53.11 — Actions admin inline (toast importé en tête de fichier)
+
+function ValidationRow({ vr, rank, kind, onRefresh }) {
+  const [busy, setBusy] = useState(null); // 'validate' | 'cancel' | 'unlock'
   const dateStr = vr.created_at ? new Date(vr.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
   const org = vr.organization || {};
   const orgName = org.name || vr.organization_name || '(sans nom)';
@@ -560,22 +564,90 @@ function ValidationRow({ vr, rank, kind }) {
   const styles = kind === 'prevalidated'
     ? 'border-emerald-200 bg-white hover:border-emerald-400'
     : 'border-amber-200 bg-amber-50/60 hover:border-amber-400';
+
+  const doAction = async (action, e) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (busy) return;
+    const regId = vr.registration_id;
+    if (!regId) { toast.error('Registration_id manquant'); return; }
+    if (action === 'validate') {
+      if (!confirm(`✅ Verrouiller définitivement la candidature de ${orgName} (stand ${standCode}) ?\n\nL'exposant ne pourra plus modifier ses dates/animations/stand.`)) return;
+      setBusy('validate');
+      try {
+        await api(`/api/admin/registrations/${regId}/validate`, { method: 'POST', body: JSON.stringify({}) });
+        toast.success(`✅ ${orgName} verrouillé`);
+        await onRefresh?.();
+      } catch (err) { toast.error(err.message || 'Erreur'); } finally { setBusy(null); }
+    } else if (action === 'unlock') {
+      if (!confirm(`🔓 Déverrouiller la candidature de ${orgName} pour permettre des modifications ?`)) return;
+      setBusy('unlock');
+      try {
+        await api(`/api/admin/registrations/${regId}/unlock-candidature`, { method: 'POST', body: JSON.stringify({}) });
+        toast.success(`🔓 ${orgName} déverrouillé`);
+        await onRefresh?.();
+      } catch (err) { toast.error(err.message || 'Erreur'); } finally { setBusy(null); }
+    } else if (action === 'cancel') {
+      const reason = prompt(`❌ Annuler la pré-réservation de ${orgName} ?\n\nRaison (optionnelle) :`, '');
+      if (reason === null) return;
+      setBusy('cancel');
+      try {
+        await api(`/api/admin/registrations/${regId}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
+        toast.success(`❌ ${orgName} annulé`);
+        await onRefresh?.();
+      } catch (err) { toast.error(err.message || 'Erreur'); } finally { setBusy(null); }
+    }
+  };
+
   return (
-    <ExposantLink
-      exposant={{ registration_id: vr.registration_id, organization_id: vr.organization_id, name: orgName }}
-      className={`text-xs text-slate-800 rounded px-2 py-1.5 border ${styles} transition flex items-center justify-between gap-2 cursor-pointer`}
-    >
-      <span className="flex items-center gap-1.5 min-w-0">
+    <div className={`text-xs text-slate-800 rounded px-2 py-1.5 border ${styles} transition flex items-center justify-between gap-2`}>
+      <ExposantLink
+        exposant={{ registration_id: vr.registration_id, organization_id: vr.organization_id, name: orgName }}
+        className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer hover:underline"
+      >
         <span className={`text-[9px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${kind === 'prevalidated' ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'}`}>
           {rank}
         </span>
         <span className="font-medium truncate">{orgName}</span>
-      </span>
-      <span className="text-[9px] text-slate-500 shrink-0 flex items-center gap-2">
+      </ExposantLink>
+      <span className="text-[9px] text-slate-500 shrink-0 flex items-center gap-1.5">
         <span className="font-mono">{standCode}</span>
-        <span>{dateStr}</span>
-        {kind === 'waitlist' && <span className="text-amber-700 font-bold">⏳</span>}
+        <span className="hidden md:inline">{dateStr}</span>
+        {kind === 'waitlist' && <span className="text-amber-700 font-bold" title="En attente de promotion">⏳</span>}
+        {/* 🆕 SESSION 53.11 — Actions admin inline */}
+        <div className="flex items-center gap-0.5 ml-1 border-l border-slate-300 pl-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => doAction('validate', e)}
+            disabled={!!busy}
+            className="h-5 w-5 p-0 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
+            title="Verrouiller définitivement la candidature"
+          >
+            {busy === 'validate' ? '⏳' : '✓'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => doAction('unlock', e)}
+            disabled={!!busy}
+            className="h-5 w-5 p-0 text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+            title="Déverrouiller la candidature (re-permettre les modifications)"
+          >
+            {busy === 'unlock' ? '⏳' : '🔓'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => doAction('cancel', e)}
+            disabled={!!busy}
+            className="h-5 w-5 p-0 text-red-600 hover:bg-red-100 hover:text-red-700"
+            title="Annuler la pré-réservation"
+          >
+            {busy === 'cancel' ? '⏳' : '✕'}
+          </Button>
+        </div>
       </span>
-    </ExposantLink>
+    </div>
   );
 }
