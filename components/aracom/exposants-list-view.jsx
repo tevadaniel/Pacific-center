@@ -243,10 +243,11 @@ export default function ExposantsListView() {
   };
 
   // 📊 Métriques
+  // 🆕 SESSION 53.10 — Compte aussi pre_validated et verrouille comme "confirmé" pour cohérence
   const metrics = useMemo(() => {
     const m = { total: rows.length, contacte: 0, confirme: 0, annule: 0, liste_attente: 0 };
     for (const r of rows) {
-      if (r.status === 'confirme') m.confirme++;
+      if (['confirme', 'verrouille', 'pre_validated'].includes(r.status)) m.confirme++;
       else if (r.status === 'annule') m.annule++;
       else if (r.status === 'liste_attente') m.liste_attente++;
       else m.contacte++;

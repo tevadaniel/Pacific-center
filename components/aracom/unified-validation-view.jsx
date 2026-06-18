@@ -967,7 +967,8 @@ function GlobalFillingDashboard({ venues, requests }) {
   // Capacité totale = somme des capacity_stands de TOUS les sites visibles
   const totalCapacity = (venues || []).reduce((sum, v) => sum + (v.capacity_stands || 0), 0);
   // Pour chaque jour, on compte les exposants validés + pré-réservés (= "réservant un stand pour ce jour")
-  const ACTIVE_STATUSES = ['validated', 'confirme', 'locked', 'verrouille', 'en_attente', 'pending', 'rdv_fixe', 'a_confirmer'];
+  // 🆕 SESSION 53.10 — ACTIVE_STATUSES inclut désormais pre_validated et a_relancer pour cohérence avec grouped()
+  const ACTIVE_STATUSES = ['validated', 'confirme', 'locked', 'verrouille', 'pre_validated', 'en_attente', 'pending', 'rdv_fixe', 'a_confirmer', 'a_relancer'];
   let venReserved = 0, samReserved = 0;
   let venOnly = 0, samOnly = 0, both = 0;
   for (const r of (requests || [])) {

@@ -968,7 +968,7 @@ export default function FicheExposantV2({ id, onClose }) {
                         venueId={reg.venue_id}
                         venueName={venue?.name}
                         currentStandCode={reg.stand_code}
-                        isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme'}
+                        isLocked={reg.is_locked || reg.candidature_locked || reg.status === 'confirme' || reg.status === 'verrouille' || reg.status === 'pre_validated'}
                         onReload={load}
                       />
                     </div>

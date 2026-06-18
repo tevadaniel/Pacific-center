@@ -1886,8 +1886,9 @@ export async function GET(request, { params }) {
           const hasReg = regs.find(r => r.id === vr.registration_id);
           if (!hasReg) items.push({ status: vr.status });
         }
+        // 🆕 SESSION 53.10 — Inclure pre_validated dans validatedCount (cohérence dashboard)
         const validatedCount = items.filter(i =>
-          i.status === 'validated' || i.status === 'confirme' || i.status === 'locked' || i.status === 'verrouille'
+          i.status === 'validated' || i.status === 'confirme' || i.status === 'locked' || i.status === 'verrouille' || i.status === 'pre_validated'
         ).length;
         // 🆕 SESSION 48ac — Logique métier : la liste d'attente n'existe que si le quota est atteint.
         //                  Tous les "candidats" (pré-réservés + waitlist) sont fusionnés ;
@@ -1945,7 +1946,8 @@ export async function GET(request, { params }) {
       //                    une registration avec un statut actif (a_confirmer, a_relancer, confirme, etc.).
       //                    Cela évite de filtrer trop les seed/imports légitimes.
       const activeValidations = await db.collection('validation_requests').find({
-        status: { $in: ['validated', 'confirme', 'locked', 'verrouille', 'pending', 'en_attente', 'a_confirmer', 'a_relancer', 'rdv_fixe'] }
+        // 🆕 SESSION 53.10 — pre_validated inclus (ARACOM a pré-approuvé)
+        status: { $in: ['validated', 'confirme', 'locked', 'verrouille', 'pre_validated', 'pending', 'en_attente', 'a_confirmer', 'a_relancer', 'rdv_fixe'] }
       }).toArray();
       const activeRegIds = new Set([
         ...activeValidations.map(v => v.registration_id),

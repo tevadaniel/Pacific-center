@@ -961,10 +961,12 @@ function FicheExposant({ id, onClose }) {
     const docs = data.documents || [];
     const slots = data.slots || [];
 
-    if (r.status === 'confirme' && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
+    // 🆕 SESSION 53.10 — Inclut verrouille + pre_validated dans "confirmé" pour cohérence
+    const isConfirmedStatus = ['confirme', 'verrouille', 'pre_validated'].includes(r.status);
+    if (isConfirmedStatus && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
       return { kind: 'done', label: '✅ Dossier complet et confirmé', tone: 'emerald' };
     }
-    if (r.status !== 'confirme' && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
+    if (!isConfirmedStatus && dep.status === 'recue' && r.is_insurance_uploaded && r.is_convention_signed) {
       return { kind: 'confirm', label: 'Tout est en règle — Confirmer l\'inscription', cta: 'Confirmer maintenant', tone: 'emerald', action: confirmReg };
     }
     if (!r.is_insurance_uploaded && docs.filter(d => d.document_type === 'attestation_assurance').length === 0) {
