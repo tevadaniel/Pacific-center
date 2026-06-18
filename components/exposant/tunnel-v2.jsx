@@ -14,7 +14,7 @@
  * Props : tout ce qu'il faut pour piloter les 5 blocs et soumettre la candidature active.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   MapPin, Clock, Calendar, Users, Star, ChevronUp, ChevronDown, Plus, Trash2,
   Check, AlertTriangle, Loader2, Lock, Sparkles, ArrowRight, Info, Send,
-  Tent, Sun,
+  Tent, Sun, Upload, Download, CloudUpload, FileText, Shield,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import StandViewToggle from '@/components/stand-view-toggle';
@@ -864,7 +864,143 @@ function Bloc4Animations({ registration, venueId, days, attendingDayTimes, slots
 // =======================================================
 // BLOC 5 — Documents + Soumission stricte
 // =======================================================
-function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, isSubmitting, onSubmit }) {
+// 🆕 SESSION 53.13 — Upload réel des documents directement depuis le tunnel exposant.
+//   Chaque doc requis (Convention / Attestation d'assurance) propose un drop-zone +
+//   bouton "Parcourir". Une fois uploadé, l'exposant peut télécharger, remplacer ou supprimer.
+function DocUploadRow({ check, regId, onRefresh, locked }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const doc = check.doc;
+  const hasFile = !!doc;
+  const docType = check.docType;
+  const Icon = docType === 'convention' ? FileText : Shield;
+  const iconBg = docType === 'convention' ? 'bg-indigo-500' : 'bg-cyan-500';
+
+  const upload = async (file) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error('Fichier trop volumineux (max 10 Mo)'); return; }
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const base64 = String(dataUrl).split(',')[1];
+      await api('/api/registration-documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          registration_id: regId,
+          document_type: docType,
+          category: docType,
+          file_name: file.name,
+          mime_type: file.type || 'application/octet-stream',
+          file_data: base64,
+          status: 'recu',
+        }),
+      });
+      toast.success(`✅ ${check.label} uploadé`);
+      onRefresh?.();
+    } catch (e) {
+      toast.error(e?.message || 'Erreur upload');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!doc?.id || !confirm('Supprimer ce document ?')) return;
+    try {
+      await api(`/api/registration-documents/${doc.id}`, { method: 'DELETE' });
+      toast.success('Document supprimé');
+      onRefresh?.();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const handleDownload = () => {
+    if (!doc?.id) return;
+    window.open(`/api/documents/${doc.id}/download`, '_blank');
+  };
+
+  const borderTone = hasFile
+    ? 'border-emerald-300 bg-emerald-50/60'
+    : 'border-amber-300 bg-amber-50/60';
+
+  return (
+    <div className={`rounded-lg border-2 ${borderTone} p-3`}>
+      <div className="flex items-start gap-2.5">
+        <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${iconBg}`}>
+          <Icon className="w-4 h-4 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-sm text-slate-900">{check.label}</span>
+              {hasFile ? (
+                <Badge className="text-[9px] h-4 px-1.5 bg-emerald-100 text-emerald-800 border-emerald-300">✓ Reçu</Badge>
+              ) : (
+                <Badge className="text-[9px] h-4 px-1.5 bg-amber-100 text-amber-800 border-amber-300">À fournir</Badge>
+              )}
+            </div>
+          </div>
+
+          {hasFile ? (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <span className="text-[11px] text-slate-700 truncate max-w-[220px] italic">📎 {doc.file_name}</span>
+              <Button size="sm" variant="outline" onClick={handleDownload} className="h-7 text-[10px] gap-1">
+                <Download className="w-3 h-3" /> Télécharger
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading || locked} className="h-7 text-[10px] gap-1">
+                {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Remplacer
+              </Button>
+              {!locked && (
+                <Button size="sm" variant="ghost" onClick={handleDelete} className="h-7 text-[10px] gap-1 text-red-600 hover:bg-red-50">
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div
+              className={`mt-2 rounded-md border-2 border-dashed text-center px-3 py-3 text-[11px] cursor-pointer transition ${
+                drag ? 'border-blue-500 bg-blue-50' : 'border-amber-300 hover:bg-amber-100/40'
+              }`}
+              onClick={() => !uploading && inputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDrag(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) upload(f);
+              }}
+            >
+              {uploading ? (
+                <span className="inline-flex items-center gap-1.5 text-slate-700"><Loader2 className="w-3 h-3 animate-spin" /> Upload en cours…</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-slate-700">
+                  <CloudUpload className="w-4 h-4 text-amber-600" />
+                  <span className="font-semibold">Glissez un fichier ici ou cliquez pour parcourir</span>
+                  <span className="text-slate-500">(PDF/JPG/PNG • 10 Mo max)</span>
+                </span>
+              )}
+            </div>
+          )}
+          <input
+            type="file"
+            ref={inputRef}
+            className="hidden"
+            accept=".pdf,.jpg,.jpeg,.png"
+            onChange={(e) => upload(e.target.files?.[0])}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, isSubmitting, onSubmit, regId, onRefresh }) {
   const docs = (checks || []).filter((c) => c.kind === 'doc');
 
   return (
@@ -875,21 +1011,16 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
           <h3 className="font-bold text-base text-slate-900">Documents & Soumission</h3>
         </header>
 
-        {/* Liste documents requis */}
-        <div className="space-y-1 mb-3">
+        {/* Liste documents requis avec UPLOAD réel */}
+        <div className="space-y-2 mb-3">
           {docs.map((d) => (
-            <div
-              key={d.label}
-              className={`rounded-md border px-2 py-1.5 text-xs flex items-center justify-between gap-2 ${
-                d.ok ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900' : 'border-amber-200 bg-amber-50/60 text-amber-900'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <span>{d.ok ? '✅' : '⚠️'}</span>
-                <span>{d.label}</span>
-              </span>
-              {!d.ok && <Badge className="bg-amber-500 text-white border-amber-600 text-[9px]">À fournir</Badge>}
-            </div>
+            d.isInfo ? (
+              <div key={d.label} className="rounded-md border border-blue-200 bg-blue-50/60 text-blue-900 px-2 py-1.5 text-xs">
+                {d.label}
+              </div>
+            ) : (
+              <DocUploadRow key={d.label} check={d} regId={regId} onRefresh={onRefresh} locked={false} />
+            )
           ))}
         </div>
 
@@ -1151,10 +1282,12 @@ export default function TunnelV2({
     if (days.includes(DAY_SAT)) list.push({ kind: 'anim', ok: animSam.length >= 1, label: 'Animation du samedi 15 août' });
     // Bloc 5 — Documents (en waitlist, optionnels jusqu'à promotion)
     if (!isWaitlist) {
-      const hasConv = !!r.is_convention_signed || (docs || []).some((d) => d.document_type === 'convention');
-      list.push({ kind: 'doc', ok: hasConv, label: 'Convention signée' });
-      const hasAss = (docs || []).some((d) => d.document_type === 'assurance') || !!r.is_insurance_uploaded;
-      list.push({ kind: 'doc', ok: hasAss, label: 'Attestation d\'assurance' });
+      const convDoc = (docs || []).find((d) => d.document_type === 'convention');
+      const hasConv = !!r.is_convention_signed || !!convDoc;
+      list.push({ kind: 'doc', ok: hasConv, label: 'Convention signée', docType: 'convention', doc: convDoc });
+      const assDoc = (docs || []).find((d) => d.document_type === 'assurance');
+      const hasAss = !!assDoc || !!r.is_insurance_uploaded;
+      list.push({ kind: 'doc', ok: hasAss, label: 'Attestation d\'assurance', docType: 'assurance', doc: assDoc });
     } else {
       list.push({ kind: 'doc', ok: true, label: '📄 Documents à fournir quand promu de la liste d\'attente', isInfo: true });
     }
@@ -1224,6 +1357,8 @@ export default function TunnelV2({
         isLocked={isLocked}
         isSubmitting={submitting}
         onSubmit={onSubmit}
+        regId={r.id}
+        onRefresh={onRefresh}
       />
     </div>
   );
