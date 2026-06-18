@@ -460,7 +460,7 @@ function SiteDetailPanel({ site, onRefresh }) {
             {s.noAnim.map((r) => (
               <ExposantLink
                 key={r.id}
-                exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization_name || '—' }}
+                exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization?.name || r.organization_name || '—' }}
                 className="text-xs text-slate-800 hover:text-rose-900 hover:bg-white rounded px-2 py-1 border border-rose-200 bg-white/70 transition flex items-center justify-between gap-2"
               >
                 <span className="truncate">
@@ -469,7 +469,7 @@ function SiteDetailPanel({ site, onRefresh }) {
                   {r.is_user_priority === true && (
                     <span className="text-amber-500 mr-0.5" title="L'exposant a marqué ce site comme prioritaire">⭐</span>
                   )}
-                  {r.organization_name || '(sans nom)'}
+                  {r.organization?.name || r.organization_name || '(sans nom)'}
                 </span>
                 <span className="text-[9px] text-slate-500 shrink-0">
                   {r.stand_code || '—'}
@@ -493,7 +493,7 @@ function SiteDetailPanel({ site, onRefresh }) {
             {s.regsList.map((r) => (
               <ExposantLink
                 key={r.id}
-                exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization_name || '—' }}
+                exposant={{ registration_id: r.id, organization_id: r.organization_id, name: r.organization?.name || r.organization_name || '—' }}
                 className="text-[11px] text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded px-2 py-1 transition flex items-center justify-between gap-2"
               >
                 <span className="truncate">
@@ -501,7 +501,7 @@ function SiteDetailPanel({ site, onRefresh }) {
                   {r.is_user_priority === true && (
                     <span className="text-amber-500 mr-0.5" title="L'exposant a marqué ce site comme prioritaire">⭐</span>
                   )}
-                  {r.organization_name || '(sans nom)'}
+                  {r.organization?.name || r.organization_name || '(sans nom)'}
                 </span>
                 <span className="text-[9px] text-slate-400 shrink-0">{r.stand_code || '—'}</span>
               </ExposantLink>
