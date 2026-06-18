@@ -44,9 +44,10 @@ export default function PacificCentersPage() {
         </Card>
 
         <Tabs defaultValue="synthese">
-          <TabsList className="w-full grid grid-cols-6">
+          <TabsList className="w-full grid grid-cols-7">
             <TabsTrigger value="synthese">Synthèse</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>
+            <TabsTrigger value="exposants">👥 Exposants</TabsTrigger>
             <TabsTrigger value="validations">📋 Validations & Attente</TabsTrigger>
             <TabsTrigger value="planning">Planning animations</TabsTrigger>
             <TabsTrigger value="prospection">🎯 Prospection</TabsTrigger>
@@ -54,6 +55,7 @@ export default function PacificCentersPage() {
           </TabsList>
           <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
           <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
+          <TabsContent value="exposants" className="space-y-6 mt-4"><ExposantsPacificView /></TabsContent>
           <TabsContent value="validations" className="space-y-6 mt-4"><PacificValidationsView /></TabsContent>
           <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
           <TabsContent value="prospection" className="space-y-6 mt-4"><ProspectionView /></TabsContent>
@@ -208,6 +210,206 @@ function SitesView() {
     </div>
   );
 }
+
+
+// 🆕 SESSION 53.12 — Cellule de check (✓ / ✕) pour la table Exposants Pacific
+function CheckCell({ ok, title }) {
+  return (
+    <span title={title || (ok ? 'Reçu' : 'À fournir')}>
+      {ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <XCircle className="w-4 h-4 text-slate-300 inline" />}
+    </span>
+  );
+}
+
+// 🆕 SESSION 53.12 — Vue Exposants Pacific Centers (lecture seule)
+// Affiche la liste complète des exposants par site avec leur état de complétion :
+// - Convention signée
+// - Assurance déposée
+// - Caution / chèque reçu(e)
+// - Reçu (transaction encaissée)
+function ExposantsPacificView() {
+  const [regs, setRegs] = useState([]);
+  const [orgs, setOrgs] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [venueFilter, setVenueFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api('/api/registrations').catch(() => []),
+      api('/api/organizations').catch(() => []),
+      api('/api/venues').catch(() => []),
+      api('/api/documents').catch(() => []),
+    ]).then(([r, o, v, doc]) => {
+      setRegs(Array.isArray(r) ? r : []);
+      setOrgs(Array.isArray(o) ? o : []);
+      setVenues(Array.isArray(v) ? v : []);
+      // Le deposit est déjà embarqué dans chaque registration via /api/registrations
+      setDeposits([]);
+      setDocs(Array.isArray(doc) ? doc : []);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+  const venueById = Object.fromEntries(venues.map(v => [v.id, v]));
+  // 🆕 Le deposit est embarqué dans la registration sous la clé `deposit` (cf /api/registrations endpoint)
+  const depositByReg = {};
+  for (const r of regs) {
+    if (r.deposit) depositByReg[r.id] = r.deposit;
+  }
+  const docsByReg = {};
+  for (const d of docs) {
+    if (!docsByReg[d.registration_id]) docsByReg[d.registration_id] = [];
+    docsByReg[d.registration_id].push(d);
+  }
+
+  // Filtrage + tri
+  const filtered = regs
+    .filter(r => venueFilter === 'all' || r.venue_id === venueFilter)
+    .filter(r => {
+      if (statusFilter === 'all') return true;
+      if (statusFilter === 'validated') return ['confirme', 'verrouille', 'pre_validated'].includes(r.status);
+      if (statusFilter === 'pre_reserved') return r.status === 'a_confirmer' && !r.is_waitlist;
+      if (statusFilter === 'waitlist') return r.is_waitlist === true || r.status === 'liste_attente';
+      return r.status === statusFilter;
+    })
+    .filter(r => {
+      if (!search) return true;
+      const org = orgById[r.organization_id];
+      const q = search.toLowerCase();
+      return (org?.name || '').toLowerCase().includes(q)
+        || (org?.main_email || '').toLowerCase().includes(q)
+        || (r.stand_code || '').toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      const oa = orgById[a.organization_id]?.name || '';
+      const ob = orgById[b.organization_id]?.name || '';
+      return oa.localeCompare(ob, 'fr');
+    });
+
+  const stats = {
+    total: regs.length,
+    validated: regs.filter(r => ['confirme', 'verrouille', 'pre_validated'].includes(r.status)).length,
+    preReserved: regs.filter(r => r.status === 'a_confirmer' && !r.is_waitlist).length,
+    waitlist: regs.filter(r => r.is_waitlist === true || r.status === 'liste_attente').length,
+    convSigned: regs.filter(r => r.is_convention_signed).length,
+    insurance: regs.filter(r => r.is_insurance_uploaded).length,
+    cautionReceived: regs.filter(r => r.is_deposit_received).length,
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2"><Users className="w-4 h-4 text-cyan-600" /> Détail des exposants</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+            <KpiCard label="Total" value={stats.total} accent="slate" />
+            <KpiCard label="Validés" value={stats.validated} accent="emerald" />
+            <KpiCard label="Pré-réservés" value={stats.preReserved} accent="violet" />
+            <KpiCard label="Liste d'attente" value={stats.waitlist} accent="amber" />
+            <KpiCard label="Conventions signées" value={`${stats.convSigned}/${stats.total}`} accent="blue" />
+            <KpiCard label="Assurances reçues" value={`${stats.insurance}/${stats.total}`} accent="cyan" />
+            <KpiCard label="Cautions reçues" value={`${stats.cautionReceived}/${stats.total}`} accent="teal" />
+          </div>
+
+          {/* Filtres */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div>
+              <Label className="text-xs">Recherche</Label>
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom org., email, stand…" className="h-8" />
+            </div>
+            <div>
+              <Label className="text-xs">Site</Label>
+              <Select value={venueFilter} onValueChange={setVenueFilter}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous sites</SelectItem>
+                  {venues.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Statut</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous statuts</SelectItem>
+                  <SelectItem value="validated">Validés</SelectItem>
+                  <SelectItem value="pre_reserved">Pré-réservés</SelectItem>
+                  <SelectItem value="waitlist">Liste d&apos;attente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-8 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Chargement…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-8 text-sm text-slate-500">Aucun exposant ne correspond aux filtres.</div>
+          ) : (
+            <div className="rounded-md border border-slate-200 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-700">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left font-bold">Exposant</th>
+                    <th className="px-2 py-1.5 text-left font-bold">Site</th>
+                    <th className="px-2 py-1.5 text-left font-bold">Stand</th>
+                    <th className="px-2 py-1.5 text-center font-bold">Statut</th>
+                    <th className="px-2 py-1.5 text-center font-bold" title="Convention signée">📝 Conv.</th>
+                    <th className="px-2 py-1.5 text-center font-bold" title="Assurance RC déposée">🛡️ Assur.</th>
+                    <th className="px-2 py-1.5 text-center font-bold" title="Caution / chèque reçu">💰 Caution</th>
+                    <th className="px-2 py-1.5 text-center font-bold" title="Reçu (paiement)">🧾 Reçu</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => {
+                    const org = orgById[r.organization_id] || {};
+                    const venue = venueById[r.venue_id] || {};
+                    const dep = depositByReg[r.id];
+                    const isValidated = ['confirme', 'verrouille', 'pre_validated'].includes(r.status);
+                    const isPreReserved = r.status === 'a_confirmer' && !r.is_waitlist;
+                    const isWaitlist = r.is_waitlist === true || r.status === 'liste_attente';
+                    const statusLabel = isValidated ? 'Validé' : isPreReserved ? 'Pré-réservé' : isWaitlist ? 'Attente' : r.status;
+                    const statusColor = isValidated ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : isPreReserved ? 'bg-violet-100 text-violet-900 border-violet-300' : isWaitlist ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-slate-100 text-slate-700 border-slate-300';
+                    return (
+                      <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="px-2 py-1.5">
+                          <div className="font-medium text-slate-900 truncate max-w-[260px]" title={org.name}>{org.name || '—'}</div>
+                          <div className="text-[10px] text-slate-500 truncate">{org.main_email}</div>
+                        </td>
+                        <td className="px-2 py-1.5 text-slate-700">{venue.name || '—'}</td>
+                        <td className="px-2 py-1.5 font-mono">{r.stand_code || '—'}</td>
+                        <td className="px-2 py-1.5 text-center">
+                          <Badge className={`text-[10px] ${statusColor} border`}>{statusLabel}</Badge>
+                        </td>
+                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_convention_signed} title="Convention signée" /></td>
+                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_insurance_uploaded} title="Attestation d'assurance RC" /></td>
+                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_deposit_received} title={dep ? `${dep.amount_xpf} XPF · ${dep.status}` : 'Caution non reçue'} /></td>
+                        <td className="px-2 py-1.5 text-center"><CheckCell ok={dep?.status === 'recue'} title={dep ? `Reçu : ${dep.amount_xpf} XPF` : 'Pas de transaction'} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="text-[10px] text-slate-500 italic">
+            🔒 Vue lecture seule. Pour toute modification, contactez ARACOM.
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 
 function PlanningView() {
   const [slots, setSlots] = useState([]);
