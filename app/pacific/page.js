@@ -44,10 +44,11 @@ export default function PacificCentersPage() {
         </Card>
 
         <Tabs defaultValue="synthese">
-          <TabsList className="w-full grid grid-cols-7">
+          <TabsList className="w-full grid grid-cols-8">
             <TabsTrigger value="synthese">Synthèse</TabsTrigger>
             <TabsTrigger value="sites">Sites & plan</TabsTrigger>
             <TabsTrigger value="exposants">👥 Exposants</TabsTrigger>
+            <TabsTrigger value="domaines">📊 Domaines</TabsTrigger>
             <TabsTrigger value="validations">📋 Validations & Attente</TabsTrigger>
             <TabsTrigger value="planning">Planning animations</TabsTrigger>
             <TabsTrigger value="prospection">🎯 Prospection</TabsTrigger>
@@ -56,6 +57,7 @@ export default function PacificCentersPage() {
           <TabsContent value="synthese" className="space-y-6 mt-4"><SyntheseView /></TabsContent>
           <TabsContent value="sites" className="space-y-6 mt-4"><SitesView /></TabsContent>
           <TabsContent value="exposants" className="space-y-6 mt-4"><ExposantsPacificView /></TabsContent>
+          <TabsContent value="domaines" className="space-y-6 mt-4"><DomainesPacificView /></TabsContent>
           <TabsContent value="validations" className="space-y-6 mt-4"><PacificValidationsView /></TabsContent>
           <TabsContent value="planning" className="space-y-6 mt-4"><PlanningView /></TabsContent>
           <TabsContent value="prospection" className="space-y-6 mt-4"><ProspectionView /></TabsContent>
@@ -406,6 +408,201 @@ function ExposantsPacificView() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+
+
+// 🆕 SESSION 53.13 — Vue Domaines & Secteurs (graphique par site)
+// Couleurs reproductibles pour chaque discipline (hash-based)
+const DISCIPLINE_COLORS = [
+  'bg-rose-500', 'bg-pink-500', 'bg-fuchsia-500', 'bg-purple-500', 'bg-violet-500',
+  'bg-indigo-500', 'bg-blue-500', 'bg-sky-500', 'bg-cyan-500', 'bg-teal-500',
+  'bg-emerald-500', 'bg-green-500', 'bg-lime-500', 'bg-yellow-500', 'bg-amber-500',
+  'bg-orange-500', 'bg-red-500',
+];
+function colorForDiscipline(name) {
+  let h = 0;
+  for (let i = 0; i < (name || '').length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return DISCIPLINE_COLORS[h % DISCIPLINE_COLORS.length];
+}
+
+function DomainesPacificView() {
+  const [regs, setRegs] = useState([]);
+  const [orgs, setOrgs] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [slots, setSlots] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api('/api/registrations').catch(() => []),
+      api('/api/organizations').catch(() => []),
+      api('/api/venues').catch(() => []),
+      api('/api/animation-slots').catch(() => []),
+    ]).then(([r, o, v, s]) => {
+      setRegs(Array.isArray(r) ? r : []);
+      setOrgs(Array.isArray(o) ? o : []);
+      setVenues(Array.isArray(v) ? v : []);
+      setSlots(Array.isArray(s) ? s : []);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const orgById = Object.fromEntries(orgs.map(o => [o.id, o]));
+  const activeVenues = venues.filter(v => v.is_available_2026 !== false);
+
+  // Pour chaque site : agréger par discipline
+  const perVenue = activeVenues.map(v => {
+    const vregs = regs.filter(r => r.venue_id === v.id && !r.is_waitlist);
+    const byDisc = {};
+    for (const r of vregs) {
+      const o = orgById[r.organization_id];
+      const disc = o?.discipline || 'Sans discipline';
+      if (!byDisc[disc]) byDisc[disc] = [];
+      byDisc[disc].push({ ...o, stand_code: r.stand_code, reg_id: r.id });
+    }
+    // Tri par taille décroissante
+    const sortedDisc = Object.entries(byDisc).sort((a, b) => b[1].length - a[1].length);
+    const total = vregs.length;
+
+    // Animations sur ce site
+    const vslots = slots.filter(s => {
+      const r = regs.find(rr => rr.id === s.registration_id);
+      return r?.venue_id === v.id;
+    });
+    const animVen = vslots.filter(s => s.day_label === 'vendredi').length;
+    const animSam = vslots.filter(s => s.day_label === 'samedi').length;
+    const animStand = vslots.filter(s => s.location === 'on_stand' || s.is_on_stand).length;
+    const animDemo = vslots.filter(s => s.location === 'demo_zone' || s.is_demo_zone).length;
+
+    return { venue: v, sortedDisc, total, animVen, animSam, animStand, animDemo, slotsCount: vslots.length };
+  });
+
+  // Vue globale : disciplines toutes éditions confondues
+  const globalDisc = {};
+  for (const r of regs.filter(r => !r.is_waitlist)) {
+    const o = orgById[r.organization_id];
+    const disc = o?.discipline || 'Sans discipline';
+    globalDisc[disc] = (globalDisc[disc] || 0) + 1;
+  }
+  const globalSorted = Object.entries(globalDisc).sort((a, b) => b[1] - a[1]);
+  const globalTotal = Object.values(globalDisc).reduce((s, n) => s + n, 0);
+
+  if (loading) return <div className="text-center py-8 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Chargement…</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* Vue globale */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2"><Activity className="w-4 h-4 text-violet-600" /> Répartition globale par domaine d&apos;activité</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="text-[11px] text-slate-500">{globalSorted.length} domaines · {globalTotal} exposants</div>
+          {/* Stacked bar */}
+          <div className="w-full h-4 rounded-full overflow-hidden flex border border-slate-200">
+            {globalSorted.map(([disc, count]) => (
+              <div
+                key={disc}
+                className={`${colorForDiscipline(disc)} transition-all hover:opacity-80`}
+                style={{ width: `${(count / globalTotal) * 100}%` }}
+                title={`${disc} · ${count} exposant${count > 1 ? 's' : ''} (${Math.round((count / globalTotal) * 100)}%)`}
+              />
+            ))}
+          </div>
+          {/* Liste classement */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1 text-[11px]">
+            {globalSorted.map(([disc, count]) => (
+              <div key={disc} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50">
+                <span className={`w-3 h-3 rounded ${colorForDiscipline(disc)} shrink-0`} />
+                <span className="flex-1 truncate text-slate-800" title={disc}>{disc}</span>
+                <Badge variant="outline" className="text-[10px]">{count}</Badge>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Par site */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {perVenue.map(({ venue, sortedDisc, total, animVen, animSam, animStand, animDemo, slotsCount }) => (
+          <Card key={venue.id} className="border-slate-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MapPin className="w-3.5 h-3.5 text-cyan-600" /> {venue.name}
+                <Badge variant="outline" className="ml-auto text-[10px]">{total} exposants</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Bar par discipline */}
+              {sortedDisc.length === 0 ? (
+                <div className="text-xs text-slate-500 italic">Aucun exposant inscrit.</div>
+              ) : (
+                <>
+                  <div className="w-full h-3 rounded-full overflow-hidden flex border border-slate-200">
+                    {sortedDisc.map(([disc, list]) => (
+                      <div
+                        key={disc}
+                        className={`${colorForDiscipline(disc)} hover:opacity-80 transition`}
+                        style={{ width: `${(list.length / total) * 100}%` }}
+                        title={`${disc} · ${list.length} (${Math.round((list.length / total) * 100)}%)`}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Disciplines + associations associées */}
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {sortedDisc.map(([disc, list]) => (
+                      <details key={disc} className="rounded border border-slate-200 bg-white">
+                        <summary className="px-2 py-1 cursor-pointer flex items-center gap-2 hover:bg-slate-50">
+                          <span className={`w-2.5 h-2.5 rounded ${colorForDiscipline(disc)} shrink-0`} />
+                          <span className="text-xs font-medium text-slate-800 flex-1 truncate">{disc}</span>
+                          <Badge variant="outline" className="text-[10px]">{list.length}</Badge>
+                        </summary>
+                        <ul className="px-3 py-1.5 space-y-0.5 border-t border-slate-100">
+                          {list.map(o => (
+                            <li key={o.reg_id} className="flex items-center gap-2 text-[11px]">
+                              <span className="w-1 h-1 rounded-full bg-slate-400" />
+                              <span className="flex-1 truncate text-slate-700" title={o.name}>{o.name || '—'}</span>
+                              {o.stand_code && <span className="font-mono text-[10px] text-slate-500">{o.stand_code}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Animations résumé */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-[10px] font-bold text-slate-700 mb-1 uppercase tracking-wide">🎯 Animations programmées</div>
+                <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                  <div className="rounded bg-blue-50 border border-blue-200 px-2 py-1 text-center">
+                    <div className="text-blue-700 font-bold">{animVen}</div>
+                    <div className="text-blue-900">Vendredi</div>
+                  </div>
+                  <div className="rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-center">
+                    <div className="text-indigo-700 font-bold">{animSam}</div>
+                    <div className="text-indigo-900">Samedi</div>
+                  </div>
+                  <div className="rounded bg-emerald-50 border border-emerald-200 px-2 py-1 text-center">
+                    <div className="text-emerald-700 font-bold">{animStand}</div>
+                    <div className="text-emerald-900">Sur stand</div>
+                  </div>
+                  <div className="rounded bg-amber-50 border border-amber-200 px-2 py-1 text-center">
+                    <div className="text-amber-700 font-bold">{animDemo}</div>
+                    <div className="text-amber-900">Zone démo</div>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-500 italic mt-1">{slotsCount} créneau{slotsCount > 1 ? 'x' : ''} au total</div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
