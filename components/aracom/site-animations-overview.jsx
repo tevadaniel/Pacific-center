@@ -63,36 +63,46 @@ export default function SiteAnimationsOverview() {
     return m;
   }, [validations]);
 
-  // 🆕 SESSION 52g.4 — Classification stricte des inscriptions par état métier réel
-  //   • CONFIRMED   = exposant validé (tunnel terminé) — a_confirmer, confirme, verrouille…
-  //   • WAITLIST    = liste d'attente (is_waitlist OU status liste_attente)
-  //   • DRAFT       = tunnel en cours (provisoire UNIQUEMENT — vraie inscription en cours)
-  //   • PROSPECT    = prospects/relances CRM (prospect, a_relancer) — PAS un tunnel
-  //   • CANCELLED   = refusé/annulé — ignoré
-  const STATUSES_CONFIRMED = ['a_confirmer', 'confirme', 'verrouille', 'rdv_fixe', 'en_attente'];
-  const STATUSES_WAITLIST = ['liste_attente'];
-  const STATUSES_CANCELLED = ['annule', 'cancelled', 'refused', 'refuse'];
-  const STATUSES_PROSPECT = ['prospect', 'a_relancer'];
+  // 🆕 SESSION 53.12 — Classification stricte des inscriptions par état métier réel
+  //   • PRE_RESERVED = pré-réservé par admin (import Excel ou saisie manuelle) — tunnel PAS ouvert/PAS soumis
+  //                    Détecté par : status='a_confirmer' SANS validation_requested_at ni validation_request_id
+  //   • SUBMITTED    = exposant a soumis sa demande via le tunnel (validation_requested_at présent)
+  //                    → bucket "submitted" : il a "terminé le tunnel" et attend la validation admin
+  //   • VALIDATED    = admin a verrouillé définitivement (locked_at OU status confirme/verrouille/validated)
+  //                    → bucket "validated" : inscription finale
+  //   • WAITLIST     = liste d'attente (is_waitlist OU status liste_attente)
+  //   • DRAFT        = tunnel en cours (provisoire UNIQUEMENT)
+  //   • PROSPECT     = prospects/relances CRM (prospect, a_relancer) — PAS un tunnel
+  //   • CANCELLED    = refusé/annulé — ignoré
+  const STATUSES_VALIDATED = ['confirme', 'verrouille', 'validated', 'locked'];
+  const STATUSES_SUBMITTED_FALLBACK = ['rdv_fixe', 'en_attente', 'a_valider', 'pending']; // fallback si validation_requested_at absent
+  const STATUSES_WAITLIST = ['liste_attente', 'waitlist'];
+  const STATUSES_CANCELLED = ['annule', 'annulee', 'cancelled', 'refused', 'refuse'];
+  const STATUSES_PROSPECT = ['prospect', 'a_relancer', 'contacte'];
   const STATUSES_DRAFT = ['provisoire'];
+  const hasSubmitted = (r) => !!(r.validation_requested_at || r.validation_request_id);
+  const hasValidated = (r) => !!(r.locked_at || STATUSES_VALIDATED.includes(r.status));
   const classifyReg = (r) => {
     if (STATUSES_CANCELLED.includes(r.status)) return 'cancelled';
     if (r.is_waitlist === true || STATUSES_WAITLIST.includes(r.status)) return 'waitlist';
-    if (STATUSES_CONFIRMED.includes(r.status)) return 'confirmed';
+    if (hasValidated(r)) return 'validated';
+    if (hasSubmitted(r) || STATUSES_SUBMITTED_FALLBACK.includes(r.status)) return 'submitted';
     if (STATUSES_PROSPECT.includes(r.status)) return 'prospect';
     if (STATUSES_DRAFT.includes(r.status)) return 'draft';
+    // Reste : 'a_confirmer' sans submission ni validation = pré-réservé admin
+    if (r.status === 'a_confirmer') return 'pre_reserved';
     return 'other';
   };
 
-  // Index : registrations par venue ET par état (hors annulé et prospects qui ne sont PAS dans le tunnel)
+  // Index : registrations par venue ET par état (hors annulé, prospects, pré-réservé qui ne sont PAS dans le tunnel actif)
   const regsByVenue = useMemo(() => {
     const m = new Map();
     for (const r of regs) {
       if (!r.venue_id) continue;
       const cls = classifyReg(r);
       if (cls === 'cancelled' || cls === 'prospect' || cls === 'other') continue;
-      if (!m.has(r.venue_id)) m.set(r.venue_id, { confirmed: [], waitlist: [], draft: [] });
-      const bucket = cls === 'draft' ? 'draft' : cls; // map in_progress→draft consistency
-      m.get(r.venue_id)[bucket].push(r);
+      if (!m.has(r.venue_id)) m.set(r.venue_id, { validated: [], submitted: [], waitlist: [], draft: [], pre_reserved: [] });
+      m.get(r.venue_id)[cls].push(r);
     }
     return m;
   }, [regs]);
@@ -122,8 +132,10 @@ export default function SiteAnimationsOverview() {
   /** Stats agrégées par venue */
   const venueStats = useMemo(() => {
     return venues.map((v) => {
-      const buckets = regsByVenue.get(v.id) || { confirmed: [], waitlist: [], draft: [] };
-      const venueRegs = buckets.confirmed; // 🆕 SESSION 52g.4 — Seuls les confirmés sont des "exposants"
+      const buckets = regsByVenue.get(v.id) || { validated: [], submitted: [], waitlist: [], draft: [], pre_reserved: [] };
+      // 🆕 SESSION 53.12 — "Tous les exposants" = SUBMITTED (tunnel terminé) + VALIDATED (verrouillé admin)
+      //   PRE_RESERVED exclus : ils ont juste été pré-saisis par l'admin, n'ont rien fait eux-mêmes.
+      const venueRegs = [...buckets.validated, ...buckets.submitted];
       const venueAnims = animsByVenue.get(v.id) || [];
       const dayCount = (day) =>
         venueRegs.filter((r) => Array.isArray(r.attending_days) && (r.attending_days.includes(day) || r.attending_days.includes(day === 'vendredi' ? '2026-08-14' : '2026-08-15'))).length;
@@ -137,8 +149,9 @@ export default function SiteAnimationsOverview() {
       const standsTotal = v.capacity_stands || 0;
       const standsUsed = Math.min(standsTotal, v.stands_used || 0);
       const standsFree = Math.max(0, standsTotal - standsUsed);
-      // 🆕 SESSION 52g — Sans animation = UNIQUEMENT exposants confirmés (tunnel terminé) sans animation
-      //   On exclut les brouillons (provisoire) et les waitlist : ils ne peuvent pas avoir d'anim normalement.
+      // 🆕 SESSION 53.12 — ANOMALIE = exposants ayant SOUMIS le tunnel OU VALIDÉS, sans animation.
+      //   Les pré-réservés (a_confirmer sans soumission) ne comptent PAS comme anomalie car ils n'ont
+      //   pas encore eu l'occasion de remplir leurs animations via le tunnel.
       const noAnim = venueRegs.filter((r) => !regsWithAnim.has(r.id));
       // 🆕 SESSION 45 — Demandes de validation par site, séparées en pré-validés (dans quota) / liste d'attente
       const valReqs = validationsByVenue.get(v.id) || [];
@@ -157,9 +170,12 @@ export default function SiteAnimationsOverview() {
         anims: { ven, sam, ven_stand, ven_demo, sam_stand, sam_demo, total: ven.length + sam.length },
         noAnim,
         regsList: venueRegs,
-        // 🆕 SESSION 52g.4 — Comptage séparé pour transparence admin
+        // 🆕 SESSION 53.12 — Comptages séparés pour transparence admin
         draftCount: buckets.draft.length,
         waitlistRegsCount: buckets.waitlist.length,
+        preReservedCount: buckets.pre_reserved.length,
+        submittedCount: buckets.submitted.length,
+        validatedCount: buckets.validated.length,
         valReqs,
         preValidated,
         waitlist,
@@ -185,9 +201,12 @@ export default function SiteAnimationsOverview() {
       acc.waitlist += s.waitlist.length;
       acc.draft += s.draftCount || 0;
       acc.waitlistRegs += s.waitlistRegsCount || 0;
+      acc.preReserved += s.preReservedCount || 0;
+      acc.submitted += s.submittedCount || 0;
+      acc.validated += s.validatedCount || 0;
       return acc;
     },
-    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0, draft: 0, waitlistRegs: 0 }
+    { standsTotal: 0, standsUsed: 0, standsFree: 0, regsCount: 0, regsVen: 0, regsSam: 0, animVen: 0, animSam: 0, animOnStand: 0, animOnDemo: 0, noAnim: 0, preValidated: 0, waitlist: 0, draft: 0, waitlistRegs: 0, preReserved: 0, submitted: 0, validated: 0 }
   ), [venueStats]);
 
   if (loading) {
@@ -205,8 +224,13 @@ export default function SiteAnimationsOverview() {
           <span className="flex items-center gap-2">🗺️ Remplissage & animations par site</span>
           <Badge variant="secondary" className="text-[10px]">{venueStats.length} sites</Badge>
           {totals.noAnim > 0 && (
-            <Badge className="text-[10px] bg-rose-100 text-rose-800 border-rose-300 border" title="Exposants confirmés (tunnel terminé) qui n'ont aucune animation programmée — c'est une anomalie">
-              🚨 {totals.noAnim} confirmé·s sans animation
+            <Badge className="text-[10px] bg-rose-100 text-rose-800 border-rose-300 border" title="Exposants ayant soumis le tunnel ou validés par admin sans aucune animation programmée — c'est une anomalie">
+              🚨 {totals.noAnim} sans animation
+            </Badge>
+          )}
+          {totals.preReserved > 0 && (
+            <Badge className="text-[10px] bg-amber-50 text-amber-800 border-amber-300 border" title="Pré-réservés par admin (import Excel ou saisie manuelle) — l'exposant n'a pas encore ouvert le tunnel pour soumettre sa demande">
+              📋 {totals.preReserved} pré-réservé·s
             </Badge>
           )}
           {totals.draft > 0 && (
@@ -225,7 +249,7 @@ export default function SiteAnimationsOverview() {
               <TabsTrigger key={s.id} value={s.id} className="text-xs h-8">
                 {s.name}
                 {s.noAnim.length > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] bg-rose-200 text-rose-900 font-bold" title="Exposants confirmés sans animation">
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] bg-rose-200 text-rose-900 font-bold" title="Exposants soumis/validés sans animation">
                     {s.noAnim.length}
                   </span>
                 )}
@@ -236,11 +260,12 @@ export default function SiteAnimationsOverview() {
           {/* ───────── OVERVIEW TAB ───────── */}
           <TabsContent value="overview" className="mt-4 space-y-3">
             {/* KPIs globaux */}
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
               <KpiMini label="Stands utilisés" value={`${totals.standsUsed} / ${totals.standsTotal}`} accent="blue" sub={`${totals.standsFree} libres`} />
-              <KpiMini label="Exposants confirmés" value={totals.regsCount} accent="emerald" sub={`Ven: ${totals.regsVen} · Sam: ${totals.regsSam}`} />
+              <KpiMini label="Exposants actifs" value={totals.regsCount} accent="emerald" sub={`✓ ${totals.validated} validés · ⏳ ${totals.submitted} soumis`} />
+              <KpiMini label="📋 Pré-réservés" value={totals.preReserved} accent={totals.preReserved > 0 ? 'amber' : 'slate'} sub="admin – pas encore soumis" />
               <KpiMini label="Animations totales" value={totals.animVen + totals.animSam} accent="violet" sub={`Ven: ${totals.animVen} · Sam: ${totals.animSam}`} />
-              <KpiMini label="🚨 Anomalies anim." value={totals.noAnim} accent={totals.noAnim > 0 ? 'rose' : 'slate'} sub={totals.noAnim > 0 ? 'confirmés sans anim' : 'aucune'} />
+              <KpiMini label="🚨 Anomalies anim." value={totals.noAnim} accent={totals.noAnim > 0 ? 'rose' : 'slate'} sub={totals.noAnim > 0 ? 'soumis/validés sans anim' : 'aucune'} />
               <KpiMini label="En cours (brouillons)" value={totals.draft} accent="slate" sub="tunnel non terminé" />
               <KpiMini label="✓ Pré-validés" value={totals.preValidated} accent="emerald" sub="dans quota" />
               <KpiMini label="⏳ Liste d'attente" value={totals.waitlist} accent={totals.waitlist > 0 ? 'amber' : 'slate'} sub="quota dépassé" />
@@ -450,11 +475,11 @@ function SiteDetailPanel({ site, onRefresh }) {
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="w-4 h-4 text-rose-700" />
             <div className="text-xs font-bold text-rose-900">
-              🚨 ANOMALIE — {s.noAnim.length} exposant·s confirmé·s sans animation sur {s.name}
+              🚨 ANOMALIE — {s.noAnim.length} exposant·s soumis/validé·s sans animation sur {s.name}
             </div>
           </div>
           <div className="text-[10px] text-rose-800 mb-2">
-            Ces exposants ont <b>terminé le tunnel d&apos;inscription</b> mais n&apos;ont aucune animation enregistrée — ce qui ne devrait jamais arriver (le tunnel l&apos;impose). Cliquez sur un nom pour ouvrir la fiche et corriger.
+            Ces exposants ont <b>soumis leur demande via le tunnel</b> (ou ont été validés par l&apos;admin) mais n&apos;ont aucune animation enregistrée — ce qui ne devrait jamais arriver (le tunnel impose une animation). Cliquez sur un nom pour ouvrir la fiche et corriger.
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
             {s.noAnim.map((r) => (
@@ -483,11 +508,11 @@ function SiteDetailPanel({ site, onRefresh }) {
         </div>
       )}
 
-      {/* Tous les exposants du site */}
+      {/* Tous les exposants du site (= validés + soumis) */}
       {s.regsList.length > 0 && (
         <details className="rounded-md border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-            👥 Tous les exposants ({s.regsList.length})
+            👥 Tous les exposants ({s.regsList.length}) <span className="text-[10px] font-normal text-slate-500">— validés &amp; soumis (hors pré-réservés)</span>
           </summary>
           <div className="p-2 grid grid-cols-1 md:grid-cols-3 gap-1">
             {s.regsList.map((r) => (
