@@ -452,6 +452,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               if (isSam) sam.push(r);
               if (!isVen && !isSam) unknown.push(r);
             }
+            // 🆕 SESSION 53.23 — Les exposants sans aucune date sélectionnée
+            // sont affichés dans la colonne Vendredi avec un badge "📋 Date à choisir"
+            // pour rester visibles à l'admin (sans gonfler les compteurs des 2 colonnes).
+            for (const r of unknown) { ven.push({ ...r, _noDate: true }); }
             return { ven, sam, unknown };
           };
           const valByDay = splitByDay(g.validated);
@@ -577,7 +581,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                             )}
                             {!hasSubmitted && (
                               <Badge className="bg-slate-100 text-slate-600 border border-slate-300 text-[9px] px-1 py-0" title="L'exposant a choisi son site mais n'a pas encore choisi de stand ni soumis sa demande">
-                                📋 Site choisi · tunnel en cours
+                                {r._noDate ? '📋 Date à choisir' : '📋 Site choisi · tunnel en cours'}
                               </Badge>
                             )}
                           </div>

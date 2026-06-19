@@ -12,7 +12,8 @@ import { api } from '@/lib/auth-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Settings, ClipboardCheck, Info } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Settings, ClipboardCheck, Info, RefreshCw, Loader2, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import EventSettingsCard from '@/components/aracom/event-settings-card';
 
@@ -20,6 +21,11 @@ export default function ConfigurationView() {
   const [surveyEnabled, setSurveyEnabled] = useState(null);
   const [surveyMeta, setSurveyMeta] = useState({ updated_at: null, updated_by: null });
   const [busy, setBusy] = useState(false);
+  // 🆕 SESSION 53.22 — Maintenance : régénération en masse des PDF
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [regenResult, setRegenResult] = useState(null);
+  const [selectedDocTypes, setSelectedDocTypes] = useState({ convention: true, recu_caution: false, guide_participant: false });
+  const [regenScope, setRegenScope] = useState('with_existing');
 
   const load = async () => {
     try {

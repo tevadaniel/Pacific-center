@@ -3920,6 +3920,131 @@ export async function POST(request, { params }) {
       return json(out);
     }
 
+    // ─── 🆕 SESSION 53.22 — POST /api/admin/regenerate-documents
+    //   Régénère en masse les PDF officiels (convention, reçu, guide, attestation, badge)
+    //   pour rafraîchir le contenu (ex : numéro de téléphone, charte graphique mise à jour).
+    //   Body : { doc_types?: string[], scope?: 'with_existing'|'all', registration_ids?: string[] }
+    //     - doc_types : par défaut ['convention']
+    //     - scope='with_existing' (défaut) : ne régénère QUE les exposants ayant déjà un PDF de ce type
+    //     - scope='all' : crée le PDF pour TOUTES les registrations actives
+    //     - registration_ids : limite à un sous-ensemble (optionnel)
+    if (route === 'admin/regenerate-documents') {
+      if (ctx.role !== 'aracom_admin') return err('Réservé aux admins ARACOM', 403);
+      const validTypes = ['convention', 'recu_caution', 'attestation_remboursement', 'badge_exposant', 'guide_participant'];
+      const requested = Array.isArray(body?.doc_types) && body.doc_types.length > 0 ? body.doc_types : ['convention'];
+      const docTypes = requested.filter(t => validTypes.includes(t));
+      if (docTypes.length === 0) return err(`doc_types invalide. Valeurs autorisées : ${validTypes.join(', ')}`, 400);
+      const scope = body?.scope === 'all' ? 'all' : 'with_existing';
+      const filterRegIds = Array.isArray(body?.registration_ids) ? body.registration_ids : null;
+
+      // Sélection des registrations cibles
+      const regQuery = { edition_id: EDITION_ID, status: { $nin: ['annule', 'cancelled'] } };
+      if (filterRegIds && filterRegIds.length > 0) regQuery.id = { $in: filterRegIds };
+      const targetRegs = await db.collection('registrations').find(regQuery).toArray();
+
+      const richGen = await import('@/lib/document-generator');
+      const pdfGen = await import('@/lib/pdf-generators');
+
+      const results = {
+        total_scanned: targetRegs.length,
+        regenerated: 0,
+        skipped: 0,
+        errors: [],
+        by_type: Object.fromEntries(docTypes.map(t => [t, 0])),
+      };
+
+      for (const reg of targetRegs) {
+        for (const dt of docTypes) {
+          try {
+            const existing = await db.collection('registration_documents').findOne({ registration_id: reg.id, document_type: dt });
+            if (scope === 'with_existing' && !existing) { results.skipped++; continue; }
+
+            const org = await db.collection('organizations').findOne({ id: reg.organization_id });
+            const venue = reg.venue_id ? await db.collection('venues').findOne({ id: reg.venue_id }) : null;
+            const deposit = await db.collection('deposit_transactions').findOne({ registration_id: reg.id, type: 'caution_received' });
+            const slots = await db.collection('slots').find({ registration_id: reg.id }).sort({ start_time: 1 }).toArray();
+            const animations = slots.map(s => ({
+              title: s.title || s.activity_title || s.activity || 'Animation',
+              day: s.day_label || s.day || s.event_date,
+              start_time: s.start_time || s.startTime,
+              end_time: s.end_time || s.endTime,
+              location: s.location || s.zone || (s.location_type === 'stand' ? 'Stand' : (s.location_type === 'zone' ? 'Zone d\'exposition' : '')),
+              location_type: s.location_type,
+              description: s.description || '',
+            }));
+
+            let portalUrl = null;
+            if (dt === 'badge_exposant' && org?.id) {
+              try { portalUrl = await getOrCreateExposantAccessUrl(db, org.id, org.main_email, request); } catch {}
+            }
+
+            let buf;
+            if (dt === 'convention') {
+              buf = await richGen.generateConventionPDF({ registration: reg, organization: org, venue, animations, deposit });
+            } else if (dt === 'recu_caution') {
+              buf = await richGen.generateReceiptPDF({ registration: reg, organization: org, venue, deposit });
+            } else if (dt === 'guide_participant') {
+              buf = await richGen.generateGuidePDF({ registration: reg, organization: org, venue, animations });
+            } else if (dt === 'attestation_remboursement') {
+              buf = await pdfGen.generateAttestationRemboursementPDF({ org, reg, venue, deposit });
+            } else if (dt === 'badge_exposant') {
+              buf = await pdfGen.generateBadgePDF({ org, reg, venue, portalUrl });
+            }
+            if (!buf) { results.skipped++; continue; }
+
+            const fileName = `${dt}_${(org?.name || 'exp').replace(/[^a-z0-9]/gi, '_')}.pdf`;
+            const docRow = {
+              id: existing?.id || uuid(),
+              registration_id: reg.id,
+              organization_id: reg.organization_id,
+              document_type: dt,
+              category: dt,
+              file_name: fileName,
+              mime_type: 'application/pdf',
+              file_data: buf.toString('base64'),
+              size_bytes: buf.length,
+              status: 'generated',
+              validation_status: existing?.validation_status || 'pending',
+              uploaded_at: new Date(),
+              uploaded_by: ctx.userId || 'system',
+              generated_at: new Date(),
+              auto_generated: true,
+              regenerated_by: ctx.userId || 'admin',
+              regenerated_at: new Date(),
+              updated_at: new Date(),
+            };
+            if (existing) {
+              await db.collection('registration_documents').updateOne({ id: existing.id }, { $set: docRow });
+            } else {
+              docRow.created_at = new Date();
+              await db.collection('registration_documents').insertOne(docRow);
+            }
+            results.regenerated++;
+            results.by_type[dt] = (results.by_type[dt] || 0) + 1;
+          } catch (e) {
+            console.error('[regenerate-documents]', dt, reg.id, e?.message);
+            results.errors.push({ registration_id: reg.id, doc_type: dt, error: e?.message || 'unknown' });
+          }
+        }
+      }
+
+      try {
+        await db.collection('activity_logs').insertOne({
+          id: uuid(),
+          user_id: ctx.userId || 'admin',
+          entity_type: 'admin_tools',
+          entity_id: 'regenerate-documents',
+          action_type: 'bulk_regenerate',
+          new_values_json: { doc_types: docTypes, scope, ...results, errors: undefined },
+          created_at: new Date(),
+        });
+      } catch { /* ignore */ }
+
+      return json({ ok: true, ...results });
+    }
+
+
+
     // ─── POST /api/documents/send — Envoie un document par email à l'exposant
     if (route === 'documents/send') {
       const { registration_id, doc_id, doc_type } = body;
