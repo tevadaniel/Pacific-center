@@ -509,8 +509,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               {/* 🆕 SESSION 52g.7 — Sous-en-tête : récap par bucket et par jour */}
               <div className="grid grid-cols-3 gap-3 mb-2 text-[10px]">
                 <DayBreakdownStrip tone="emerald" label="Validées" bd={valBreakdown} />
-                <DayBreakdownStrip tone="violet" label="Pré-réservés" bd={preBreakdown} />
-                <DayBreakdownStrip tone="amber" label="Liste d'attente" bd={waitBreakdown} />
+                <DayBreakdownStrip tone="violet" label="Pré-inscription site" bd={preBreakdown} />
+                <DayBreakdownStrip tone="amber" label="Hors quota" bd={waitBreakdown} />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* ───── COL 1 : VALIDÉS (par jour) ───── */}
@@ -553,10 +553,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   />
                 </Section>
 
-                {/* ───── COL 2 : PRÉ-RÉSERVÉS (par jour) ───── */}
+                {/* ───── COL 2 : PRÉ-INSCRIPTION SITE (par jour) ───── */}
+                {/* 🆕 SESSION 53.18 — Renommée "Pré-inscription site" : ces exposants ont juste
+                    choisi un site (pas de stand committé, pas encore soumis le tunnel). */}
                 <Section
                   icon={<Hourglass className="w-3.5 h-3.5 text-violet-600" />}
-                  title="Pré-réservés"
+                  title="Pré-inscription site"
                   count={g.preReserved.length}
                   tone="violet"
                 >
@@ -565,28 +567,20 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                     samItems={preByDay.sam}
                     emptyLabel="—"
                     renderRow={(r) => {
-                      // 🆕 SESSION 53.15 — Actions admin (✓ X ⇄) ne sont visibles QUE si l'exposant a
-                      // démarré son parcours (soumis tunnel OU validation_request présent).
-                      // Sinon, l'exposant est juste "en cours de création de dossier" (pré-réservé importé)
-                      // et l'admin n'a aucune décision à prendre pour le moment.
                       const reg = r.registration || {};
                       const hasSubmitted = !!(reg.validation_requested_at || reg.validation_request_id || r._source === 'validation_request');
                       return (
                         <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
                           <ExposantName r={r} onClick={effectiveExposantClick} />
                           <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
-                            {r.stand_code
-                              ? <span className="font-mono">{r.stand_code}</span>
-                              : (reg.pre_assigned_stand_code && (
-                                  <span className="font-mono opacity-60 italic" title="Pré-cliqué (historique Excel) — pas encore validé">
-                                    ~{reg.pre_assigned_stand_code}
-                                  </span>
-                                ))}
+                            {r.stand_code && <span className="font-mono">{r.stand_code}</span>}
                             {r.created_at && (
                               <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
                             )}
                             {!hasSubmitted && (
-                              <Badge className="bg-slate-100 text-slate-600 border border-slate-300 text-[9px] px-1 py-0">📋 En cours de création</Badge>
+                              <Badge className="bg-slate-100 text-slate-600 border border-slate-300 text-[9px] px-1 py-0" title="L'exposant a choisi son site mais n'a pas encore choisi de stand ni soumis sa demande">
+                                📋 Site choisi · tunnel en cours
+                              </Badge>
                             )}
                           </div>
                           {!readonly && hasSubmitted && (
@@ -610,10 +604,12 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   />
                 </Section>
 
-                {/* ───── COL 3 : LISTE D'ATTENTE ───── */}
+                {/* ───── COL 3 : SURPLUS HORS QUOTA (anciennement "Liste d'attente") ───── */}
+                {/* 🆕 SESSION 53.18 — Renommée : ce sont toujours des demandes EN COURS sur ce site,
+                    mais au-delà de la capacité d'accueil → seront promues si une place se libère. */}
                 <Section
                   icon={<Clock className="w-3.5 h-3.5 text-amber-600" />}
-                  title="Liste d'attente"
+                  title="Pré-inscription (hors quota)"
                   count={g.waitlist.length}
                   tone="amber"
                 >
