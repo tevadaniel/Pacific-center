@@ -2114,7 +2114,10 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
               </div>
             </div>
             {list.length === 0 ? (
-              <div className="text-[11px] italic text-slate-400 py-1">Aucune animation ce jour</div>
+              <div className="text-[11px] italic text-slate-400 py-1">
+                Aucune animation ce jour
+                {!isLocked && <span className="ml-1 text-slate-500 not-italic">— cliquez sur <b>« + Ajouter une animation »</b> ci-dessous pour en créer une (puis ✏️ Modifier / ↔ Échanger / 🗑️ Supprimer apparaîtront ici).</span>}
+              </div>
             ) : (
               <div className="space-y-1">
                 {list.map((s) => editingId === s.id ? (
