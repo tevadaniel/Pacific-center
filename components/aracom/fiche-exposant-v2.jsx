@@ -906,7 +906,7 @@ export default function FicheExposantV2({ id, onClose }) {
                   </div>
                 )}
 
-                {/* Animations par jour (uniquement site courant) */}
+                {/* Animations par jour (uniquement site courant, et seulement si dates renseignées) */}
                 {isCurrent && hasDates && (
                   <div className="space-y-1.5 mt-2 pt-2 border-t border-slate-200">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Planning par jour</div>
@@ -940,22 +940,27 @@ export default function FicheExposantV2({ id, onClose }) {
                         </div>
                       );
                     })}
-                    {/* Panel animations admin (CRUD complet pour le site courant) */}
-                    <details className="mt-1">
-                      <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">⚙️ Gestion avancée des animations (CRUD)</summary>
-                      <div className="mt-2">
-                        <AdminAnimationsPanel
-                          registrationId={reg.id}
-                          venueId={reg.venue_id}
-                          venueName={venue?.name}
-                          attendingDays={days}
-                          slots={slots}
-                          isLocked={reg.is_locked || reg.candidature_locked}
-                          onReload={load}
-                        />
-                      </div>
-                    </details>
                   </div>
+                )}
+
+                {/* 🆕 SESSION 53.19 — Panel CRUD admin TOUJOURS disponible sur le site courant
+                    (même si pas de dates ni d'animations). L'admin peut configurer les jours,
+                    ajouter des animations, échanger, supprimer, etc. */}
+                {isCurrent && (
+                  <details className="mt-2 pt-2 border-t border-slate-200" open={!hasDates}>
+                    <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 font-semibold">⚙️ Gestion avancée des animations (CRUD admin)</summary>
+                    <div className="mt-2">
+                      <AdminAnimationsPanel
+                        registrationId={reg.id}
+                        venueId={reg.venue_id}
+                        venueName={venue?.name}
+                        attendingDays={days}
+                        slots={slots}
+                        isLocked={reg.is_locked || reg.candidature_locked}
+                        onReload={load}
+                      />
+                    </div>
+                  </details>
                 )}
 
                 {/* Stand picker / Swap (uniquement site courant) */}
