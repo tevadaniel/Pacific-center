@@ -575,7 +575,13 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                         <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
                           <ExposantName r={r} onClick={effectiveExposantClick} />
                           <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
-                            <span className="font-mono">{r.stand_code}</span>
+                            {r.stand_code
+                              ? <span className="font-mono">{r.stand_code}</span>
+                              : (reg.pre_assigned_stand_code && (
+                                  <span className="font-mono opacity-60 italic" title="Pré-cliqué (historique Excel) — pas encore validé">
+                                    ~{reg.pre_assigned_stand_code}
+                                  </span>
+                                ))}
                             {r.created_at && (
                               <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
                             )}

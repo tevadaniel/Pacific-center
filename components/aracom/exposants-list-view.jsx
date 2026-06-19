@@ -968,15 +968,21 @@ function OrgSitesBadges({ group, venues, onOpenReg }) {
   const renderBadge = (r, withClick = true) => {
     const cls = STATUS_BADGE[r.status] || 'bg-slate-50 text-slate-700 border-slate-200';
     const name = venueName(r.venue_id);
+    // 🆕 SESSION 53.17 — Stand pré-cliqué (héritage Excel ou choix exposant en cours)
+    //   Affiché à titre indicatif uniquement, séparé visuellement du vrai stand_code committé.
+    const preStand = !r.stand_code && r.pre_assigned_stand_code ? r.pre_assigned_stand_code : null;
     return (
       <button
         key={r.id}
         onClick={withClick ? (e) => { e.stopPropagation(); onOpenReg(r.id); } : undefined}
         className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10.5px] font-medium ${cls} hover:opacity-80`}
-        title={`${name}${r.stand_code ? ' · stand ' + r.stand_code : ''}`}
+        title={`${name}${r.stand_code ? ' · stand ' + r.stand_code : (preStand ? ` · pré-cliqué : ${preStand} (pas encore validé)` : '')}`}
       >
         <span className="font-semibold">{name}</span>
         {r.stand_code && <span className="font-mono text-[9.5px] opacity-80">{r.stand_code}</span>}
+        {!r.stand_code && preStand && (
+          <span className="font-mono text-[9.5px] opacity-60 italic" title="Pré-cliqué — pas encore validé">~{preStand}</span>
+        )}
         {r.is_waitlist && <span title="Liste d'attente">⏳</span>}
       </button>
     );
