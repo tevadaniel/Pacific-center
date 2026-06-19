@@ -198,7 +198,7 @@ export default function MesDocumentsPage() {
             <span className="text-sm text-slate-700">Une question ?</span>
             <a href="mailto:agence@aracom-conseil.fr" className="text-aracom-orange font-semibold hover:underline">agence@aracom-conseil.fr</a>
             <span className="text-slate-400">·</span>
-            <span className="text-sm text-slate-600">40 47 88 50</span>
+            <span className="text-sm text-slate-600">87 21 04 44</span>
           </CardContent>
         </Card>
       </div>

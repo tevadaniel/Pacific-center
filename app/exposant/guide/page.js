@@ -116,8 +116,7 @@ const SECTIONS = [
     content: [
       "🏢 **ARACOM Conseil** — Organisation du Forum de la Rentrée 2026",
       "📧 agence@aracom-conseil.fr",
-      "📱 40 47 88 50 (bureau)",
-      "📞 87 21 04 44 (Teva — direct)",
+      "📞 87 21 04 44",
       "",
       "💼 Pour toute question, suggestion ou problème sur site, contactez-nous directement.",
     ],
