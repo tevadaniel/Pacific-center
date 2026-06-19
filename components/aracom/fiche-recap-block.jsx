@@ -33,7 +33,7 @@ export default function FicheRecapBlock({ registration, organization, venue, onR
     'Bonjour,\n\nNous avons le plaisir de vous confirmer votre participation au Forum de la Rentrée 2026.\n\n' +
     'Votre fiche récapitulative est disponible dans votre espace exposant. ' +
     'Vous y trouverez tous les détails : stand, animations, jours de présence, et la convention à signer.\n\n' +
-    'Préparez votre venue avec la caution de 20 000 XPF par chèque (à l\'ordre d\'ARACOM) ' +
+    'Préparez votre venue avec la caution de 20 000 XPF par chèque ' +
     'et n\'hésitez pas à nous contacter pour toute question.\n\n' +
     'Cordialement,\nL\'équipe ARACOM'
   );

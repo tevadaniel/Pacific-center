@@ -180,7 +180,7 @@ export default function MesDocumentsPage() {
                 </div>
                 <div className="flex-1 min-w-[200px]">
                   <div className="text-xs text-slate-600">
-                    Forme : <b>chèque</b> à l&apos;ordre de <b>{venue?.owner_sci || 'votre bailleur (voir Convention)'}</b>
+                    Forme : <b>chèque</b>
                   </div>
                   <div className="text-xs text-slate-600">
                     Deadline : <b className="text-rose-700">31 juillet 2026</b>

@@ -166,7 +166,7 @@ export default function AnnexePage() {
           <h2 className="text-[14px] font-bold uppercase text-aracom-black border-l-4 border-aracom-orange pl-2 mb-2">5. Caution / Dépôt de garantie</h2>
           <div className="bg-aracom-gold/10 border border-aracom-gold/40 rounded p-3 grid grid-cols-2 gap-3">
             <Field label="Montant" value={`${caution.amount_xpf.toLocaleString('fr-FR')} XPF`} highlight />
-            <Field label="Forme" value="Chèque de caution à l'ordre du bailleur" />
+            <Field label="Forme" value="Chèque de caution" />
             <Field label="Statut" value={cautionLabel} />
             <Field label="Date d'encaissement" value={caution.received_at ? fmtDate(caution.received_at) : '—'} />
           </div>

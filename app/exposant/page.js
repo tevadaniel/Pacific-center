@@ -935,7 +935,7 @@ export default function ExposantPortal() {
                     </a>
                   ) : (
                     <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-md p-3">
-                      <strong>Mode accepté :</strong> chèque uniquement (à l&apos;ordre d&apos;ARACOM). <br />
+                      <strong>Mode accepté :</strong> chèque uniquement. <br />
                       Le reçu de caution sera <b>fourni automatiquement par ARACOM</b> dans cet espace dès réception du paiement.
                     </div>
                   )}
@@ -1576,7 +1576,7 @@ function Step3Card({ registration, docs, validationRequest, isLocked, unlocked, 
                 <ul className="text-xs text-violet-700 mt-2 ml-4 list-disc space-y-0.5">
                   <li>Convention signée (téléchargeable plus haut)</li>
                   <li>Justificatif d&apos;assurance responsabilité civile</li>
-                  <li>Caution de <b>20 000 XPF</b> en chèque (à l&apos;ordre d&apos;ARACOM)</li>
+                  <li>Caution de <b>20 000 XPF</b> en chèque</li>
                 </ul>
                 <p className="text-xs text-violet-700 mt-2">Une fois le rendez-vous honoré, votre stand sera <b>définitivement verrouillé</b> et vous recevrez un email de confirmation avec le guide de l&apos;exposant.</p>
                 <Button onClick={submitValidation} disabled={submitting} className={`mt-3 gap-2 ${validationRequest ? 'bg-blue-600 hover:bg-blue-700' : 'bg-violet-600 hover:bg-violet-700'}`}>
@@ -1709,7 +1709,7 @@ function ConfirmPresenceInlineCard({ registrationId, canRequest, onDone }) {
           </div>
           <p className={`text-sm ${canRequest ? 'text-violet-800' : 'text-slate-500'}`}>
             {canRequest
-              ? <>Tout est prêt ! En soumettant, votre <b>candidature sera verrouillée</b> et ARACOM vous contactera pour fixer un RDV de remise de caution par chèque (20 000 XPF, à l&apos;ordre d&apos;ARACOM).</>
+              ? <>Tout est prêt ! En soumettant, votre <b>candidature sera verrouillée</b> et ARACOM vous contactera pour fixer un RDV de remise de caution par chèque (20 000 XPF).</>
               : <>Pour activer la soumission : choisissez un <b>site + stand</b> (onglet Sites &amp; plan) et au moins <b>un créneau d&apos;animation</b> (onglet Animations).</>
             }
           </p>
@@ -1725,7 +1725,7 @@ function ConfirmPresenceInlineCard({ registrationId, canRequest, onDone }) {
             {/* 🆕 SESSION 48n — Mode caution = Chèque uniquement (plus de choix) */}
             <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
               <span className="text-lg shrink-0">💳</span>
-              <span><b>Mode de caution :</b> Chèque (à l&apos;ordre d&apos;ARACOM) — 20 000 XPF, seul mode accepté.</span>
+              <span><b>Mode de caution :</b> Chèque — 20 000 XPF, seul mode accepté.</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1812,7 +1812,7 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
               {/* 🆕 SESSION 48n — Mode caution = Chèque uniquement (plus de choix) */}
               <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
                 <span className="text-lg shrink-0">💳</span>
-                <span><b>Mode de caution :</b> Chèque à l&apos;ordre d&apos;ARACOM — 20 000 XPF (seul mode accepté).</span>
+                <span><b>Mode de caution :</b> Chèque — 20 000 XPF (seul mode accepté).</span>
               </div>
               <div>
                 <Label className="text-sm font-semibold">Vos disponibilités pour le RDV (facultatif)</Label>
@@ -1832,7 +1832,7 @@ function ConfirmPresenceButton({ registrationId, disabled, onDone }) {
                 />
               </div>
               <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-                <b>📌 Mode accepté :</b> chèque uniquement, à l&apos;ordre d&apos;ARACOM (20 000 XPF).
+                <b>📌 Mode accepté :</b> chèque uniquement (20 000 XPF).
               </div>
             </CardContent>
             <div className="flex gap-2 justify-end p-4 border-t">
@@ -2019,7 +2019,7 @@ function ValidationStatusCard({ registrationId, validationRequestId, onRefresh }
             <div className="font-bold text-emerald-900 text-lg">Rendez-vous fixé — {rdv.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {rdv.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
             {vreq.rdv_location && <div className="text-sm text-emerald-800 mt-1"><b>📍 Lieu :</b> {vreq.rdv_location}</div>}
             {vreq.rdv_notes && <div className="text-sm text-emerald-800 mt-1">{vreq.rdv_notes}</div>}
-            <div className="text-sm text-emerald-800 mt-2"><b>À prévoir :</b> votre caution de 20 000 XPF en {paymentLabel}{vreq.preferred_payment === 'cheque' ? ' (à l\'ordre d\'ARACOM)' : ''} + pièce d\'identité du responsable.</div>
+            <div className="text-sm text-emerald-800 mt-2"><b>À prévoir :</b> votre caution de 20 000 XPF en {paymentLabel}{vreq.preferred_payment === 'cheque' ? '' : ''} + pièce d\'identité du responsable.</div>
           </div>
           <Button size="sm" variant="outline" onClick={cancel} disabled={busy}>Annuler</Button>
         </CardContent>
@@ -3308,7 +3308,7 @@ function GuideBlock() {
           <ol className="list-decimal pl-5 text-slate-700">
             <li>Complétez votre <strong>profil</strong> (description, contact, jours de présence).</li>
             <li>Choisissez <strong>un site et pré-réservez un stand</strong> dans l&apos;onglet <em>Sites & plan</em>.</li>
-            <li>Versez votre <strong>caution de 20 000 XPF</strong> à ARACOM par chèque (à l&apos;ordre d&apos;ARACOM).</li>
+            <li>Versez votre <strong>caution de 20 000 XPF</strong> à ARACOM par chèque.</li>
             <li>ARACOM <strong>confirme votre inscription</strong> et vous remet le reçu de caution.</li>
           </ol>
         </section>

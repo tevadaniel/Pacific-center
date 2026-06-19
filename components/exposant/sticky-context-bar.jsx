@@ -464,7 +464,7 @@ export default function StickyContextBar({
                         <span className="text-base shrink-0">💰</span>
                         <div className="flex-1 min-w-0">
                           <div className="font-semibold">Caution à déposer (20 000 XPF)</div>
-                          <div className="text-[10px] opacity-80">Chèque uniquement, à l&apos;ordre d&apos;ARACOM</div>
+                          <div className="text-[10px] opacity-80">Chèque uniquement</div>
                         </div>
                       </li>
                     )}

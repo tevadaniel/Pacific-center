@@ -3198,7 +3198,7 @@ export async function GET(request, { params }) {
         { key: 'stand', label: 'Choisir votre site et pré-réserver un stand', done: !!(reg?.venue_id && reg?.stand_code), action_label: 'Choisir mon stand', target_tab: 'parcours', target_step: 1, deadline_key: 'stand', why: 'Réserve votre emplacement avant que les autres exposants ne prennent les meilleurs.' },
         { key: 'animation', label: "Planifier vos créneaux d'animation", done: animSlots.length > 0, action_label: 'Planifier une animation', target_tab: 'parcours', target_step: 2, deadline_key: 'animation', why: "1 créneau d'1 heure maximum par jour. Vendredi 11h-17h ou samedi 9h-17h." },
         { key: 'documents', label: 'Déposer vos documents officiels', done: hasInsurance && validatedDocs >= 2, action_label: 'Téléverser mes documents', target_tab: 'parcours', target_step: 3, deadline_key: 'documents', why: "L'attestation d'assurance responsabilité civile est obligatoire pour exposer." },
-        { key: 'caution', label: 'Verser votre caution (20 000 XPF)', done: cautionReceived, action_label: 'Voir les modalités de caution', target_tab: 'parcours', target_step: 3, deadline_key: 'caution', why: "Caution restituée intégralement après l'événement. Versement par chèque uniquement (à l'ordre d'ARACOM)." },
+        { key: 'caution', label: 'Verser votre caution (20 000 XPF)', done: cautionReceived, action_label: 'Voir les modalités de caution', target_tab: 'parcours', target_step: 3, deadline_key: 'caution', why: "Caution restituée intégralement après l'événement. Versement par chèque uniquement." },
         { key: 'convention', label: 'Signer la convention de participation', done: conventionSigned, action_label: 'Voir la convention', target_tab: 'parcours', target_step: 3, deadline_key: 'convention', why: 'Document contractuel envoyé par ARACOM après validation de votre dossier.' },
       ];
 
@@ -3783,7 +3783,7 @@ export async function POST(request, { params }) {
 
     // ─── POST /api/registration-documents — Upload un document depuis la fiche (cockpit ou portail)
     if (route === 'registration-documents') {
-      const { registration_id, document_type, category, file_name, mime_type, file_data, status } = body;
+      const { registration_id, document_type, category, file_name, mime_type, file_data, status, display_name } = body;
       if (!registration_id || !file_data) return err('registration_id et file_data requis', 400);
       const reg = await db.collection('registrations').findOne({ id: registration_id });
       if (!reg) return err('Inscription introuvable', 404);
@@ -3800,6 +3800,7 @@ export async function POST(request, { params }) {
         size_bytes: Math.floor((file_data.length * 3) / 4),
         status: status || 'recu',
         validation_status: 'pending',
+        display_name: display_name || null,
         uploaded_at: new Date(),
         uploaded_by: ctx.userId || 'anon',
         created_at: new Date(),
@@ -4019,7 +4020,7 @@ export async function POST(request, { params }) {
             <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px;border-radius:6px;font-size:12px;color:#78350f;margin:16px 0;">
               <b>⚠️ Prochaines étapes :</b><br>
               1. Signer la convention (téléchargeable depuis votre espace)<br>
-              2. Régler la <b>caution de 20 000 XPF</b> par chèque (à l'ordre d'ARACOM)<br>
+              2. Régler la <b>caution de 20 000 XPF</b> par chèque<br>
               3. Préparer vos animations et votre matériel
             </div>
             <p style="font-size:12px;color:#6b7280;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:12px;">
@@ -5514,7 +5515,7 @@ ${a ? `<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:14px
 
 ${cautionPayment || cautionDepositAt ? `<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 18px;border-radius:6px;margin:18px 0">
   <h3 style="margin:0 0 10px 0;color:#5b21b6">💰 Caution & dépôt de documents</h3>
-  ${cautionPayment ? `<div><b>Mode de règlement :</b> Chèque (à l'ordre d'ARACOM)</div>` : ''}
+  ${cautionPayment ? `<div><b>Mode de règlement :</b> Chèque</div>` : ''}
   ${cautionDepositAt ? `<div><b>Date et heure du dépôt :</b> ${new Date(cautionDepositAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} à ${new Date(cautionDepositAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
   ${bring_documents_to_rdv ? `<div style="margin-top:6px;padding:8px;background:#fef3c7;border-radius:4px;font-size:13px"><b>📋 À apporter le jour J :</b> les documents manquants (convention signée, attestation d'assurance, etc.)</div>` : ''}
   <div style="margin-top:8px;font-size:13px;color:#5b21b6"><b>Caution :</b> 20 000 XPF par site</div>
@@ -9628,7 +9629,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
   ${rdv_proposal ? `<div><b>Vos disponibilités :</b> ${rdv_proposal}</div>` : ''}
 </div>
 <p>L'équipe ARACOM va vous recontacter sous peu pour <b>fixer un rendez-vous</b> de remise de la caution. Une fois la caution réceptionnée, votre stand et vos créneaux d'animation seront <b>verrouillés définitivement</b>.</p>
-<p>📌 <b>Mode accepté :</b> chèque uniquement (à l'ordre d'ARACOM).</p>
+<p>📌 <b>Mode accepté :</b> chèque uniquement.</p>
 <p>À très vite,<br/>L'équipe ARACOM</p>`,
             }, db).catch(e => console.error('[mail exposant request-validation]', e?.message));
           }
@@ -9693,7 +9694,7 @@ ${message ? `<div style="background:#f3f4f6;border-left:4px solid #6b7280;paddin
 </div>
 <p>📌 <b>Merci de prévoir :</b></p>
 <ul>
-  <li>Votre <b>caution de 20 000 XPF</b> par <b>chèque</b> à l'ordre d'ARACOM (seul mode accepté)</li>
+  <li>Votre <b>caution de 20 000 XPF</b> par <b>chèque</b> (seul mode accepté)</li>
   <li>Votre <b>attestation d'assurance</b> et la <b>convention signée</b> si pas encore déposées</li>
   <li>Une pièce d'identité du responsable légal de l'association</li>
 </ul>
@@ -10658,7 +10659,7 @@ ${deadlineLines}
 2. Choisir un site Pacific Centers et pré-réserver un stand libre sur le plan
 3. Planifier 1 créneau d'animation par jour maximum (vendredi 11h-17h, samedi 9h-17h)
 4. Déposer les documents officiels (assurance responsabilité civile, RIB, etc.)
-5. Verser la caution de 20 000 XPF auprès d'ARACOM par chèque (à l'ordre d'ARACOM)
+5. Verser la caution de 20 000 XPF auprès d'ARACOM par chèque
 6. Signer la convention de participation envoyée par ARACOM
 
 🔒 Verrouillage du stand : votre stand devient définitivement réservé UNIQUEMENT après validation d'ARACOM (caution reçue + convention signée + documents validés). Avant cela, vous pouvez libérer votre pré-réservation à tout moment.

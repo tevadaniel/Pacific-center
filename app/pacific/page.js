@@ -22,6 +22,8 @@ import SmartVenueMap from '@/components/smart-venue-map';
 import { exportExposantsCSV, exportCautionsCSV, exportSatisfactionCSV, exportAnimationsCSV, exportAllZIP } from '@/lib/csv-export';
 import { Package, Loader2, Wallet, FileSpreadsheet } from 'lucide-react';
 import PacificValidationsView from '@/components/pacific/pacific-validations-view';
+import AdditionalDocsSection from '@/components/shared/additional-docs-section';
+import { Download, ChevronDown, ChevronRight } from 'lucide-react';
 
 export default function PacificCentersPage() {
   return (
@@ -223,6 +225,63 @@ function CheckCell({ ok, title }) {
   );
 }
 
+// 🆕 SESSION 53.14 — Panneau dépliable montrant TOUS les documents d'un exposant
+//   Visible côté Pacific Centers (lecture seule + téléchargement).
+function DocsListPanel({ reg, org, venue, docs }) {
+  const STANDARD_LABELS = {
+    convention: { label: 'Convention signée', icon: '📝' },
+    assurance: { label: "Attestation d'assurance RC", icon: '🛡️' },
+    identite: { label: "Pièce d'identité du référent", icon: '🆔' },
+    immatriculation: { label: 'Justificatif d\'immatriculation (Kbis/RNA)', icon: '🏢' },
+    recu_caution: { label: 'Reçu de caution', icon: '🧾' },
+    attestation_remboursement: { label: 'Attestation de remboursement', icon: '↩️' },
+    badge_exposant: { label: 'Badge exposant', icon: '🎫' },
+    guide_participant: { label: 'Guide du participant', icon: '📘' },
+  };
+  const handleDownload = (doc) => {
+    if (!doc?.id) return;
+    window.open(`/api/documents/${doc.id}/download`, '_blank');
+  };
+  const standardDocs = (docs || []).filter((d) => STANDARD_LABELS[d.document_type]);
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] text-slate-600">
+        <b>{org?.name || '—'}</b> · {venue?.name || '—'} · Stand {reg?.stand_code || '—'}
+        <span className="ml-2 text-slate-400">— {(docs || []).length} document(s) au dossier</span>
+      </div>
+
+      {/* Documents standard */}
+      {standardDocs.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Documents officiels</div>
+          {standardDocs.map((d) => (
+            <div key={d.id} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded px-2 py-1.5">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span>{STANDARD_LABELS[d.document_type].icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-slate-800 truncate">{STANDARD_LABELS[d.document_type].label}</div>
+                  <div className="text-[10px] text-slate-500 truncate italic">📎 {d.file_name}</div>
+                </div>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => handleDownload(d)} className="h-7 text-[10px] gap-1">
+                <Download className="w-3 h-3" /> Télécharger
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Documents complémentaires (lecture seule + téléchargement) */}
+      <AdditionalDocsSection
+        regId={reg.id}
+        documents={docs}
+        readonly
+        title="📎 Documents complémentaires"
+      />
+    </div>
+  );
+}
+
 // 🆕 SESSION 53.12 — Vue Exposants Pacific Centers (lecture seule)
 // Affiche la liste complète des exposants par site avec leur état de complétion :
 // - Convention signée
@@ -304,6 +363,10 @@ function ExposantsPacificView() {
     cautionReceived: regs.filter(r => r.is_deposit_received).length,
   };
 
+  // 🆕 SESSION 53.14 — Ligne dépliable montrant tous les documents d'un exposant
+  const [expandedRegId, setExpandedRegId] = useState(null);
+  const toggleExpand = (regId) => setExpandedRegId((cur) => (cur === regId ? null : regId));
+
   return (
     <div className="space-y-4">
       <Card>
@@ -361,6 +424,7 @@ function ExposantsPacificView() {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 text-slate-700">
                   <tr>
+                    <th className="px-2 py-1.5 text-left font-bold w-6"></th>
                     <th className="px-2 py-1.5 text-left font-bold">Exposant</th>
                     <th className="px-2 py-1.5 text-left font-bold">Site</th>
                     <th className="px-2 py-1.5 text-left font-bold">Stand</th>
@@ -369,6 +433,7 @@ function ExposantsPacificView() {
                     <th className="px-2 py-1.5 text-center font-bold" title="Assurance RC déposée">🛡️ Assur.</th>
                     <th className="px-2 py-1.5 text-center font-bold" title="Caution / chèque reçu">💰 Caution</th>
                     <th className="px-2 py-1.5 text-center font-bold" title="Reçu (paiement)">🧾 Reçu</th>
+                    <th className="px-2 py-1.5 text-center font-bold" title="Documents complémentaires">📎 Docs</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -381,22 +446,53 @@ function ExposantsPacificView() {
                     const isWaitlist = r.is_waitlist === true || r.status === 'liste_attente';
                     const statusLabel = isValidated ? 'Validé' : isPreReserved ? 'Pré-réservé' : isWaitlist ? 'Attente' : r.status;
                     const statusColor = isValidated ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : isPreReserved ? 'bg-violet-100 text-violet-900 border-violet-300' : isWaitlist ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-slate-100 text-slate-700 border-slate-300';
+                    const regDocs = docsByReg[r.id] || [];
+                    const isExpanded = expandedRegId === r.id;
                     return (
-                      <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
-                        <td className="px-2 py-1.5">
-                          <div className="font-medium text-slate-900 truncate max-w-[260px]" title={org.name}>{org.name || '—'}</div>
-                          <div className="text-[10px] text-slate-500 truncate">{org.main_email}</div>
-                        </td>
-                        <td className="px-2 py-1.5 text-slate-700">{venue.name || '—'}</td>
-                        <td className="px-2 py-1.5 font-mono">{r.stand_code || '—'}</td>
-                        <td className="px-2 py-1.5 text-center">
-                          <Badge className={`text-[10px] ${statusColor} border`}>{statusLabel}</Badge>
-                        </td>
-                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_convention_signed} title="Convention signée" /></td>
-                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_insurance_uploaded} title="Attestation d'assurance RC" /></td>
-                        <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_deposit_received} title={dep ? `${dep.amount_xpf} XPF · ${dep.status}` : 'Caution non reçue'} /></td>
-                        <td className="px-2 py-1.5 text-center"><CheckCell ok={dep?.status === 'recue'} title={dep ? `Reçu : ${dep.amount_xpf} XPF` : 'Pas de transaction'} /></td>
-                      </tr>
+                      <>
+                        <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="px-1 py-1.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(r.id)}
+                              className="text-slate-500 hover:text-slate-900 p-0.5 rounded hover:bg-slate-100"
+                              title={isExpanded ? 'Replier' : 'Voir documents'}
+                            >
+                              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                            </button>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="font-medium text-slate-900 truncate max-w-[260px]" title={org.name}>{org.name || '—'}</div>
+                            <div className="text-[10px] text-slate-500 truncate">{org.main_email}</div>
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-700">{venue.name || '—'}</td>
+                          <td className="px-2 py-1.5 font-mono">{r.stand_code || '—'}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            <Badge className={`text-[10px] ${statusColor} border`}>{statusLabel}</Badge>
+                          </td>
+                          <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_convention_signed} title="Convention signée" /></td>
+                          <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_insurance_uploaded} title="Attestation d'assurance RC" /></td>
+                          <td className="px-2 py-1.5 text-center"><CheckCell ok={r.is_deposit_received} title={dep ? `${dep.amount_xpf} XPF · ${dep.status}` : 'Caution non reçue'} /></td>
+                          <td className="px-2 py-1.5 text-center"><CheckCell ok={dep?.status === 'recue'} title={dep ? `Reçu : ${dep.amount_xpf} XPF` : 'Pas de transaction'} /></td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(r.id)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border ${regDocs.length > 0 ? 'bg-blue-50 border-blue-300 text-blue-800 hover:bg-blue-100' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
+                              title="Voir tous les documents"
+                            >
+                              📂 {regDocs.length}
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-slate-50/70 border-t border-slate-100">
+                            <td colSpan={10} className="px-3 py-3">
+                              <DocsListPanel reg={r} org={org} venue={venue} docs={regDocs} />
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })}
                 </tbody>

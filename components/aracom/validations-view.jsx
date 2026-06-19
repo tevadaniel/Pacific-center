@@ -116,7 +116,7 @@ export default function ValidationsView() {
         <CardContent className="p-4 text-sm text-violet-900 flex items-start gap-3">
           <Sparkles className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
-            <b>Workflow de verrouillage :</b> l&apos;exposant clique sur <i>« Confirmer ma présence »</i> ⟶ vous fixez un RDV pour la remise du <b>chèque</b> (20 000 XPF à l&apos;ordre d&apos;ARACOM) ⟶ vous encaissez ⟶ vous verrouillez la demande ⟶ l&apos;application confirme l&apos;inscription, marque la caution comme reçue, génère automatiquement le reçu et l&apos;envoie à l&apos;exposant par email.
+            <b>Workflow de verrouillage :</b> l&apos;exposant clique sur <i>« Confirmer ma présence »</i> ⟶ vous fixez un RDV pour la remise du <b>chèque</b> (20 000 XPF) ⟶ vous encaissez ⟶ vous verrouillez la demande ⟶ l&apos;application confirme l&apos;inscription, marque la caution comme reçue, génère automatiquement le reçu et l&apos;envoie à l&apos;exposant par email.
           </div>
         </CardContent>
       </Card>
@@ -291,7 +291,7 @@ function LockValidationModal({ req, onClose, onLocked }) {
           <CardContent className="space-y-3">
             <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex items-center gap-2">
               <span className="text-xl">💳</span>
-              <span><b>Mode de paiement :</b> Chèque (à l&apos;ordre d&apos;ARACOM) — seul mode accepté.</span>
+              <span><b>Mode de paiement :</b> Chèque — seul mode accepté.</span>
             </div>
             <div>
               <Label>Montant (XPF)</Label>

@@ -64,7 +64,7 @@ const SECTIONS = [
     title: 'Caution / Dépôt de garantie',
     content: [
       { label: 'Montant', value: '20 000 XPF par exposant' },
-      { label: 'Forme', value: "Chèque de caution à l'ordre du bailleur du site" },
+      { label: 'Forme', value: "Chèque de caution" },
       { label: 'Rendue', value: "À l'issue du Forum si tous les engagements ont été respectés" },
       { label: 'Encaissée si', value: "Non-respect des horaires, absence d'animation, ou annulation après le 31 juillet 2026" },
     ],

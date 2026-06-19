@@ -564,32 +564,43 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                     venItems={preByDay.ven}
                     samItems={preByDay.sam}
                     emptyLabel="—"
-                    renderRow={(r) => (
-                      <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
-                        <ExposantName r={r} onClick={effectiveExposantClick} />
-                        <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
-                          <span className="font-mono">{r.stand_code}</span>
-                          {r.created_at && (
-                            <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
-                          )}
-                        </div>
-                        {!readonly && (
-                          <div className="flex items-center gap-1 mt-1 flex-wrap">
-                            <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-1.5 text-[10px] bg-emerald-600 hover:bg-emerald-700" title="Valider">
-                              <Check className="w-3 h-3" />
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-1.5 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50" title="Refuser">
-                              <X className="w-3 h-3" />
-                            </Button>
-                            {g.waitlist.length > 0 && (
-                              <Button size="sm" variant="outline" onClick={() => openSwitch(g, g.waitlist[0], r)} className="h-6 px-1.5 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger sur ${g.venue.name}`}>
-                                <ArrowLeftRight className="w-3 h-3" />
-                              </Button>
+                    renderRow={(r) => {
+                      // 🆕 SESSION 53.15 — Actions admin (✓ X ⇄) ne sont visibles QUE si l'exposant a
+                      // démarré son parcours (soumis tunnel OU validation_request présent).
+                      // Sinon, l'exposant est juste "en cours de création de dossier" (pré-réservé importé)
+                      // et l'admin n'a aucune décision à prendre pour le moment.
+                      const reg = r.registration || {};
+                      const hasSubmitted = !!(reg.validation_requested_at || reg.validation_request_id || r._source === 'validation_request');
+                      return (
+                        <Row key={r.id} icon={r.status === 'rdv_fixe' ? '📅' : '⏳'} tone="violet">
+                          <ExposantName r={r} onClick={effectiveExposantClick} />
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1 flex-wrap">
+                            <span className="font-mono">{r.stand_code}</span>
+                            {r.created_at && (
+                              <span title={new Date(r.created_at).toLocaleString('fr-FR')}>· {new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
+                            )}
+                            {!hasSubmitted && (
+                              <Badge className="bg-slate-100 text-slate-600 border border-slate-300 text-[9px] px-1 py-0">📋 En cours de création</Badge>
                             )}
                           </div>
-                        )}
-                      </Row>
-                    )}
+                          {!readonly && hasSubmitted && (
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              <Button size="sm" onClick={() => doValidate(r)} className="h-6 px-1.5 text-[10px] bg-emerald-600 hover:bg-emerald-700" title="Valider">
+                                <Check className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => doRefusePending(r)} className="h-6 px-1.5 text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50" title="Refuser">
+                                <X className="w-3 h-3" />
+                              </Button>
+                              {g.waitlist.length > 0 && (
+                                <Button size="sm" variant="outline" onClick={() => openSwitch(g, g.waitlist[0], r)} className="h-6 px-1.5 text-[10px] border-amber-300 text-amber-800 hover:bg-amber-50" title={`Échanger sur ${g.venue.name}`}>
+                                  <ArrowLeftRight className="w-3 h-3" />
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </Row>
+                      );
+                    }}
                   />
                 </Section>
 
@@ -607,6 +618,9 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                     emptyLabel="—"
                     renderRow={(r) => {
                       const canPromote = g.freeStands.length > 0;
+                      // 🆕 SESSION 53.15 — Idem actions waitlist : visibles UNIQUEMENT si l'exposant a soumis.
+                      const reg = r.registration || {};
+                      const hasSubmitted = !!(reg.validation_requested_at || reg.validation_request_id || r._source === 'validation_request');
                       return (
                         <Row key={r.id} icon={`#${r.fifo_position}`} tone="amber">
                           <ExposantName r={r} onClick={effectiveExposantClick} />
@@ -618,8 +632,11 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                             {r.ex_pre_reserved && (
                               <Badge className="bg-orange-100 text-orange-800 border border-orange-300 text-[9px] px-1 py-0">↩️ Ancien pré-réservé</Badge>
                             )}
+                            {!hasSubmitted && (
+                              <Badge className="bg-slate-100 text-slate-600 border border-slate-300 text-[9px] px-1 py-0">📋 En cours de création</Badge>
+                            )}
                           </div>
-                          {!readonly && (
+                          {!readonly && hasSubmitted && (
                             <div className="flex items-center gap-1 mt-1 flex-wrap">
                               <Button
                                 size="sm"

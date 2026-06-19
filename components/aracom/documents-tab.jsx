@@ -19,6 +19,7 @@ import {
 import { api } from '@/lib/auth-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import AdditionalDocsSection from '@/components/shared/additional-docs-section';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // AUTOGEN DOC CARD
@@ -400,6 +401,14 @@ export default function DocumentsTab({ registration, organization, deposit, docu
           />
         </div>
       </div>
+
+      {/* ════════ Catégorie 3 : DOCUMENTS COMPLÉMENTAIRES ════════ */}
+      <AdditionalDocsSection
+        regId={reg.id}
+        documents={documents}
+        onReload={onReload}
+        title="📎 Documents complémentaires (RIB, statuts, programme, photos…)"
+      />
     </div>
   );
 }

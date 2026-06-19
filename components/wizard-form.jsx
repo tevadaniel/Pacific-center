@@ -1677,7 +1677,7 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
               </Field>
               {/* 🆕 SESSION 48n — Caution = Chèque uniquement : champ informatif */}
               <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                💳 Mode de caution : <b className="text-slate-900">Chèque</b> (à l&apos;ordre d&apos;ARACOM) — désormais seul moyen accepté.
+                💳 Mode de caution : <b className="text-slate-900">Chèque</b> — désormais seul moyen accepté.
               </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setEditingRdv(false)}>Annuler</Button>
@@ -1696,7 +1696,7 @@ function Step5Final({ state, onBack, reload, registrationId, saving, setSaving, 
             <div className="space-y-3 p-4 border-2 border-amber-200 rounded-lg bg-amber-50/30">
               {/* 🆕 SESSION 48n — Caution = Chèque uniquement : champ informatif */}
               <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                💳 Mode de caution : <b>Chèque</b> à l&apos;ordre d&apos;ARACOM (seul mode accepté pour la caution de 20 000 XPF).
+                💳 Mode de caution : <b>Chèque</b> (seul mode accepté pour la caution de 20 000 XPF).
               </div>
               <Field label="Vos disponibilités pour le RDV *" testid="rdv-proposal">
                 <Textarea rows={2} value={rdvForm.rdv_proposal} onChange={e => setRdvForm(r => ({ ...r, rdv_proposal: e.target.value }))} placeholder="Ex : lundi 16/05 entre 14h et 17h, ou mardi matin…" />

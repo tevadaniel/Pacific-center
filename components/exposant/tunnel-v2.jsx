@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import StandViewToggle from '@/components/stand-view-toggle';
+import AdditionalDocsSection from '@/components/shared/additional-docs-section';
 
 const DAY_FRI = 'vendredi';
 const DAY_SAT = 'samedi';
@@ -1000,7 +1001,7 @@ function DocUploadRow({ check, regId, onRefresh, locked }) {
   );
 }
 
-function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, isSubmitting, onSubmit, regId, onRefresh }) {
+function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, isSubmitting, onSubmit, regId, onRefresh, allDocs = [] }) {
   const docs = (checks || []).filter((c) => c.kind === 'doc');
 
   return (
@@ -1022,6 +1023,18 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
               <DocUploadRow key={d.label} check={d} regId={regId} onRefresh={onRefresh} locked={false} />
             )
           ))}
+        </div>
+
+        {/* 🆕 SESSION 53.14 — Documents complémentaires (RIB, statuts, photos…)
+            Visible aussi par ARACOM et Pacific Centers. */}
+        <div className="mb-3">
+          <AdditionalDocsSection
+            regId={regId}
+            documents={allDocs}
+            onReload={onRefresh}
+            title="📎 Documents complémentaires (optionnels — visibles par ARACOM)"
+            collapsedByDefault
+          />
         </div>
 
         {/* Bouton soumettre — 🆕 SESSION 53.7 RULE 6 : Toujours TRÈS VISIBLE et coloré
@@ -1359,6 +1372,7 @@ export default function TunnelV2({
         onSubmit={onSubmit}
         regId={r.id}
         onRefresh={onRefresh}
+        allDocs={docs}
       />
     </div>
   );

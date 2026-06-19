@@ -129,11 +129,11 @@ export default function SubmitFinalizeModal({ open, onClose, onConfirm, state, r
               <Banknote className="w-5 h-5 text-violet-600" />
               <h3 className="font-bold text-slate-900">Caution par chèque</h3>
             </div>
-            <p className="text-xs text-slate-600">Caution de <b>20 000 XPF</b> par site, par <b>chèque uniquement</b> à l&apos;ordre d&apos;ARACOM. Restituée après l&apos;événement.</p>
+            <p className="text-xs text-slate-600">Caution de <b>20 000 XPF</b> par site, par <b>chèque uniquement</b>. Restituée après l&apos;événement.</p>
             <div className="rounded-md border-2 border-violet-300 bg-white px-3 py-2.5 flex items-center gap-3">
               <span className="text-2xl">📃</span>
               <div>
-                <div className="font-semibold text-sm">Chèque — à l&apos;ordre d&apos;ARACOM</div>
+                <div className="font-semibold text-sm">Chèque</div>
                 <div className="text-[11px] text-slate-500">Seul mode de règlement accepté pour la caution.</div>
               </div>
             </div>
@@ -259,7 +259,7 @@ export default function SubmitFinalizeModal({ open, onClose, onConfirm, state, r
           {paymentMethod && depositDate && (
             <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-200 rounded-lg p-3 text-xs text-emerald-900">
               <div className="font-bold mb-1 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Récapitulatif</div>
-              <div>💰 Caution 20 000 XPF en <b>chèque</b> (à l&apos;ordre d&apos;ARACOM)</div>
+              <div>💰 Caution 20 000 XPF en <b>chèque</b></div>
               <div>📅 Dépôt le <b>{new Date(`${depositDate}T${depositTime}`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</b> à <b>{depositTime}</b></div>
               <div>📋 Documents : <b>{allDocsOk ? 'tous OK' : `${missingDocs.length} à apporter${bringToRdv ? ' le jour J' : ''}`}</b></div>
             </div>
