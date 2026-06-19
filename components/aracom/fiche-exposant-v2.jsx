@@ -1679,6 +1679,12 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
   const [allVenuesList, setAllVenuesList] = useState([]);
   // 🆕 SESSION 44 — Récupérer le nom de l'organisation pour affichage
   const [orgInfo, setOrgInfo] = useState({ name: null, discipline: null, description: null, contact_name: null });
+  // 🆕 SESSION 53.16 — Édition inline des attending_days + bulk clear + custom time + swap
+  const [savingDays, setSavingDays] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(null); // 'vendredi' | 'samedi' | 'all'
+  const [swapSourceSlot, setSwapSourceSlot] = useState(null); // slot dont on veut échanger l'horaire
+  const [swapCandidates, setSwapCandidates] = useState([]); // autres animations sur le même site
+  const [swapBusy, setSwapBusy] = useState(false);
   const [form, setForm] = useState({
     day: 'vendredi',
     location_type: 'sur_stand',
@@ -1687,7 +1693,94 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     description: '',
     material_needs: '',
     target_audience: '',
+    // 🆕 SESSION 53.16 — Mode "horaire libre"
+    use_custom_time: false,
+    custom_start: '',
+    custom_end: '',
   });
+
+  // 🆕 SESSION 53.16 — Toggle attending_days (Ven only / Sam only / Ven+Sam)
+  const setAttendingDays = async (newDays) => {
+    setSavingDays(true);
+    try {
+      await api(`/api/registrations/${registrationId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ attending_days: newDays }),
+      });
+      toast.success('📅 Jours prévus mis à jour');
+      onReload?.();
+    } catch (e) { toast.error(e?.message || 'Erreur'); }
+    setSavingDays(false);
+  };
+
+  // 🆕 SESSION 53.16 — Effacer toutes les animations d'un jour (ou des 2)
+  const bulkClearAnimations = async (day) => {
+    const targetSlots = (slots || []).filter((s) => day === 'all' ? true : s.day_label === day);
+    if (targetSlots.length === 0) { toast.info('Aucune animation à effacer'); return; }
+    const msg = day === 'all'
+      ? `Supprimer TOUTES les animations (${targetSlots.length}) de cet exposant ?`
+      : `Supprimer les ${targetSlots.length} animation(s) du ${day === 'vendredi' ? 'vendredi' : 'samedi'} ?`;
+    if (!confirm(msg)) return;
+    setBulkBusy(day);
+    try {
+      await Promise.all(targetSlots.map((s) => api(`/api/animation-slots/${s.id}`, { method: 'DELETE' })));
+      toast.success(`✅ ${targetSlots.length} animation(s) supprimée(s)`);
+      await loadAllVenueSlots();
+      onReload?.();
+    } catch (e) { toast.error(e?.message || 'Erreur'); }
+    setBulkBusy(null);
+  };
+
+  // 🆕 SESSION 53.16 — Ouvre le dialogue d'échange : liste tous les autres slots du même site
+  const openSwapDialog = async (sourceSlot) => {
+    setSwapSourceSlot(sourceSlot);
+    try {
+      // Charge TOUS les slots du même venue, exclut ceux de cet exposant
+      const data = await api(`/api/animation-slots?venue_id=${sourceSlot.venue_id}`);
+      const all = Array.isArray(data) ? data : [];
+      // Hydrate avec org name via registrations
+      const otherRegIds = [...new Set(all.filter((s) => s.registration_id && s.registration_id !== registrationId).map((s) => s.registration_id))];
+      const orgsMap = {};
+      if (otherRegIds.length > 0) {
+        try {
+          const regs = await api('/api/registrations');
+          for (const r of (regs || [])) {
+            if (otherRegIds.includes(r.id)) orgsMap[r.id] = r.organization?.name || r.organization_name || '—';
+          }
+        } catch { /* ignore */ }
+      }
+      const candidates = all
+        .filter((s) => s.registration_id !== registrationId)
+        .map((s) => ({ ...s, _org_name: orgsMap[s.registration_id] || '—' }));
+      setSwapCandidates(candidates);
+    } catch (e) { toast.error(e?.message); setSwapSourceSlot(null); }
+  };
+
+  // 🆕 SESSION 53.16 — Effectue l'échange de propriétaires entre 2 slots
+  //   Cas 1 (échange complet) : on inverse les registration_id (chaque slot change de propriétaire,
+  //   mais garde son créneau horaire et son emplacement).
+  const confirmSwap = async (targetSlot) => {
+    if (!swapSourceSlot || !targetSlot) return;
+    if (!confirm(`Échanger : "${swapSourceSlot.title || swapSourceSlot.start_time}" ↔ "${targetSlot.title || targetSlot.start_time}" (${targetSlot._org_name}) ?\n\nChaque créneau changera de propriétaire mais gardera son horaire et son emplacement.`)) return;
+    setSwapBusy(true);
+    try {
+      const srcRegId = swapSourceSlot.registration_id;
+      const tgtRegId = targetSlot.registration_id;
+      await api(`/api/animation-slots/${swapSourceSlot.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ registration_id: tgtRegId }),
+      });
+      await api(`/api/animation-slots/${targetSlot.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ registration_id: srcRegId }),
+      });
+      toast.success('🔄 Créneaux échangés');
+      setSwapSourceSlot(null); setSwapCandidates([]);
+      await loadAllVenueSlots();
+      onReload?.();
+    } catch (e) { toast.error(e?.message); }
+    setSwapBusy(false);
+  };
 
   const EVENT_DATES_LOCAL = [
     { label: 'vendredi', date: '2026-08-14', display: 'Vendredi 14 août' },
@@ -1780,11 +1873,36 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
 
   const addAnim = async () => {
     if (!venueId) return toast.error('Aucun site défini sur cette inscription');
-    if (!form.title.trim()) return toast.error('Titre requis');
-    const choices = slotChoicesForCurrent();
-    const slot = choices[form.slot_index];
-    if (!slot) return toast.error('Créneau invalide');
-    if (form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, slot.start, slot.end)) {
+    // 🆕 SESSION 53.16 — Titre optionnel : si vide, placeholder "Créneau réservé"
+    const effectiveTitle = form.title.trim() || 'Créneau réservé';
+
+    // 🆕 SESSION 53.16 — Mode horaire libre
+    let startT, endT, duration;
+    if (form.use_custom_time) {
+      if (!/^\d{2}:\d{2}$/.test(form.custom_start) || !/^\d{2}:\d{2}$/.test(form.custom_end)) {
+        return toast.error('Format horaire attendu HH:MM');
+      }
+      if (form.custom_start >= form.custom_end) {
+        return toast.error('Heure de fin doit être après le début');
+      }
+      // Bornes minimums
+      const dayBounds = form.day === 'vendredi' ? { open: '11:00', close: '17:00' } : { open: '09:00', close: '17:00' };
+      if (form.custom_start < dayBounds.open) return toast.error(`Le ${form.day} commence à ${dayBounds.open}`);
+      if (form.custom_end > dayBounds.close) return toast.error(`Le ${form.day} se termine à ${dayBounds.close}`);
+      startT = form.custom_start;
+      endT = form.custom_end;
+      const [sh, sm] = startT.split(':').map(Number);
+      const [eh, em] = endT.split(':').map(Number);
+      duration = (eh * 60 + em) - (sh * 60 + sm);
+    } else {
+      const choices = slotChoicesForCurrent();
+      const slot = choices[form.slot_index];
+      if (!slot) return toast.error('Créneau invalide');
+      startT = slot.start;
+      endT = slot.end;
+      duration = form.location_type === 'zone_demo' ? 45 : 30;
+    }
+    if (form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, startT, endT)) {
       return toast.error('Ce créneau de zone démo est déjà pris par un autre exposant');
     }
     setBusy(true);
@@ -1797,10 +1915,10 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           venue_id: venueId,
           day_label: form.day,
           event_date,
-          start_time: slot.start,
-          end_time: slot.end,
-          duration_minutes: form.location_type === 'zone_demo' ? 45 : 30,
-          title: form.title,
+          start_time: startT,
+          end_time: endT,
+          duration_minutes: duration,
+          title: effectiveTitle,
           description: form.description || null,
           material_needs: form.material_needs || null,
           target_audience: form.target_audience || null,
@@ -1808,9 +1926,9 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
           location_type: form.location_type,
         }),
       });
-      toast.success(`✨ Animation ${slot.start}–${slot.end} créée`);
+      toast.success(`✨ Animation ${startT}–${endT} créée`);
       setShowForm(false);
-      setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '' });
+      setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '', use_custom_time: false, custom_start: '', custom_end: '' });
       await loadAllVenueSlots();
       onReload?.();
     } catch (e) { toast.error(e.message); }
@@ -1930,19 +2048,70 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
 
       <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-2 leading-relaxed">
         📍 Site : <b>{venueName || '—'}</b>
-        {attendingDays.length > 0 && <> · Jours prévus : <b>{attendingDays.includes('vendredi') ? 'Ven' : ''}{attendingDays.length === 2 ? ' + ' : ''}{attendingDays.includes('samedi') ? 'Sam' : ''}</b></>}
+        {/* 🆕 SESSION 53.16 — Édition inline des Jours prévus (3 toggles) */}
+        <span className="ml-2 inline-flex items-center gap-1">
+          · Jours prévus :
+          {[
+            { val: ['vendredi'], label: 'Ven seul' },
+            { val: ['samedi'], label: 'Sam seul' },
+            { val: ['vendredi', 'samedi'], label: 'Ven + Sam' },
+          ].map((opt) => {
+            const isActive = JSON.stringify([...(attendingDays || [])].sort()) === JSON.stringify([...opt.val].sort());
+            return (
+              <button
+                key={opt.label}
+                type="button"
+                disabled={savingDays || isLocked}
+                onClick={() => setAttendingDays(opt.val)}
+                className={`px-1.5 py-0.5 rounded text-[10px] border ${isActive ? 'bg-violet-600 text-white border-violet-700' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'} disabled:opacity-50`}
+                title={`Configurer comme : ${opt.label}`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+          {savingDays && <Loader2 className="w-3 h-3 animate-spin text-violet-600" />}
+        </span>
         <br />
         🟦 <b>Sur stand</b> = 30 min sur votre stand · 🟧 <b>Zone démo</b> = 45 min partagé (1 seul exposant à la fois)
         {isLocked && <div className="mt-1 text-amber-700 font-semibold">🔒 Inscription verrouillée — modifications restreintes</div>}
+        {/* 🆕 SESSION 53.16 — Bulk clear all animations */}
+        {!isLocked && (slots || []).length > 0 && (
+          <div className="mt-1.5 flex items-center gap-2 text-[10px]">
+            <button
+              type="button"
+              disabled={bulkBusy === 'all'}
+              onClick={() => bulkClearAnimations('all')}
+              className="text-rose-700 hover:text-rose-900 underline decoration-dotted disabled:opacity-50"
+              title="Effacer TOUTES les animations de cet exposant"
+            >
+              {bulkBusy === 'all' ? '⏳ Suppression…' : '🗑️ Effacer toutes les animations'}
+            </button>
+          </div>
+        )}
       </div>
 
       {EVENT_DATES_LOCAL.map((d) => {
         const list = slotsByDay[d.label];
         return (
           <div key={d.label} className="rounded-md border border-slate-200 bg-white p-2">
-            <div className="text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+            <div className="text-xs font-bold text-slate-700 mb-1 flex items-center justify-between gap-2">
               <span>📅 {d.display}</span>
-              <Badge variant="outline" className="text-[10px]">{list.length} animation{list.length > 1 ? 's' : ''}</Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="text-[10px]">{list.length} animation{list.length > 1 ? 's' : ''}</Badge>
+                {/* 🆕 SESSION 53.16 — Effacer toutes les animations de CE jour */}
+                {!isLocked && list.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={bulkBusy === d.label}
+                    onClick={() => bulkClearAnimations(d.label)}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                    title={`Effacer les ${list.length} animation(s) du ${d.display.toLowerCase()}`}
+                  >
+                    {bulkBusy === d.label ? '⏳' : '🗑️ Tout effacer'}
+                  </button>
+                )}
+              </div>
             </div>
             {list.length === 0 ? (
               <div className="text-[11px] italic text-slate-400 py-1">Aucune animation ce jour</div>
@@ -2076,6 +2245,17 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
                       >
                         <Pencil className="w-3 h-3" />
                       </Button>
+                      {/* 🆕 SESSION 53.16 — Échanger avec un autre exposant du même site */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        disabled={isLocked || busyDelete === s.id || editingId === s.id}
+                        onClick={() => openSwapDialog(s)}
+                        title="Échanger ce créneau avec un autre exposant"
+                      >
+                        ↔
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -2133,28 +2313,63 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
             </div>
           </div>
           <div>
-            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Créneau horaire</label>
-            <select
-              value={String(form.slot_index)}
-              onChange={(e) => setForm((f) => ({ ...f, slot_index: Number(e.target.value) }))}
-              className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
-            >
-              {slotChoicesForCurrent().map((s, i) => {
-                const taken = form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, s.start, s.end);
-                return (
-                  <option key={`${s.start}-${s.end}`} value={String(i)} disabled={taken}>
-                    {s.start}–{s.end} {taken ? '🚫 (déjà pris)' : ''}
-                  </option>
-                );
-              })}
-            </select>
+            <div className="flex items-center justify-between mb-0.5">
+              <label className="block text-[10px] uppercase text-slate-500 font-semibold">Créneau horaire</label>
+              {/* 🆕 SESSION 53.16 — Toggle "horaire libre" */}
+              <label className="flex items-center gap-1 text-[10px] text-violet-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.use_custom_time}
+                  onChange={(e) => setForm((f) => ({ ...f, use_custom_time: e.target.checked }))}
+                  className="w-3 h-3"
+                />
+                ⚙️ Horaire libre
+              </label>
+            </div>
+            {form.use_custom_time ? (
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>
+                  <label className="block text-[9px] text-slate-500 mb-0.5">Début</label>
+                  <Input
+                    type="time"
+                    value={form.custom_start}
+                    onChange={(e) => setForm((f) => ({ ...f, custom_start: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] text-slate-500 mb-0.5">Fin</label>
+                  <Input
+                    type="time"
+                    value={form.custom_end}
+                    onChange={(e) => setForm((f) => ({ ...f, custom_end: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            ) : (
+              <select
+                value={String(form.slot_index)}
+                onChange={(e) => setForm((f) => ({ ...f, slot_index: Number(e.target.value) }))}
+                className="w-full h-8 text-xs rounded-md border border-input bg-white px-2"
+              >
+                {slotChoicesForCurrent().map((s, i) => {
+                  const taken = form.location_type === 'zone_demo' && isDemoSlotTaken(form.day, s.start, s.end);
+                  return (
+                    <option key={`${s.start}-${s.end}`} value={String(i)} disabled={taken}>
+                      {s.start}–{s.end} {taken ? '🚫 (déjà pris)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
           </div>
           <div>
-            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Titre *</label>
+            <label className="block text-[10px] uppercase text-slate-500 font-semibold mb-0.5">Titre <span className="text-slate-400">(optionnel — si vide, "Créneau réservé")</span></label>
             <Input
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="ex: Démonstration de judo"
+              placeholder="ex: Démonstration de judo — laissez vide pour réserver"
               className="h-8 text-xs"
             />
           </div>
@@ -2195,13 +2410,65 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
             </div>
           </div>
           <div className="flex gap-1 justify-end pt-1">
-            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => { setShowForm(false); setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '' }); }}>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => { setShowForm(false); setForm({ day: 'vendredi', location_type: 'sur_stand', slot_index: 0, title: '', description: '', material_needs: '', target_audience: '', use_custom_time: false, custom_start: '', custom_end: '' }); }}>
               Annuler
             </Button>
-            <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white gap-1" disabled={busy || !form.title.trim()} onClick={addAnim}>
+            <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white gap-1" disabled={busy} onClick={addAnim}>
               {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-              Créer
+              {form.title.trim() ? 'Créer' : 'Réserver créneau vide'}
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 🆕 SESSION 53.16 — Dialogue d'échange de propriétaire de créneau */}
+      {swapSourceSlot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !swapBusy && setSwapSourceSlot(null)}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-slate-200 bg-amber-50">
+              <div className="flex items-center gap-2 text-amber-900 font-bold">
+                ↔ Échanger ce créneau avec un autre exposant
+              </div>
+              <div className="text-[11px] text-slate-600 mt-1">
+                <b>Source :</b> {swapSourceSlot.title || 'Créneau réservé'} · {swapSourceSlot.day_label} · {swapSourceSlot.start_time}–{swapSourceSlot.end_time} · {swapSourceSlot.location_type === 'zone_demo' ? '🟧 Zone démo' : '🟦 Sur stand'}
+              </div>
+              <div className="text-[11px] text-slate-500 italic mt-0.5">
+                Sélectionnez un créneau d'un autre exposant : les 2 créneaux échangeront de propriétaire (le créneau garde son horaire et son emplacement).
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {swapCandidates.length === 0 ? (
+                <div className="text-xs text-slate-500 italic text-center py-6">Aucun autre créneau sur ce site</div>
+              ) : (
+                swapCandidates.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    disabled={swapBusy}
+                    onClick={() => confirmSwap(c)}
+                    className="w-full text-left p-2 rounded border border-slate-200 hover:border-amber-400 hover:bg-amber-50 transition disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-slate-900 truncate">
+                          {c._org_name} <span className="text-[10px] text-slate-500 font-normal">— {c.title || 'Créneau réservé'}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-600 mt-0.5">
+                          📅 {c.day_label} · ⏰ {c.start_time}–{c.end_time} · {c.location_type === 'zone_demo' ? '🟧 Zone démo' : '🟦 Sur stand'}
+                        </div>
+                      </div>
+                      <span className="text-amber-700 text-base">↔</span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSwapSourceSlot(null)} disabled={swapBusy}>
+                Fermer
+              </Button>
+              {swapBusy && <span className="text-xs text-amber-700 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Échange en cours…</span>}
+            </div>
           </div>
         </div>
       )}

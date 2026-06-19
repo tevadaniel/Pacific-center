@@ -12024,7 +12024,7 @@ export async function PUT(request, { params }) {
 
     if (route.startsWith('animation-slots/')) {
       const id = p[1];
-      const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes','venue_id','material_needs','target_audience'];
+      const allowed = ['day_label','event_date','start_time','end_time','duration_minutes','title','description','slot_type','location_type','status','notes','venue_id','material_needs','target_audience','registration_id'];
       const upd = {}; for (const k of allowed) if (k in body) upd[k] = body[k];
 
       // 🆕 Validation amplitude horaires (cohérence avec les créneaux exposants)
