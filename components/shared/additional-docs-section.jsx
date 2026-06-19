@@ -129,6 +129,11 @@ export default function AdditionalDocsSection({
   readonly = false,
   title = '📎 Documents complémentaires',
   collapsedByDefault = false,
+  // 🆕 SESSION 53.21 — Filtre des types activés par ARACOM
+  //   - undefined / null = pas de filtre (vue admin/fiche) — tous types affichés
+  //   - [] = aucun type activé (vue exposant si rien activé)
+  //   - ['rib','statuts'] = seuls ces types affichés
+  enabledTypes = undefined,
 }) {
   const [busyKey, setBusyKey] = useState(null);
   const [showCustom, setShowCustom] = useState(false);
@@ -223,8 +228,19 @@ export default function AdditionalDocsSection({
               ? '👁️ Lecture seule — vous pouvez télécharger les pièces déjà reçues.'
               : 'Ajoutez ici toute pièce utile pour compléter la base ARACOM (visible également par Pacific Centers).'}
           </div>
-          {/* Liste des types standard */}
-          {EXPOSANT_ADDITIONAL_DOC_TYPES.filter((t) => t.key !== 'autre').map((t) => (
+          {/* Liste des types standard (filtrée si enabledTypes fourni) */}
+          {EXPOSANT_ADDITIONAL_DOC_TYPES
+            .filter((t) => t.key !== 'autre')
+            .filter((t) => {
+              // Si enabledTypes est fourni (mode exposant) : filtre.
+              // Si null/undefined (mode admin) : tout afficher.
+              // Si readonly : afficher ceux qui ont un doc OU ceux activés (pour Pacific)
+              if (enabledTypes === undefined || enabledTypes === null) return true;
+              const hasDoc = !!docsByType[t.key];
+              const isEnabled = enabledTypes.includes(t.key);
+              return isEnabled || hasDoc; // toujours montrer si déjà rempli
+            })
+            .map((t) => (
             <DocRowCard
               key={t.key}
               doc={docsByType[t.key]}

@@ -11830,7 +11830,7 @@ export async function PUT(request, { params }) {
       const { DEFAULT_EVENT_SETTINGS } = await import('@/lib/event-time-config.js');
       const userRole = request.headers.get('x-user-role');
       if (userRole !== 'aracom_admin') return err('Seul un admin peut modifier les horaires', 403);
-      const allowedKeys = ['friday_date','friday_label','friday_open','friday_close','saturday_date','saturday_label','saturday_open','saturday_close','stand_slot_minutes','demo_slot_minutes','lunch_start','lunch_end','exposant_arrival_friday','exposant_arrival_saturday'];
+      const allowedKeys = ['friday_date','friday_label','friday_open','friday_close','saturday_date','saturday_label','saturday_open','saturday_close','stand_slot_minutes','demo_slot_minutes','lunch_start','lunch_end','exposant_arrival_friday','exposant_arrival_saturday','enabled_optional_docs'];
       const upd = {};
       for (const k of allowedKeys) if (k in body) upd[k] = body[k];
       upd.updated_at = new Date();

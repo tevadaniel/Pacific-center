@@ -21,6 +21,7 @@ import { Loader2, Save, Clock, Calendar, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/auth-client';
 import { useEventSettings, invalidateEventSettings } from '@/lib/use-event-settings';
 import { generateStandSlots, generateDemoSlots } from '@/lib/event-time-config';
+import { EXPOSANT_ADDITIONAL_DOC_TYPES } from '@/lib/exposant-document-types';
 
 export default function EventSettingsCard() {
   const { settings, refresh, loading } = useEventSettings();
@@ -122,6 +123,55 @@ export default function EventSettingsCard() {
           </div>
           <div className="text-[10px] text-slate-500 mt-2">
             La pause déjeuner exclut uniquement les créneaux <b>Zone démo</b> (les stands restent disponibles).
+          </div>
+        </div>
+
+        {/* 🆕 SESSION 53.21 — Documents complémentaires (activation par ARACOM) */}
+        <div className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-base">📎</span>
+            <span className="font-bold text-sm text-slate-900">Documents complémentaires demandés aux exposants</span>
+            <Badge variant="outline" className="ml-auto text-[10px]">
+              {(draft.enabled_optional_docs || []).length} activé{(draft.enabled_optional_docs || []).length > 1 ? 's' : ''}
+            </Badge>
+          </div>
+          <div className="text-[10px] text-slate-500 mb-2 italic">
+            Par défaut <b>aucun</b> document optionnel n&apos;est demandé aux exposants. Activez ici uniquement ceux nécessaires pour cette édition. ARACOM garde toujours accès à tous les types depuis la fiche admin.
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+            {EXPOSANT_ADDITIONAL_DOC_TYPES.filter((t) => t.key !== 'autre').map((t) => {
+              const isEnabled = (draft.enabled_optional_docs || []).includes(t.key);
+              return (
+                <label
+                  key={t.key}
+                  className={`flex items-start gap-2 px-2 py-1.5 rounded border cursor-pointer transition ${
+                    isEnabled ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isEnabled}
+                    onChange={(e) => {
+                      const cur = new Set(draft.enabled_optional_docs || []);
+                      if (e.target.checked) cur.add(t.key); else cur.delete(t.key);
+                      upd('enabled_optional_docs', Array.from(cur));
+                    }}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-slate-900">{t.label}</div>
+                    <div className="text-[10px] text-slate-500">{t.subtitle}</div>
+                  </div>
+                </label>
+              );
+            })}
+            {/* "autre" (nom libre) toujours dispo si au moins un doc est activé */}
+            <label className="flex items-start gap-2 px-2 py-1.5 rounded border bg-white border-dashed border-slate-300 text-slate-500 col-span-full">
+              <span className="text-base mt-0.5">📎</span>
+              <div className="text-[11px] italic">
+                « Autre document (nom libre) » est toujours disponible côté admin. Pour les exposants, il sera affiché si au moins un autre type est activé ci-dessus.
+              </div>
+            </label>
           </div>
         </div>
 

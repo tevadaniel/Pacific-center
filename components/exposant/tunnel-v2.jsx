@@ -28,6 +28,7 @@ import {
 import { api } from '@/lib/auth-client';
 import StandViewToggle from '@/components/stand-view-toggle';
 import AdditionalDocsSection from '@/components/shared/additional-docs-section';
+import { useEventSettings } from '@/lib/use-event-settings';
 
 const DAY_FRI = 'vendredi';
 const DAY_SAT = 'samedi';
@@ -1003,6 +1004,14 @@ function DocUploadRow({ check, regId, onRefresh, locked }) {
 
 function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, isSubmitting, onSubmit, regId, onRefresh, allDocs = [] }) {
   const docs = (checks || []).filter((c) => c.kind === 'doc');
+  // 🆕 SESSION 53.21 — Récupère les types optionnels activés par ARACOM
+  const { settings: eventSettings } = useEventSettings();
+  const enabledOptionalDocs = eventSettings?.enabled_optional_docs || [];
+  const hasAnyUploadedOptional = (allDocs || []).some((d) =>
+    d.document_type && !['convention','assurance','identite','immatriculation','recu_caution','attestation_remboursement','badge_exposant','guide_participant'].includes(d.document_type)
+  );
+  // Afficher la section si : au moins un type activé OU au moins un doc déjà uploadé
+  const showOptionalSection = enabledOptionalDocs.length > 0 || hasAnyUploadedOptional;
 
   return (
     <Card data-section="submit" className="border-emerald-300">
@@ -1025,17 +1034,20 @@ function Bloc5Submit({ checks, missingList, canSubmit, isSubmitted, isLocked, is
           ))}
         </div>
 
-        {/* 🆕 SESSION 53.14 — Documents complémentaires (RIB, statuts, photos…)
-            Visible aussi par ARACOM et Pacific Centers. */}
-        <div className="mb-3">
-          <AdditionalDocsSection
-            regId={regId}
-            documents={allDocs}
-            onReload={onRefresh}
-            title="📎 Documents complémentaires (optionnels — visibles par ARACOM)"
-            collapsedByDefault
-          />
-        </div>
+        {/* 🆕 SESSION 53.14/53.21 — Documents complémentaires (optionnels)
+            Visible UNIQUEMENT si ARACOM a activé au moins un type dans Configuration. */}
+        {showOptionalSection && (
+          <div className="mb-3">
+            <AdditionalDocsSection
+              regId={regId}
+              documents={allDocs}
+              onReload={onRefresh}
+              title="📎 Documents complémentaires (optionnels)"
+              collapsedByDefault
+              enabledTypes={enabledOptionalDocs}
+            />
+          </div>
+        )}
 
         {/* Bouton soumettre — 🆕 SESSION 53.7 RULE 6 : Toujours TRÈS VISIBLE et coloré
             même quand incomplet. Clic sur bouton incomplet → toast listant ce qui manque.
