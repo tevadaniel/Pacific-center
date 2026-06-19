@@ -1676,6 +1676,22 @@ export async function GET(request, { params }) {
 
     // dashboard/kpis et dashboard/by-site ont été extraits vers handleDashboardGet (voir début GET)
 
+    // 🆕 SESSION 53.20 — Configuration centralisée des horaires & créneaux Forum
+    if (route === 'event-settings') {
+      const { DEFAULT_EVENT_SETTINGS } = await import('@/lib/event-time-config.js');
+      const cur = await db.collection('event_settings').findOne({ id: 'current' });
+      if (!cur) {
+        // Auto-seed avec defaults
+        const seed = { ...DEFAULT_EVENT_SETTINGS, created_at: new Date(), updated_at: new Date() };
+        await db.collection('event_settings').insertOne(seed);
+        const { _id, ...rest } = seed;
+        return json(rest);
+      }
+      // Merge avec defaults (pour les champs nouvellement ajoutés)
+      const { _id, ...rest } = cur;
+      return json({ ...DEFAULT_EVENT_SETTINGS, ...rest });
+    }
+
     if (route === 'venues') {
       const venues = await db.collection('venues').find({ edition_id: EDITION_ID }).toArray();
       const userRole = request.headers.get('x-user-role');
@@ -11808,6 +11824,27 @@ export async function PUT(request, { params }) {
       if (fresh) delete fresh._id;
       return json(fresh);
     }
+
+    // 🆕 SESSION 53.20 — Update centralisé event_settings (admin uniquement)
+    if (route === 'event-settings') {
+      const { DEFAULT_EVENT_SETTINGS } = await import('@/lib/event-time-config.js');
+      const userRole = request.headers.get('x-user-role');
+      if (userRole !== 'aracom_admin') return err('Seul un admin peut modifier les horaires', 403);
+      const allowedKeys = ['friday_date','friday_label','friday_open','friday_close','saturday_date','saturday_label','saturday_open','saturday_close','stand_slot_minutes','demo_slot_minutes','lunch_start','lunch_end','exposant_arrival_friday','exposant_arrival_saturday'];
+      const upd = {};
+      for (const k of allowedKeys) if (k in body) upd[k] = body[k];
+      upd.updated_at = new Date();
+      const exists = await db.collection('event_settings').findOne({ id: 'current' });
+      if (!exists) {
+        await db.collection('event_settings').insertOne({ ...DEFAULT_EVENT_SETTINGS, ...upd, id: 'current', created_at: new Date() });
+      } else {
+        await db.collection('event_settings').updateOne({ id: 'current' }, { $set: upd });
+      }
+      const fresh = await db.collection('event_settings').findOne({ id: 'current' });
+      if (fresh) delete fresh._id;
+      return json({ ...DEFAULT_EVENT_SETTINGS, ...fresh });
+    }
+
 
     if (route.startsWith('registrations/')) {
       const id = p[1];

@@ -23,6 +23,9 @@ import {
   IdCard, Shield, FileSpreadsheet, Receipt, FileBadge, Lock,
 } from 'lucide-react';
 import { api } from '@/lib/auth-client';
+// 🆕 SESSION 53.20 — Config horaires centralisée
+import { useEventSettings } from '@/lib/use-event-settings';
+import { generateStandSlots, generateDemoSlots } from '@/lib/event-time-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -1791,39 +1794,27 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
     { label: 'vendredi', date: '2026-08-14', display: 'Vendredi 14 août' },
     { label: 'samedi', date: '2026-08-15', display: 'Samedi 15 août' },
   ];
-  // 🆕 SESSION 48b — Créneaux NORMALISÉS par lieu d'animation :
-  //   • Sur stand (zone exposant) = 30 min  (auparavant 60 min)
-  //   • Zone démo                  = 45 min (auparavant 30 min)
-  // Plage : vendredi 11h–17h, samedi 9h–17h (pause déjeuner 12h–13h pour zone démo)
-  const STAND_SLOTS_FRIDAY = [
-    { start: '11:00', end: '11:30' }, { start: '11:30', end: '12:00' },
-    { start: '12:00', end: '12:30' }, { start: '12:30', end: '13:00' },
-    { start: '13:00', end: '13:30' }, { start: '13:30', end: '14:00' },
-    { start: '14:00', end: '14:30' }, { start: '14:30', end: '15:00' },
-    { start: '15:00', end: '15:30' }, { start: '15:30', end: '16:00' },
-    { start: '16:00', end: '16:30' }, { start: '16:30', end: '17:00' },
-  ];
-  const STAND_SLOTS_SATURDAY = [
-    { start: '09:00', end: '09:30' }, { start: '09:30', end: '10:00' },
-    { start: '10:00', end: '10:30' }, { start: '10:30', end: '11:00' },
-    ...STAND_SLOTS_FRIDAY,
-  ];
-  const DEMO_SLOTS = [
-    // Matin (avant pause déjeuner) — utilisable surtout le samedi
-    { start: '09:00', end: '09:45' },
-    { start: '09:45', end: '10:30' },
-    { start: '10:30', end: '11:15' },
-    { start: '11:15', end: '12:00' },
-    // Après-midi
-    { start: '13:00', end: '13:45' },
-    { start: '13:45', end: '14:30' },
-    { start: '14:30', end: '15:15' },
-    { start: '15:15', end: '16:00' },
-    { start: '16:00', end: '16:45' },
-  ];
+  // 🆕 SESSION 53.20 — Charge la config horaires centralisée pour générer les créneaux dynamiquement
+  const { settings: eventSettings } = useEventSettings();
+
+  const STAND_SLOTS_FRIDAY = useMemo(() => generateStandSlots(eventSettings, 'vendredi'), [eventSettings]);
+  const STAND_SLOTS_SATURDAY = useMemo(() => generateStandSlots(eventSettings, 'samedi'), [eventSettings]);
+  const DEMO_SLOTS = useMemo(() => {
+    // Combine matin+après-midi des 2 jours, déduplique par start
+    const ven = generateDemoSlots(eventSettings, 'vendredi');
+    const sam = generateDemoSlots(eventSettings, 'samedi');
+    const merged = new Map();
+    for (const s of [...sam, ...ven]) merged.set(s.start, s);
+    return Array.from(merged.values()).sort((a, b) => a.start.localeCompare(b.start));
+  }, [eventSettings]);
 
   const slotChoicesForCurrent = () => {
-    if (form.location_type === 'zone_demo') return DEMO_SLOTS;
+    if (form.location_type === 'zone_demo') {
+      // Pour zone démo : filtre selon le jour pour ne pas montrer 09h le vendredi
+      return form.day === 'vendredi'
+        ? generateDemoSlots(eventSettings, 'vendredi')
+        : generateDemoSlots(eventSettings, 'samedi');
+    }
     return form.day === 'vendredi' ? STAND_SLOTS_FRIDAY : STAND_SLOTS_SATURDAY;
   };
 
@@ -1890,8 +1881,10 @@ function AdminAnimationsPanel({ registrationId, venueId, venueName, attendingDay
       if (form.custom_start >= form.custom_end) {
         return toast.error('Heure de fin doit être après le début');
       }
-      // Bornes minimums
-      const dayBounds = form.day === 'vendredi' ? { open: '11:00', close: '17:00' } : { open: '09:00', close: '17:00' };
+      // Bornes minimums (dynamiques depuis event_settings)
+      const dayBounds = form.day === 'vendredi'
+        ? { open: eventSettings.friday_open, close: eventSettings.friday_close }
+        : { open: eventSettings.saturday_open, close: eventSettings.saturday_close };
       if (form.custom_start < dayBounds.open) return toast.error(`Le ${form.day} commence à ${dayBounds.open}`);
       if (form.custom_end > dayBounds.close) return toast.error(`Le ${form.day} se termine à ${dayBounds.close}`);
       startT = form.custom_start;

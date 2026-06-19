@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Settings, ClipboardCheck, Info } from 'lucide-react';
 import { toast } from 'sonner';
+import EventSettingsCard from '@/components/aracom/event-settings-card';
 
 export default function ConfigurationView() {
   const [surveyEnabled, setSurveyEnabled] = useState(null);
@@ -113,6 +114,9 @@ export default function ConfigurationView() {
           )}
         </CardContent>
       </Card>
+
+      {/* 🆕 SESSION 53.20 — Horaires & créneaux centralisés du Forum */}
+      <EventSettingsCard />
 
       {/* Placeholder pour d'autres toggles globaux à venir */}
       <Card className="border-dashed">
