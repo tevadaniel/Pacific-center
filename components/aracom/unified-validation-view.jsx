@@ -178,7 +178,7 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
       } else if (
         r.status === 'en_attente' || r.status === 'pending' || r.status === 'rdv_fixe' ||
         r.status === 'a_confirmer' || r.status === 'a_relancer' ||
-        r.status === 'waitlist'
+        r.status === 'waitlist' || r.status === 'liste_attente'
       ) {
         out[v]._candidates.push(r);
       } else {
@@ -509,8 +509,8 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
               {/* 🆕 SESSION 52g.7 — Sous-en-tête : récap par bucket et par jour */}
               <div className="grid grid-cols-3 gap-3 mb-2 text-[10px]">
                 <DayBreakdownStrip tone="emerald" label="Validées" bd={valBreakdown} />
-                <DayBreakdownStrip tone="violet" label="Pré-inscription site" bd={preBreakdown} />
-                <DayBreakdownStrip tone="amber" label="Hors quota" bd={waitBreakdown} />
+                <DayBreakdownStrip tone="violet" label="Pré-réservés" bd={preBreakdown} />
+                <DayBreakdownStrip tone="amber" label="Liste d'attente" bd={waitBreakdown} />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* ───── COL 1 : VALIDÉS (par jour) ───── */}
@@ -553,12 +553,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   />
                 </Section>
 
-                {/* ───── COL 2 : PRÉ-INSCRIPTION SITE (par jour) ───── */}
-                {/* 🆕 SESSION 53.18 — Renommée "Pré-inscription site" : ces exposants ont juste
-                    choisi un site (pas de stand committé, pas encore soumis le tunnel). */}
+                {/* ───── COL 2 : PRÉ-RÉSERVÉS (par jour) ───── */}
                 <Section
                   icon={<Hourglass className="w-3.5 h-3.5 text-violet-600" />}
-                  title="Pré-inscription site"
+                  title="Pré-réservés"
                   count={g.preReserved.length}
                   tone="violet"
                 >
@@ -604,12 +602,10 @@ export default function UnifiedValidationView({ readonly = false, onExposantClic
                   />
                 </Section>
 
-                {/* ───── COL 3 : SURPLUS HORS QUOTA (anciennement "Liste d'attente") ───── */}
-                {/* 🆕 SESSION 53.18 — Renommée : ce sont toujours des demandes EN COURS sur ce site,
-                    mais au-delà de la capacité d'accueil → seront promues si une place se libère. */}
+                {/* ───── COL 3 : LISTE D'ATTENTE ───── */}
                 <Section
                   icon={<Clock className="w-3.5 h-3.5 text-amber-600" />}
-                  title="Pré-inscription (hors quota)"
+                  title="Liste d'attente"
                   count={g.waitlist.length}
                   tone="amber"
                 >
